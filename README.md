@@ -26,6 +26,9 @@ Configuration is handled in a dict at the beginning of code.py. It includes the 
 | speed_limit | No | int | **kph** / mph | |
 | sensor_pacing | No | float | seconds | Time between sonic sensor firings. This should be tuned so that echos from one sensor doesn't interfere with another - exact timing will depend on the geometry of your garage. |
 | sensors | Yes | ... | N/A | Sensor name with sub-dict of sensor options. See below. |
+| network | No | True/False | N/A | Enable networking, yes or no. Defaults to False |
+| ssid | Yes if Network is True | str | N/A | SSID of WiFi network to use | 
+| psk | Yes if Network is True | str | N/A | Pre-Shared Key of WiFi network to use |
 
 #### Sensor Options
 | Options | Sensor Type | Required? | Valid Options | Units | Description |
