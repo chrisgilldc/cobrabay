@@ -52,6 +52,8 @@ class Sensors:
                 else:
                     print("Requested timing budget '" + str(options['timing_budget']) + "' not supported. Keeping default of 50ms.")
 
+            new_sensor.start_ranging()
+
             return new_sensor
             
         # The HC-SR04 sensor, or US-100 in HC-SR04 compatibility mode
