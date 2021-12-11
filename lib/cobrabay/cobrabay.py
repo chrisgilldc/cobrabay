@@ -17,7 +17,6 @@ class CobraBay():
         self.config = {
             'units': 'imperial', # Set to 'imperial' for feet/inches. Otherwise defaults to metric.
             'max_detect_range': 276, # Range where tracking starts. Centimeters or Inches, depending on units.
-            'speed_limit': 5, # Treat jumps in range over this rate as spurious. Either MPH or KPH, depending on units.
             'sensor_pacing': 0.5, # Time in seconds between each sensor ping, to prevent echos.
             'sensors': {
                 'center': {'type': 'vl53', 'address': 0x29, 'distance_mode': 'long', 'timing_budget': 50},
@@ -30,12 +29,12 @@ class CobraBay():
         # Convert max detect range if necessary
         if self.config['units'] == 'imperial':
             self.config['max_detect_range'] = self.config['max_detect_range'] * 2.54
-        
         # Create sensor object
         self.sensors = Sensors(self.config)
         # Create Display object
         self.display = Display(self.config)
 
+    # Master run function. Collects data from the sensors and sends it to the display.
     def Run(self):
         while True:
-            self.display.UpdateDisplay()
+            self.display.UpdateDisplay(self.sensors.Sweep())

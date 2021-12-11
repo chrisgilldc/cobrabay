@@ -5,6 +5,7 @@
 
 import board, digitalio, displayio, framebufferio, rgbmatrix, sys, time, terminalio 
 from adafruit_display_shapes.rect import Rect
+from adafruit_display_shapes.line import Line
 from adafruit_display_text.label import Label
 from adafruit_bitmap_font import bitmap_font
 from adafruit_display_text import bitmap_label
@@ -36,9 +37,6 @@ class Display():
                 self.config[config_value] = config[config_value]
             except:
                 pass
-        
-        ### Default the current range to the max range + 100. This should trigger approach.
-        self.current_range = self.config['max_detect_range'] + 100
         
         ## Convert approach strobe speed to nanoseconds from milliseconds
         self.config['approach_strobe_speed'] = self.config['approach_strobe_speed'] * 1000000
@@ -94,30 +92,26 @@ class Display():
         if units == 'imperial':
             # Convert cm to inches
             dist_inches = dist_cm * 0.393701
-            range_feet = dist_inches // 12
-            range_inches = dist_inches % 12  
+            range_feet = int(dist_inches // 12)
+            range_inches = floor(dist_inches % 12)
             label = str(range_feet) + "'" + str(range_inches) + '"'
         else:
             range_meters = dist_cm / 100
             label = str(range_meters) + "m"
         return label
 
-    def _DisplayDistance(self):
+    def _DisplayDistance(self,center_range):
         # Positioning for labels
         label_position = ( 
             floor(self.display.width / 2), # X - Middle of the display
             floor( ( self.display.height - 4 ) / 2) ) # Y - half the height, with space removed for the approach strobe
         
-        # Calculate actual range
-
-        print("ft: " + str(range_feet) + " in: " + str(range_inches))
-
         # Figure out proper coloring
-        if self.status['range'] <= 12:
+        if center_range <= 30:
             range_color = 0xFF0000
-        elif self.status['range'] <= 48:
+        elif center_range <= 121:
             range_color = 0xFFFF00
-        elif self.status['range'] > self.config['max_detect_range']:
+        elif center_range > self.config['max_detect_range']:
             range_color = 0x0000FF
         else:
             range_color = 0x00FF00
@@ -126,7 +120,7 @@ class Display():
         
         range_group = displayio.Group()
         
-        if self.status['range'] >= self.config['max_detect_range']:
+        if center_range >= self.config['max_detect_range']:
             approach_label = Label(
                 font=self.base_font['12'],
                 text="APPROACH",
@@ -139,7 +133,7 @@ class Display():
             # distance label
             range_label = Label(
                 font=self.base_font['18'],
-                text=str(range_feet) + "'" + str(range_inches) + '"',
+                text=self._DistanceLabel(center_range,self.config['units']),
                 color=range_color,
                 anchor_point = (0.4,0.5),
                 anchored_position = label_position
@@ -148,19 +142,14 @@ class Display():
 
         return range_group
         
-    def _ApproachStrobe(self):
+    def _ApproachStrobe(self,center_range):
         approach_strobe = displayio.Group()
         # Portion of the bar to be static. Based on percent distance to parked.
         available_width = (self.display.width / 2) - 6
         # Are we in range and do we need a strobe?
-        try:
-            if self.status['range'] is None:
-                return None
-        except:
-            pass
-        if self.status['range'] < self.config['max_detect_range']:
+        if center_range < self.config['max_detect_range']:
             # Compare tracking range to current range
-            bar_blocker = floor(available_width * (1-( self.current_range / self.config['max_detect_range'] )))
+            bar_blocker = floor(available_width * (1-( center_range / self.config['max_detect_range'] )))
             ## Left
             approach_strobe.append(Line(5,30,5+bar_blocker,30,0xFFFFFF))
             ## Right
@@ -186,11 +175,12 @@ class Display():
                     )
         return approach_strobe
         
-    def UpdateDisplay(self,):
-        
+    def UpdateDisplay(self,sensor_values):
+        print("New sensor values:")
+        print(sensor_values)
         # Assemble the groups
         master_group = displayio.Group()
         master_group.append(self._Frame())
-        master_group.append(self._ApproachStrobe())
-        master_group.append(self._DisplayDistance())
+        master_group.append(self._ApproachStrobe(sensor_values['center']))
+        master_group.append(self._DisplayDistance(sensor_values['center']))
         self.display.show(master_group)

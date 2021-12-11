@@ -108,5 +108,8 @@ class Sensors:
     def Sweep(self):
         return_data = {}
         for sensor in self.sensors:
-            return_data[sensor] = self.ReadSensor(sensor)
+            value = self.ReadSensor(sensor)
+            # Only return non-none values
+            if value is not None:
+                return_data[sensor] = value
         return return_data
