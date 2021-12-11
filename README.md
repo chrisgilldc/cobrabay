@@ -32,8 +32,8 @@ Configuration is handled in a dict at the beginning of code.py. It includes the 
 | --- | --- | --- | --- | --- | --- |
 | type | N/A | Yes | 'vl53', 'hcsr04' | N/A | Type of sensor. Note, HCSR04 mode should work for any compatible sensor, such as the US-100. |
 | address | vl53 | Yes | 0x29, 0x.... | N/A | I2C address of the sensor. |
-| distance_mode | vl53 | Yes | **'long'**, 'short' | N/A | Distance sensing mode |
-| timing_budget | vl53 | Yes | int | ms | |
+| distance_mode | vl53 | No | **'long'**, 'short' | N/A | Distance sensing mode |
+| timing_budget | vl53 | No | 15 (short mode only), 20, 33, **50**, 100, 200, 500 | ms | Ranging duration. Increasing and improve reliability. Only certain values are supported by the base library. |
 | board | hcsr04 | Yes | **'local'**,'0x58','0x59','0x5A','0x5B' | N/A | Where the GPIO pins for trigger and echo are. 'Local' uses on-board pins from the board. If using an AW9523 GPIO expander, specify the I2C address of the board. |
 | trigger | hcsr04 | Yes | int | N/A | Pin to trigger ping. |
 | echo | hcsr04 | Yes | int | N/A | Pin to listen for echo on. |
