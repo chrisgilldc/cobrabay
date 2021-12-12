@@ -2,6 +2,8 @@
 # Cobra Bay Display
 ####
 
+# Experimental asyncio support so we can keep updating the display while sensors update.
+import asyncio
 
 import board, digitalio, displayio, framebufferio, rgbmatrix, sys, time, terminalio 
 from adafruit_display_shapes.rect import Rect
@@ -21,15 +23,20 @@ class Display():
             'approach_strobe_speed': 100, # Default to 100ms
             'units': 'metric', # Default to metric, which is the native
             'range_multiplier': 1, # Since metric is default, we don't need to modify the range units, since it's natively in centimeters.
+            'bay': {}
             }
+            
+        # Merge in the provided values with the defaults.
+        self.config.update(config)
         
         # Set up variables from the input configuration
-        ## Maximum detection range
-        try:
-            self.config['max_detect_range'] = config['max_detect_range']
-        except:
-            print("Maximum detect range must be configured.")
-            sys.exit(1)
+        # Check for required settings.
+        for param in ('detect_range','park_range','height','vehicle_height'):
+            try:
+                self.config['bay'][param]
+            except:
+                print("Parking bay configuration item '" + param + "' must be set!")
+                sys.exit(1)
         
         # Try to pull over values from the config array. If present, they'll overwrite the default. If not, the default stands.
         for config_value in ('speed_limit','approach_strobe_speed'):
@@ -41,23 +48,9 @@ class Display():
         ## Convert approach strobe speed to nanoseconds from milliseconds
         self.config['approach_strobe_speed'] = self.config['approach_strobe_speed'] * 1000000
         
-        # If set to imperial units, set the appropriate range multiplier to convert
-        # the HC-SR04's native cm output to inches
-        try:
-            if config['units'] == 'imperial':
-                self.config['units'] = 'imperial'
-                self.config['range_multiplier'] = 0.393701
-                self.config['speed_multiplier'] = 0.022369
-        except:
-            self.config['units'] = 'metric'
-            self.config['range_multiplier'] = 1
-            self.config['speed_multiplier'] = 0.036
-
         ## Timer for the approach strobe
         self.timer_approach_strobe = time.monotonic_ns()
         self.approach_strobe_offset = 1
-        ## Time the process started, used to simulate approaches.
-        self.start_time= time.time()
 
         ## Create an RGB matrix. This is for a 64x32 matrix on a Metro M4 Airlift.
         matrix = rgbmatrix.RGBMatrix(
@@ -68,6 +61,7 @@ class Display():
             
         ## Associate the RGB matrix with a Display so that we can use displayio features 
         self.display = framebufferio.FramebufferDisplay(matrix, auto_refresh=True)
+
         
         ## load the fonts
         self.base_font = {
@@ -76,6 +70,10 @@ class Display():
             '8': bitmap_font.load_font('fonts/Interval-Book-8.bdf'),
             }
 
+        # Dict to store sensor values in. New values stamp over this as they come in.
+        # We seed the 'center' value to prevent errors at startup.
+        self.sensor_values = {'center': self.config['bay']['detect_range']+1 }
+ 
     # Basic frame for the display
     def _Frame(self):
         frame = displayio.Group()
@@ -84,7 +82,7 @@ class Display():
         # Left guidance
         frame.append(Rect(0,0,3,32,outline=0xFFFFFF))
         # Right guidance
-        frame.append(Rect(61,0,3,32,outline=0xFFFFFF))  
+        frame.append(Rect(61,0,3,32,outline=0xFFFFFF))
         return frame
 
     # Utility function to convert distance in centimeters to either Meters/Centimeters or Feet/Inches
@@ -101,17 +99,24 @@ class Display():
         return label
 
     def _DisplayDistance(self,center_range):
+        # Adjust the provided range down by the parking distance. This will let us display the distance to the stopping point, not the sensor!
+        stop_range = center_range - self.config['bay']['park_range']
+        
+        # Don't let range be negative. May be more logic later to do additional warnings.
+        if stop_range < 0:
+            stop_range = 0
+        
         # Positioning for labels
         label_position = ( 
             floor(self.display.width / 2), # X - Middle of the display
             floor( ( self.display.height - 4 ) / 2) ) # Y - half the height, with space removed for the approach strobe
         
         # Figure out proper coloring
-        if center_range <= 30:
+        if stop_range <= 30:
             range_color = 0xFF0000
-        elif center_range <= 121:
+        elif stop_range <= 121:
             range_color = 0xFFFF00
-        elif center_range > self.config['max_detect_range']:
+        elif stop_range > self.config['bay']['detect_range']:
             range_color = 0x0000FF
         else:
             range_color = 0x00FF00
@@ -120,7 +125,7 @@ class Display():
         
         range_group = displayio.Group()
         
-        if center_range >= self.config['max_detect_range']:
+        if stop_range >= self.config['bay']['detect_range']:
             approach_label = Label(
                 font=self.base_font['12'],
                 text="APPROACH",
@@ -133,7 +138,7 @@ class Display():
             # distance label
             range_label = Label(
                 font=self.base_font['18'],
-                text=self._DistanceLabel(center_range,self.config['units']),
+                text=self._DistanceLabel(stop_range,self.config['units']),
                 color=range_color,
                 anchor_point = (0.4,0.5),
                 anchored_position = label_position
@@ -147,9 +152,9 @@ class Display():
         # Portion of the bar to be static. Based on percent distance to parked.
         available_width = (self.display.width / 2) - 6
         # Are we in range and do we need a strobe?
-        if center_range < self.config['max_detect_range']:
+        if center_range < self.config['bay']['detect_range']:
             # Compare tracking range to current range
-            bar_blocker = floor(available_width * (1-( center_range / self.config['max_detect_range'] )))
+            bar_blocker = floor(available_width * (1-( center_range / self.config['bay']['detect_range'] )))
             ## Left
             approach_strobe.append(Line(5,30,5+bar_blocker,30,0xFFFFFF))
             ## Right
@@ -174,13 +179,41 @@ class Display():
                     58-bar_blocker-self.approach_strobe_offset-1,30,0xFF0000)
                     )
         return approach_strobe
-        
-    def UpdateDisplay(self,sensor_values):
-        print("New sensor values:")
-        print(sensor_values)
-        # Assemble the groups
+
+    # Checks to see if the height of object under a sensor is within 10% of the expected vehicle height.
+    def _HeightCheck(self,distance):
+        target_dist = self.config['bay']['height'] - self.config['bay']['vehicle_height']
+        target_dist = target_dist + self.config['bay']['height'] * .1
+        print("Target Distance: " + str(target_dist))
+        print("Read distance: " + str(distance))
+        if distance < target_dist:
+                return True
+        else:
+            return False
+
+    def _SideIndicators(self,sensor_values):
+        si_group = displayio.Group()
+        for sensor in sensor_values:
+            # Is it finding something?
+            if self._HeightCheck(sensor_values[sensor]):
+                # Put the color to the appropriate place.
+                if sensor in ('left','left_front'):
+                    si_group.append(Line(1,1,1,15,0xFF0000))
+                if sensor in ('left','left_rear'):
+                    si_group.append(Line(1,16,1,30,0xFF0000))
+                if sensor in ('right','right_front'):
+                    si_group.append(Line(62,1,62,15,0xFF0000))
+                if sensor in ('right','right_rear'):
+                    si_group.append(Line(62,16,62,30,0xFF0000))
+        return si_group   
+
+    async def UpdateDisplay(self,sensor_values):
+        self.sensor_values.update(sensor_values)
+        print("Displaying sensor values: " + str(self.sensor_values))
         master_group = displayio.Group()
         master_group.append(self._Frame())
-        master_group.append(self._ApproachStrobe(sensor_values['center']))
-        master_group.append(self._DisplayDistance(sensor_values['center']))
+        master_group.append(self._SideIndicators(sensor_values))
+        master_group.append(self._ApproachStrobe(self.sensor_values['center']))
+        master_group.append(self._DisplayDistance(self.sensor_values['center']))
         self.display.show(master_group)
+        await asyncio.sleep(0)

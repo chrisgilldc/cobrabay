@@ -1,4 +1,0 @@
-####
-# Cobra Bay Main
-####
-

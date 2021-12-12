@@ -2,6 +2,9 @@
 # Cobra Bay Sensors
 ####
 
+# Experimental asyncio support so we can keep updating the display while sensors update.
+import asyncio
+
 import board, digitalio, sys, time, terminalio 
 from adafruit_hcsr04 import HCSR04
 from adafruit_aw9523 import AW9523
@@ -32,8 +35,8 @@ class Sensors:
         for sensor in config['sensors']:
             sensor_obj = self._CreateSensor(config['sensors'][sensor])
             self.sensors[sensor] = {
-                'sensor_type': config['sensors'][sensor]['type'],
-                'sensor_obj': sensor_obj }
+                'type': config['sensors'][sensor]['type'],
+                'obj': sensor_obj }
                 
     def _CreateSensor(self,options):
         # VL53L1X sensor.
@@ -92,26 +95,47 @@ class Sensors:
             sys.exit(1)
             
     # Provides a uniform interface to access different types of sensors.
-    def ReadSensor(self,sensor):
-        if self.sensors[sensor]['sensor_type'] == 'hcsr04':
+    def _ReadSensor(self,sensor):
+        if self.sensors[sensor]['type'] == 'hcsr04':
             try:
-                return self.sensors[sensor]['sensor_obj'].distance
+                distance = self.sensors[sensor]['obj'].distance
             except RuntimeError:
                 # Catch timeouts and return None if it times out.
                 return None
-        if self.sensors[sensor]['sensor_type'] == 'vl53':
-            return self.sensors[sensor]['sensor_obj'].distance
+            # Sensor can be wonky and return 0, even when it doesn't strictly timeout.
+            # Catch these and return None instead.
+            if distance > 0:
+                return distance
+            else:
+                return None
+        if self.sensors[sensor]['type'] == 'vl53':
+            return self.sensors[sensor]['obj'].distance
 
     # Utility function to just list 
     def ListSensors(self):
         return [k for k in self.sensors.keys()]
-    
-    # Return a value for all the sensors.
-    def Sweep(self):
-        return_data = {}
+
+    def VL53(self,action):
+        if action not in ('start','stop'):
+            print("Invalid action '" + action + "' requested for VL53.")
+            sys.exit(1)
+        else:
+            for sensor in self.sensors:
+                if self.sensors[sensor]['type'] == 'vl53':
+                    if action == 'start':
+                        self.sensors[sensor]['obj'].start_ranging()
+                    if action == 'stop':
+                        self.sensors[sensor]['obj'].stop_ranging()
+
+    async def Sweep(self,sensor_data,type = 'all',):
         for sensor in self.sensors:
-            value = self.ReadSensor(sensor)
-            # Only return non-none values
-            if value is not None:
-                return_data[sensor] = value
-        return return_data
+            if self.sensors[sensor]['type'] == type or type == 'all':
+                value = self._ReadSensor(sensor)    
+                # Only return non-none values
+                if value is not None:
+                    sensor_data[sensor] = value
+            # For ultrasound sensors, wait the sensor_pacing time to prevent one sensor from picking up another's echos.
+            if type == 'hcsr04':
+                #time.sleep(self.config['sensor_pacing'])
+                await asyncio.sleep(self.config['sensor_pacing'])
+        await asyncio.sleep(0)
