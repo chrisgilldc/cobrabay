@@ -22,13 +22,21 @@ Configuration is handled in a dict at the beginning of code.py. It includes the 
 | Option | Required? | Valid Options | Units | Description |
 | --- | --- | --- | --- | --- |
 | units | No | **'metric'**, 'imperial' | N/A | Sets units to use for other options and display. |
-| max_detect_range | Yes | int | **cm** / in | Distance at which vehicle approach will start being reported. This should likely be the depth of your garage, plus or minus some adjustment factor. This shouldn't be longer than the reliable detection distance of the ranging sensor. |
-| speed_limit | No | int | **kph** / mph | |
 | sensor_pacing | No | float | seconds | Time between sonic sensor firings. This should be tuned so that echos from one sensor doesn't interfere with another - exact timing will depend on the geometry of your garage. |
+| bay | Yes | ... | N/A | Sub-dict with information about the parking bay. See below. |
 | sensors | Yes | ... | N/A | Sensor name with sub-dict of sensor options. See below. |
 | network | No | True/False | N/A | Enable networking, yes or no. Defaults to False |
 | ssid | Yes if Network is True | str | N/A | SSID of WiFi network to use | 
 | psk | Yes if Network is True | str | N/A | Pre-Shared Key of WiFi network to use |
+
+#### Bay Options
+Dimensions for the parking bay. All units are either in centimeters or inches, depending on the master units setting.
+| Options | Required? | Description |
+| --- | --- | --- | 
+| detect_range | Yes | Maximum detection range for the approach. Can be less than your maximum possible range if the far ranges are known to be unreliable and you want to trim them off. |
+| park_range | Yes | Distance from the sensor where the car should stop. Sets the '0' mark when displaying distance. |
+| height | Yes | Height of the garage when vacant. |
+| vehicle_height | Yes | Height of the vehicle. Used along with overall height to detect when car is moving sideways out of its bay. |
 
 #### Sensor Options
 | Options | Sensor Type | Required? | Valid Options | Units | Description |
