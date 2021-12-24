@@ -3,16 +3,21 @@
 
 ### Hardware
 
-System has been built and tested with the following components. It may work and be portable to other components, but I haven't tested and make no guarantees.
- - [Adafruit Metro M4 Airlift](https://www.adafruit.com/product/4000)
- - [64x32 RGB LED Matrix @ 4mm pitch](https://www.adafruit.com/product/4886)
- - [AW9523 GPIO Expander breakout board](https://www.adafruit.com/product/4886)
- - HC-SR04 ultrasound sensor
- - VL53
+I build the system with the parts below. You may be able to swap out some of these components, but no guarantee.
 
-Additional components used for connections and assembly:
- - [Adafruit RGB Matrix shield for Arduino](https://www.adafruit.com/product/2601) (Metro M4 compatible)
- - [5v, 4a power supply](https://www.adafruit.com/product/1466)
+| Item | Description | Source | Part # |
+| --- | --- | --- | --- |
+| Metro M4 Airlift | Microcontroller| Adafruit | [4000](https://www.adafruit.com/product/4000) |
+| 64x32 RGB LED Matrix @ 4mm pitch | Display | Adafruit | [4886](https://www.adafruit.com/product/4886) |
+| Matrix Shield | Display interface | Adafruit | [2601](https://www.adafruit.com/product/2601) |
+| AW9523 GPIO Expander | Additional GPIO | Adafruit | [4886](https://www.adafruit.com/product/4886) |
+| US-100 | Ultrasonic Rangefinder | Adafruit | [4019](https://www.adafruit.com/product/4019) |
+| VL53L1X | Laser Rangefinder | Adafruit | [3967](https://www.adafruit.com/product/3967) |
+| 5V4A Switching Supply | Power Supply | Adafruit | [1466](https://www.adafruit.com/product/1466) |
+| 2.1mm DC Barrel jack | Panel Power Jack | Adafruit | [610](https://www.adafruit.com/product/610) |
+| QT/Qwiic JST SH 4-pin to Male Headers | I2C Board Connectors | Adafruit | [4209](https://www.adafruit.com/product/4209) |
+| 5-pin DIN plug | Remote sensor cables | Parts Direct | 092-150 |
+| 5-pin DIN female chassis connector | Remote sensor ports | Parts Direct | 092-154 |
 
 ### Configuration
 
