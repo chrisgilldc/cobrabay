@@ -16,8 +16,8 @@ I build the system with the parts below. You may be able to swap out some of the
 | 5V4A Switching Supply | Power Supply | Adafruit | [1466](https://www.adafruit.com/product/1466) |
 | 2.1mm DC Barrel jack | Panel Power Jack | Adafruit | [610](https://www.adafruit.com/product/610) |
 | QT/Qwiic JST SH 4-pin to Male Headers | I2C Board Connectors | Adafruit | [4209](https://www.adafruit.com/product/4209) |
-| 5-pin DIN plug | Remote sensor cables | Parts Direct | 092-150 |
-| 5-pin DIN female chassis connector | Remote sensor ports | Parts Direct | 092-154 |
+| 5-pin DIN plug | Remote sensor cables | Parts Express | [092-150](https://www.parts-express.com/Rean-NYS322-5-Pin-DIN-Plug-092-150) |
+| 5-pin DIN female chassis connector | Remote sensor ports | Parts Express | [092-154](https://www.parts-express.com/Rean-NYS325-5-Pin-DIN-Female-Chassis-Connector-092-154) |
 
 ### Configuration
 
