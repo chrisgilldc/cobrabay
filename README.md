@@ -3,16 +3,21 @@
 
 ### Hardware
 
-System has been built and tested with the following components. It may work and be portable to other components, but I haven't tested and make no guarantees.
- - [Adafruit Metro M4 Airlift](https://www.adafruit.com/product/4000)
- - [64x32 RGB LED Matrix @ 4mm pitch](https://www.adafruit.com/product/4886)
- - [AW9523 GPIO Expander breakout board](https://www.adafruit.com/product/4886)
- - HC-SR04 ultrasound sensor
- - VL53
+I build the system with the parts below. You may be able to swap out some of these components, but no guarantee.
 
-Additional components used for connections and assembly:
- - [Adafruit RGB Matrix shield for Arduino](https://www.adafruit.com/product/2601) (Metro M4 compatible)
- - [5v, 4a power supply](https://www.adafruit.com/product/1466)
+| Item | Description | Source | Part # |
+| --- | --- | --- | --- |
+| Metro M4 Airlift | Microcontroller| Adafruit | [4000](https://www.adafruit.com/product/4000) |
+| 64x32 RGB LED Matrix @ 4mm pitch | Display | Adafruit | [4886](https://www.adafruit.com/product/4886) |
+| Matrix Shield | Display interface | Adafruit | [2601](https://www.adafruit.com/product/2601) |
+| AW9523 GPIO Expander | Additional GPIO | Adafruit | [4886](https://www.adafruit.com/product/4886) |
+| US-100 | Ultrasonic Rangefinder | Adafruit | [4019](https://www.adafruit.com/product/4019) |
+| VL53L1X | Laser Rangefinder | Adafruit | [3967](https://www.adafruit.com/product/3967) |
+| 5V4A Switching Supply | Power Supply | Adafruit | [1466](https://www.adafruit.com/product/1466) |
+| 2.1mm DC Barrel jack | Panel Power Jack | Adafruit | [610](https://www.adafruit.com/product/610) |
+| QT/Qwiic JST SH 4-pin to Male Headers | I2C Board Connectors | Adafruit | [4209](https://www.adafruit.com/product/4209) |
+| 5-pin DIN plug | Remote sensor cables | Parts Express | [092-150](https://www.parts-express.com/Rean-NYS322-5-Pin-DIN-Plug-092-150) |
+| 5-pin DIN female chassis connector | Remote sensor ports | Parts Express | [092-154](https://www.parts-express.com/Rean-NYS325-5-Pin-DIN-Female-Chassis-Connector-092-154) |
 
 ### Configuration
 
@@ -22,13 +27,21 @@ Configuration is handled in a dict at the beginning of code.py. It includes the 
 | Option | Required? | Valid Options | Units | Description |
 | --- | --- | --- | --- | --- |
 | units | No | **'metric'**, 'imperial' | N/A | Sets units to use for other options and display. |
-| max_detect_range | Yes | int | **cm** / in | Distance at which vehicle approach will start being reported. This should likely be the depth of your garage, plus or minus some adjustment factor. This shouldn't be longer than the reliable detection distance of the ranging sensor. |
-| speed_limit | No | int | **kph** / mph | |
 | sensor_pacing | No | float | seconds | Time between sonic sensor firings. This should be tuned so that echos from one sensor doesn't interfere with another - exact timing will depend on the geometry of your garage. |
+| bay | Yes | ... | N/A | Sub-dict with information about the parking bay. See below. |
 | sensors | Yes | ... | N/A | Sensor name with sub-dict of sensor options. See below. |
 | network | No | True/False | N/A | Enable networking, yes or no. Defaults to False |
 | ssid | Yes if Network is True | str | N/A | SSID of WiFi network to use | 
 | psk | Yes if Network is True | str | N/A | Pre-Shared Key of WiFi network to use |
+
+#### Bay Options
+Dimensions for the parking bay. All units are either in centimeters or inches, depending on the master units setting.
+| Options | Required? | Description |
+| --- | --- | --- | 
+| detect_range | Yes | Maximum detection range for the approach. Can be less than your maximum possible range if the far ranges are known to be unreliable and you want to trim them off. |
+| park_range | Yes | Distance from the sensor where the car should stop. Sets the '0' mark when displaying distance. |
+| height | Yes | Height of the garage when vacant. |
+| vehicle_height | Yes | Height of the vehicle. Used along with overall height to detect when car is moving sideways out of its bay. |
 
 #### Sensor Options
 | Options | Sensor Type | Required? | Valid Options | Units | Description |
