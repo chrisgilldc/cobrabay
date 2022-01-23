@@ -1,5 +1,7 @@
 ####
-# Cobra Bay Sensors
+# Cobra Bay - Sensors
+#
+# Reads in defined sensors
 ####
 
 # Experimental asyncio support so we can keep updating the display while sensors update.
@@ -9,12 +11,12 @@ import board, digitalio, sys, time, terminalio
 from adafruit_hcsr04 import HCSR04
 from adafruit_aw9523 import AW9523
 from adafruit_vl53l1x import VL53L1X
+from .synthsensor import SynthSensor
 
 class Sensors:
     def __init__(self,config):
         # Holding dicts
         self.sensors = {} # Holds sensors.
-        self.ranges = {} # ranges as reported by each individual sensor
 
         # Boards with GPIO pins. Always has 'local' as the native board. Can add additional boards (ie: AW9523) during initialization.
         self.gpio_boards = { 'local': board }
@@ -34,15 +36,25 @@ class Sensors:
         # Process the sensors
         for sensor in config['sensors']:
             sensor_obj = self._CreateSensor(config['sensors'][sensor])
-            self.sensors[sensor] = {
-                'type': config['sensors'][sensor]['type'],
-                'obj': sensor_obj }
-                
+            if sensor_obj is not None:
+                self.sensors[sensor] = {
+                    'type': config['sensors'][sensor]['type'],
+                    'obj': sensor_obj }
+                # For ultrasound sensors, add in the averaging rate and initialize buffer.
+                if self.sensors[sensor]['type'] == 'hcsr04':
+                    self.sensors[sensor]['avg'] = config['sensors'][sensor]['avg']
+                    self.sensors[sensor]['queue'] = []
+
     def _CreateSensor(self,options):
+        print(options)
         # VL53L1X sensor.
         if options['type'] == 'vl53':
             # Create the sensor
-            new_sensor = VL53L1X(board.I2C(),address=options['address'])
+            try:
+                new_sensor = VL53L1X(board.I2C(),address=options['address'])
+            except Exception as e:
+                print("VL53L1X sensor not available at address '" + str(options['address']) + "'. Ignoring.")
+                return None
             # Set the defaults.
             new_sensor.distance_mode = 2
             new_sensor.timing_budget = 50
@@ -73,23 +85,39 @@ class Sensors:
                 else:
                     timeout = options['timeout']
 
-            # Check for going via an AW9523, and set it up that way.
-            if options['board'] in (0x58,0x59,0x5A,0x5B):
-                # If the desired board hasn't been initialized yet, do so.
-                if options['board'] not in self.gpio_boards:
+            # Make sure the GPIO board has been initialized.
+            # This is already seeded with 'local', so that *always* works.
+            # Since we only support AW9523 expansion boards(currently), 
+            # then any missing board must be an AW9523.
+            if options['board'] not in self.gpio_boards:
+                try:
                     self.gpio_boards[options['board']] = AW9523(board.I2C(),address=options['board'])
-                # Now create the sensor.
-                    new_sensor = HCSR04(
-                        trigger_pin=self.gpio_boards[options['board']].get_pin(options['trigger']),
-                        echo_pin=self.gpio_boards[options['board']].get_pin(options['echo']),
-                        timeout=timeout)
-                return new_sensor
-            # If it's 'local', set up 
+                except Exception as e:
+                    print("AW9523 not available at address '" + str(options['board']) + "'. Skipping.")
+                    return None
+                    
+            # Create HCSR04 object with the correct pin syntax.
+            
+            # Pins on the AW9523
+            if options['board'] in (0x58,0x59,0x5A,0x5B):
+                new_sensor = HCSR04(
+                    trigger_pin=self.gpio_boards[options['board']].get_pin(options['trigger']),
+                    echo_pin=self.gpio_boards[options['board']].get_pin(options['echo']),
+                    timeout=timeout)
+            # 'Local' GPIO, directly on the board.
             elif options['board'] == 'local':
                 # Use the exec call to convert the inbound pin number to the actual pin objects
                 tp = eval("board.D{}".format(options['trigger']))
                 ep = eval("board.D{}".format(options['echo']))
-                return HCSR04(trigger_pin=tp,echo_pin=ep,timeout=timeout)
+                new_sensor = HCSR04(trigger_pin=tp,echo_pin=ep,timeout=timeout)
+            else:
+                print("GPIO board '" + options['board'] + "' not valid!")
+                sys.exit(1)
+            return new_sensor
+
+        # Synthetic sensors, IE: fake numbers to allow for testing.
+        elif options['type'] == 'synth':
+            return SynthSensor(options)
         else:
             print("Not a valid sensor type!")
             sys.exit(1)
@@ -108,10 +136,11 @@ class Sensors:
                 return distance
             else:
                 return None
-        if self.sensors[sensor]['type'] == 'vl53':
-            return self.sensors[sensor]['obj'].distance
+        if self.sensors[sensor]['type'] in ('vl53','synth'):
+            distance = self.sensors[sensor]['obj'].distance
+            return distance
 
-    # Utility function to just list 
+    # Utility function to just list all the sensors found.
     def ListSensors(self):
         return [k for k in self.sensors.keys()]
 
@@ -127,15 +156,32 @@ class Sensors:
                     if action == 'stop':
                         self.sensors[sensor]['obj'].stop_ranging()
 
-    async def Sweep(self,sensor_data,type = 'all',):
+    async def Sweep(self,sensor_data,type = ['all'],):
         for sensor in self.sensors:
-            if self.sensors[sensor]['type'] == type or type == 'all':
-                value = self._ReadSensor(sensor)    
+            if self.sensors[sensor]['type'] in type or type == 'all':
+                # Get the raw sensor value.
+                value = self._ReadSensor(sensor)
+                if type == 'hcsr04':
+                    # Reject times when the sensor returns none or zero, because that's almost certainly a glitch. 
+                    # You should never really be right up against the sensor!
+                    if value != 0 and value is not None:
+                        # If queue is full, remove the oldest element.
+                        if len(self.sensors[sensor]['queue']) >= self.sensors[sensor]['avg']:
+                            del self.sensors[sensor]['queue'][0]
+                        # Now add the new value and average.
+                        self.sensors[sensor]['queue'].append(value)
+                        # Calculate the average
+                        avg_value = sum(self.sensors[sensor]['queue']) / self.sensors[sensor]['avg']
+                        # Send the average back.
+                        sensor_data[sensor] = avg_value
+                    # Now ensure wait before the next check to prevent ultrasound interference.
+                    await asyncio.sleep(self.config['sensor_pacing'])
+                    #time.sleep(self.config['sensor_pacing'])
+                else:
+                    # For non-ultrasound sensors, send it directly back.
+                    sensor_data[sensor] = value
+
                 # Only return non-none values
                 if value is not None:
                     sensor_data[sensor] = value
-            # For ultrasound sensors, wait the sensor_pacing time to prevent one sensor from picking up another's echos.
-            if type == 'hcsr04':
-                #time.sleep(self.config['sensor_pacing'])
-                await asyncio.sleep(self.config['sensor_pacing'])
         await asyncio.sleep(0)
