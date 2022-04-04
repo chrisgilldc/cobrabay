@@ -3,7 +3,7 @@
 ####
 import board
 import time
-import asyncio
+#import asyncio
 
 # Release any previous displays.
 import displayio
@@ -19,15 +19,16 @@ config = {
     'global': {
         'units': 'imperial', # Defaults to 'metric' if set to anything other than 'imperial'.
         'sensor_pacing': 5, # Time in seconds between each ultrasonic sensor ping, to prevent echos.
+        'system_id': 'Bay2' # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
         },
     # Define sensors to be used in the Bay definition.
     'sensors': {
-        #'center': {'type': 'vl53', 'address': 0x29, 'distance_mode': 'long', 'timing_budget': 50 },
-        #'lat_front': {'type': 'hcsr04', 'board': 0x58, 'trigger': 1, 'echo': 2, 'timeout': 0.5, 'avg': 5 },
-        #'lat_rear': {'type': 'hcsr04', 'board': 0x58, 'trigger': 3, 'echo': 4, 'timeout': 0.5, 'avg': 5 },
-        'center': {'type': 'synth', 'role': 'approach', 'start_value': 762, 'delta-d': 1 },
-        'lat_front': {'type': 'synth', 'role': 'side', 'start_value': 10, 'variance': 10 },
-        'lat_rear': {'type': 'synth', 'role': 'side', 'start_value': 10, 'variance': 10 }
+        'center': {'type': 'vl53', 'address': 0x29, 'distance_mode': 'long', 'timing_budget': 50 },
+        'lat_front': {'type': 'hcsr04', 'board': 0x58, 'trigger': 1, 'echo': 2, 'timeout': 0.5, 'avg': 5 },
+        'lat_rear': {'type': 'hcsr04', 'board': 0x58, 'trigger': 3, 'echo': 4, 'timeout': 0.5, 'avg': 5 },
+        #'center': {'type': 'synth', 'role': 'approach', 'start_value': 762, 'delta-d': 1 },
+        #'lat_front': {'type': 'synth', 'role': 'side', 'start_value': 10, 'variance': 10 },
+        #'lat_rear': {'type': 'synth', 'role': 'side', 'start_value': 10, 'variance': 10 }
         },
     'bay': {
         # How to range-find the vehicle
@@ -44,7 +45,7 @@ config = {
                'ok_spread': 1, # Within this distance of the ideal, still report it as good.
                'warn_spread': 3, # More than this distance off the ideal will throw a warning.
                'red_spread': 5, # More than this distance off the ideal will be critical
-               'sensor': 'right_front', # Assigned sensor
+               'sensor': 'lat_front', # Assigned sensor
                'side': 'L' # Side of the bay the sensor is mounted on, 'L' or 'R'. This is relative to the range sensor.
             },
             { 'intercept_range': 50, # Distance at which an approaching vehicle should trigger this sensor.
@@ -52,7 +53,7 @@ config = {
               'ok_spread': 1, # Within this distance of the ideal, still report it as good.
               'warn_spread': 3, # More than this distance off the ideal will throw a warning.
               'red_spread': 5, # More than this distance off the ideal will be critical
-              'sensor': 'right_rear', # Assigned sensor
+              'sensor': 'lat_rear', # Assigned sensor
               'side': 'L' # Side of the bay the sensor is mounted on, 'L' or 'R'. This is relative to the range sensor.
               }
             ]
@@ -62,4 +63,6 @@ config = {
 # Initialize the object.
 cb = cobrabay.CobraBay(config)
 
-asyncio.run(cb.Dock())
+print("Starting main operating loop")
+# Start the main operating loop.
+cb.Run()

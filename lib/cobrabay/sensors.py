@@ -5,18 +5,20 @@
 ####
 
 # Experimental asyncio support so we can keep updating the display while sensors update.
-import asyncio
+#import asyncio
 
 import board, digitalio, sys, time, terminalio 
 from adafruit_hcsr04 import HCSR04
 from adafruit_aw9523 import AW9523
 from adafruit_vl53l1x import VL53L1X
 from .synthsensor import SynthSensor
+import adafruit_logging as logging
 
 class Sensors:
     def __init__(self,config):
-        # Holding dicts
-        self.sensors = {} # Holds sensors.
+        # Grab the logger.
+        self._logger = logging.getLogger('sensors')
+        self._logger.info('Sensors: Initializing...')
 
         # Boards with GPIO pins. Always has 'local' as the native board. Can add additional boards (ie: AW9523) during initialization.
         self.gpio_boards = { 'local': board }
@@ -32,29 +34,64 @@ class Sensors:
                 self.config[config_value] = config[config_value]
             except:
                 pass
-      
-        # Process the sensors
-        for sensor in config['sensors']:
-            sensor_obj = self._CreateSensor(config['sensors'][sensor])
-            if sensor_obj is not None:
-                self.sensors[sensor] = {
-                    'type': config['sensors'][sensor]['type'],
+ 
+        # Keep the status of sensors. If a given sensor is unavailable, we don't want to bomb the whole system out.
+        self._sensor_state = {}
+ 
+        # Initialize all the sensors.
+        howmany = self._InitSensors(config['sensors'])
+        self._logger.info('Sensors: Processed ' + str(howmany) + ' sensors.')
+        self._logger.info('Sensors: Initialization complete.')
+ 
+    # To initialize multiple sensors in a go. Takes a dict of sensor definitions.
+    def _InitSensors(self,sensors):
+        i = 0
+        self._sensors = {}
+        for sensor in sensors:
+            self._logger.info('Sensors: Trying setup for ' + sensor)
+            try:
+                sensor_obj = self._CreateSensor(sensors[sensor])
+            except Exception as e:
+                self._logger.error('Sensors: Could not initialize ' + sensor + ', marking unavailable')
+                self._logger.error('Sensors: ' + str(e))
+                self._sensor_state[sensor] = 'unavailable'
+            else:
+               # if sensor_obj is not None:
+                self._sensors[sensor] = {
+                    'type': sensors[sensor]['type'],
                     'obj': sensor_obj }
                 # For ultrasound sensors, add in the averaging rate and initialize buffer.
-                if self.sensors[sensor]['type'] == 'hcsr04':
-                    self.sensors[sensor]['avg'] = config['sensors'][sensor]['avg']
-                    self.sensors[sensor]['queue'] = []
+                if self._sensors[sensor]['type'] == 'hcsr04':
+                    self._sensors[sensor]['avg'] = sensors[sensor]['avg']
+                    self._sensors[sensor]['queue'] = []
 
+                # Test the sensor and make sure we can get a result. 
+                # Value doesn't matter, just get *something*
+
+                try:
+                    result = self._ReadSensor(sensor)
+                except Exception as e:
+                    self._logger.error('Sensors: Read test of sensor ' + sensor + ' failed, marking unavailable')
+                    self._logger.error('Sensors: ' + str(e))
+                    self._sensor_state[sensor] = 'unavailable'
+                else:
+                    self._logger.debug('Sensors: Read test of sensor ' + sensor +  ' got: ' + str(result))
+                    # Finally, set the sensor as available.
+                    if result is not None:
+                        self._sensor_state[sensor] = 'available'
+                    else:
+                        self._sensor_state[sensor] = 'unavailable'
+            i += 1
+        return i
+                    
     def _CreateSensor(self,options):
-        print(options)
         # VL53L1X sensor.
         if options['type'] == 'vl53':
             # Create the sensor
             try:
                 new_sensor = VL53L1X(board.I2C(),address=options['address'])
             except Exception as e:
-                print("VL53L1X sensor not available at address '" + str(options['address']) + "'. Ignoring.")
-                return None
+                raise OSError("VL53L1X sensor not available at address '" + str(options['address']) + "'. Ignoring.")
             # Set the defaults.
             new_sensor.distance_mode = 2
             new_sensor.timing_budget = 50
@@ -65,7 +102,7 @@ class Sensors:
                 if options['timing_budget'] in (15,20,33,50,100,200,500):
                     new_sensor.timing_budget = options['timing_budget']
                 else:
-                    print("Requested timing budget '" + str(options['timing_budget']) + "' not supported. Keeping default of 50ms.")
+                    self._logger.debug('Sensors: Requested timing budget ' + str(options['timing_budget']) + ' not supported. Keeping default of 50ms.')
 
             new_sensor.start_ranging()
 
@@ -77,8 +114,7 @@ class Sensors:
             # Confirm trigger, echo and board are set. These are *required*.
             for parameter in ('board','trigger','echo'):
                 if parameter not in options:
-                    raise ValueError
-                    return parameter
+                    raise ValueError("Parameter " + parameter + " not defined for HC-SR04 sensor.")
             # Set a custom timeout if necessary
                 if 'timeout' not in options:
                     timeout = 0.1
@@ -93,8 +129,7 @@ class Sensors:
                 try:
                     self.gpio_boards[options['board']] = AW9523(board.I2C(),address=options['board'])
                 except Exception as e:
-                    print("AW9523 not available at address '" + str(options['board']) + "'. Skipping.")
-                    return None
+                    raise OSError("AW9523 not available at address '" + str(options['board']) + "'. Skipping.")
                     
             # Create HCSR04 object with the correct pin syntax.
             
@@ -111,72 +146,89 @@ class Sensors:
                 ep = eval("board.D{}".format(options['echo']))
                 new_sensor = HCSR04(trigger_pin=tp,echo_pin=ep,timeout=timeout)
             else:
-                print("GPIO board '" + options['board'] + "' not valid!")
-                sys.exit(1)
+                raise OSError("GPIO board '" + options['board'] + "' not valid!")
+
+            # No errors to this point, return the sensor.
             return new_sensor
 
         # Synthetic sensors, IE: fake numbers to allow for testing.
         elif options['type'] == 'synth':
             return SynthSensor(options)
         else:
-            print("Not a valid sensor type!")
-            sys.exit(1)
+            raise ValueError("Not a valid sensor type")
             
     # Provides a uniform interface to access different types of sensors.
     def _ReadSensor(self,sensor):
-        if self.sensors[sensor]['type'] == 'hcsr04':
+        if self._sensors[sensor]['type'] == 'hcsr04':
             try:
-                distance = self.sensors[sensor]['obj'].distance
+                distance = self._sensors[sensor]['obj'].distance
             except RuntimeError:
                 # Catch timeouts and return None if it times out.
                 return None
+            except OSError:
+                raise
             # Sensor can be wonky and return 0, even when it doesn't strictly timeout.
             # Catch these and return None instead.
             if distance > 0:
                 return distance
             else:
                 return None
-        if self.sensors[sensor]['type'] in ('vl53','synth'):
-            distance = self.sensors[sensor]['obj'].distance
+        if self._sensors[sensor]['type'] in ('vl53','synth'):
+            distance = self._sensors[sensor]['obj'].distance
             return distance
 
+    # External method to allow a rescan of the sensors.
+    def ReScan(self):
+        self._InitSensors(self.config['sensors'])
+        
     # Utility function to just list all the sensors found.
-    def ListSensors(self):
-        return [k for k in self.sensors.keys()]
+    def SensorState(self,sensor = None):
+        if sensor == None:
+            return self._sensor_state
+        elif sensor in self._sensor_state:
+            return self._sensor_state[sensor]
+        else:
+            raise ValueError("Sensor name not found.")
 
     def VL53(self,action):
         if action not in ('start','stop'):
-            print("Invalid action '" + action + "' requested for VL53.")
-            sys.exit(1)
+            self._logger.error('Sensors: Requested invalid action for VL53 sensor. Must be either "start" or "stop".')
+            raise ValueError("Must be 'start' or 'stop'.")
         else:
-            for sensor in self.sensors:
-                if self.sensors[sensor]['type'] == 'vl53':
+            for sensor in self._sensors:
+                if self._sensors[sensor]['type'] == 'vl53':
                     if action == 'start':
-                        self.sensors[sensor]['obj'].start_ranging()
+                        self._sensors[sensor]['obj'].start_ranging()
                     if action == 'stop':
-                        self.sensors[sensor]['obj'].stop_ranging()
+                        self._sensors[sensor]['obj'].stop_ranging()
 
-    async def Sweep(self,sensor_data,type = ['all'],):
-        for sensor in self.sensors:
-            if self.sensors[sensor]['type'] in type or type == 'all':
+    def Sweep(self,type = ['all']):
+        sensor_data = {}
+        for sensor in self._sensors:
+            if self._sensors[sensor]['type'] in type or 'all' in type:
                 # Get the raw sensor value.
-                value = self._ReadSensor(sensor)
+                try:
+                    value = self._ReadSensor(sensor)
+                # An OSError is raised when it literally can't be read. That means it's probably missing.
+                except OSError as e:
+                    self._logger.debug('Sensors: Could not read sensor ' + sensor)
+                    self._logger.debug('Sensors: ' + str(e))
+                    raise
                 if type == 'hcsr04':
                     # Reject times when the sensor returns none or zero, because that's almost certainly a glitch. 
                     # You should never really be right up against the sensor!
                     if value != 0 and value is not None:
                         # If queue is full, remove the oldest element.
-                        if len(self.sensors[sensor]['queue']) >= self.sensors[sensor]['avg']:
-                            del self.sensors[sensor]['queue'][0]
+                        if len(self._sensors[sensor]['queue']) >= self._sensors[sensor]['avg']:
+                            del self._sensors[sensor]['queue'][0]
                         # Now add the new value and average.
-                        self.sensors[sensor]['queue'].append(value)
+                        self._sensors[sensor]['queue'].append(value)
                         # Calculate the average
-                        avg_value = sum(self.sensors[sensor]['queue']) / self.sensors[sensor]['avg']
+                        avg_value = sum(self._sensors[sensor]['queue']) / self._sensors[sensor]['avg']
                         # Send the average back.
                         sensor_data[sensor] = avg_value
                     # Now ensure wait before the next check to prevent ultrasound interference.
-                    await asyncio.sleep(self.config['sensor_pacing'])
-                    #time.sleep(self.config['sensor_pacing'])
+                    time.sleep(self.config['sensor_pacing'])
                 else:
                     # For non-ultrasound sensors, send it directly back.
                     sensor_data[sensor] = value
@@ -184,4 +236,4 @@ class Sensors:
                 # Only return non-none values
                 if value is not None:
                     sensor_data[sensor] = value
-        await asyncio.sleep(0)
+        return sensor_data

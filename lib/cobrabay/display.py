@@ -5,7 +5,7 @@
 ####
 
 # Experimental asyncio support so we can keep updating the display while sensors update.
-import asyncio
+#import asyncio
 
 import board, digitalio, displayio, framebufferio, rgbmatrix, sys, time, terminalio 
 from adafruit_display_shapes.rect import Rect
@@ -46,18 +46,24 @@ class Display():
         self.approach_strobe_offset = 1
 
         ## Create an RGB matrix. This is for a 64x32 matrix on a Metro M4 Airlift.
-        matrix = rgbmatrix.RGBMatrix(
-            width=64, height=32, bit_depth=1, 
-            rgb_pins=[board.D2, board.D3, board.D4, board.D5, board.D6, board.D7], 
-            addr_pins=[board.A0, board.A1, board.A2, board.A3], 
-            clock_pin=board.A4, latch_pin=board.D10, output_enable_pin=board.D9)
-            
+        try: 
+            matrix = rgbmatrix.RGBMatrix(
+                width=64, height=32, bit_depth=1, 
+                rgb_pins=[board.D2, board.D3, board.D4, board.D5, board.D6, board.D7], 
+                addr_pins=[board.A0, board.A1, board.A2, board.A3], 
+                clock_pin=board.A4, latch_pin=board.D10, output_enable_pin=board.D9)
+        except MemoryError:
+            raise
+
         ## Associate the RGB matrix with a Display so that we can use displayio features 
         self.display = framebufferio.FramebufferDisplay(matrix, auto_refresh=True)
 
         ## load the font
         self.base_font = bitmap_font.load_font('fonts/Interval-Book-18.bdf')
- 
+        
+        ## Load a smaller font for longer text
+        self.small_font = bitmap_font.load_font('fonts/Interval-book-12.bdf')
+        
     # Basic frame for the display
     def _Frame(self):
         frame = displayio.Group()
@@ -83,7 +89,7 @@ class Display():
             label = str(range_meters) + "m"
         return label
 
-    def _DisplayDistance(self):
+    def _DisplayDistance(self,range,range_pct):
         # Create the distance IO group.
         range_group = displayio.Group()
 
@@ -92,65 +98,49 @@ class Display():
             floor(self.display.width / 2), # X - Middle of the display
             floor( ( self.display.height - 4 ) / 2) ) # Y - half the height, with space removed for the approach strobe
 
-        # Trap cases where there isn't a self.sensors[self.config['bay']['range']['sensor']]
-        if self.config['bay']['range']['sensor'] not in self.sensor_values:
-            approach_label = Label(
-                font=self.base_font,
-                text="ERROR",
-                color=0xFF0000,
-                anchor_point = (0.5,0.5),
+        # Default label setup. Logic will override these properties if needed.
+        approach_label = Label(
+                font = self.base_font,
+                color = 0x00FF00,
+                anchor_point = (0.4,0.5),
                 anchored_position = label_position
                 )
-            range_group.append(approach_label)
-            return range_group
-            
-        # Didn't trap, proceed.
-        
-        # Adjust the provided range down by the parking distance. This will let us display the distance to the stopping point, not the sensor!
-        stop_range = self.sensor_values[self.config['bay']['range']['sensor']] - self.config['bay']['range']['dist_stop']
-        
-        # Don't let range be negative. May be more logic later to do additional warnings.
-        if stop_range < 0:
-            stop_range = 0
-        
-        # Figure out distance-based values.
-        if stop_range <= 30:
-            range_color = 0xFF0000
-            range_text = self._DistanceLabel(stop_range)
-            anchor = (0.4,0.5)
-        elif stop_range <= 121:
-            range_color = 0xFFFF00
-            range_text = self._DistanceLabel(stop_range)
-            anchor = (0.4,0.5)
-        elif stop_range > self.config['bay']['range']['dist_max']:
-            range_color = 0x0000FF
-            range_text = "APPROACH"
-            anchor = (0.5,0.5)
-        else:
-            range_color = 0x00FF00
-            range_text = self._DistanceLabel(stop_range)
-            anchor = (0.4,0.5)
 
-        # Build the approach label, add it to the group and return it.
-        approach_label = Label(
-            font=self.base_font,
-            text=range_text,
-            color=range_color,
-            anchor_point = anchor,
-            anchored_position = label_position
-            )
+        # First find cases where the sensor returned None. This indicates an error.
+        if range is None :
+            approach_label.text = "ERROR"
+            approach_label.color = 0xFF0000
+            approach_label.anchor_point = (0.5,0.5)
+        # If vehicle is beyond range, range will read as 'BR' and range_pct is None (because you can't have a percentage of a string)
+        elif range_pct is None and range is 'BR':
+            approach_label.color = 0x0000FF # Blue
+            approach_label.font = self.small_font # Smaller font to fit the text
+            approach_label.text = "APPROACH"
+            approach_label.anchor_point = (0.5,0.5) # Anchor in the center
+        ## Within 10% of range, red!
+        elif range_pct <= 0.10:
+            approach_label.color = 0xFF0000
+            approach_label.text = self._DistanceLabel(range)
+        ## Within 20 % of range, yellow.
+        elif range_pct <= 0.20:
+            approach_label.color = 0xFFFF00
+            approach_label.text = self._DistanceLabel(range)
+        ## Range readings in the remaining 80%
+        else:
+            approach_label.text = self._DistanceLabel(range)
+
         range_group.append(approach_label)
 
         return range_group
         
-    def _ApproachStrobe(self,):
+    def _ApproachStrobe(self,range,range_pct):
         approach_strobe = displayio.Group()
-        # Portion of the bar to be static. Based on percent distance to parked.
+        # Available strobing width. Cut in half since we go from both sides, take out pixes for the frames.
         available_width = (self.display.width / 2) - 6
-        # Are we in range and do we need a strobe?
-        if self.sensor_values[self.config['bay']['range']['sensor']] < self.config['bay']['range']['dist_max']:
-            # Compare tracking range to current range
-            bar_blocker = floor(available_width * (1-( self.sensor_values[self.config['bay']['range']['sensor']] / self.config['bay']['range']['dist_max'] )))
+        # If range isn't 'None' (sensor error) or 'BR' (beyond range), then we need to figure the strobe.
+        if range not in (None,'BR'):
+            # Block the distnace that's been covered.
+            bar_blocker = floor(available_width * (1-range_pct))
             ## Left
             approach_strobe.append(Line(5,30,5+bar_blocker,30,0xFFFFFF))
             ## Right
@@ -176,73 +166,117 @@ class Display():
                     )
         return approach_strobe
 
-    def _SideIndicators(self):
+    def _SideIndicators(self,lateral,lateral_num):
         si_group = displayio.Group()
-        vert_start = 30 # Where on the display to start.
-        # Go through each lateral detection zone. These should be ordered from rear to front.
         
-        for index in range(len(self.config['bay']['lateral'])):
-            # If the main range sensor says the vehicle is close enough, start paying attention to this sensor.
-            if self.sensor_values[self.config['bay']['range']['sensor']] <= self.config['bay']['lateral'][index]['intercept_range']:
-                # Get the distance of the vehicle from the lateral sensor.
-                try:
-                    lat_position = self.sensor_values[self.config['bay']['lateral'][index]['sensor']]
-                    print("Got lateral position: " + str(lat_position))
-                except KeyError:
-                    # If the sensor isn't reporting, we change it to a None and mark it as a non-reporting cycle
-                    lat_position = None
-                    self.lateral_status[index]['cycles'] += 1
-                else:
-                    # Set the cycles for this sensor back to zero.
-                    self.lateral_status[index]['cycles'] = 0
-                    # Determine the deviance side and magnitude based on this sensor report.
-                    position_deviance = lat_position - self.config['bay']['lateral'][index]['dist_ideal']
-                    print("Position deviance: " + str(position_deviance))
-                    if position_deviance == 0:
-                        deviance_side = None
-                    # Deviance away from the sensor.
-                    elif position_deviance > 0:
-                        if self.config['bay']['lateral'][index]['side'] == 'P':
-                            deviance_side = 'P'
-                        else:
-                            deviance_side = 'D'
-                    # Deviance towards the sensor.
-                    elif position_deviance < 0:
-                        if self.config['bay']['lateral'][index]['side'] == 'D':
-                            deviance_side = 'D'
-                        else:
-                            deviance_side = 'P'
-                    print("Deviance side: " + str(deviance_side))
+        # Assign out the available vertical pixels in a round-robin fashion so each area gets a fair shake.
+        area_lengths = [0] * lateral_num
+        available_height = self.display.height-2
+        candidate_area = 0
+        while available_height > 0:
+            area_lengths[candidate_area] += 1
+            available_height -= 1
+            candidate_area += 1
+            if candidate_area > len(area_lengths) - 1:
+                candidate_area = 0
+        
+        # Start position of the bar, from the top.
+        bar_start = 1
+        # Go through each lateral detection zone. These should be ordered from rear to front.
+        for index in range(len(lateral)):
+            # If it returned the string 'BR', the vehicle has yet to cross this sensor's line of sight, so do nothing.
+            if isinstance(lateral[index],str):
+                if lateral[index] == 'BR':
+                    pass # Append to both left and right.
+            # Show Green if we're in the 'spot on' or 'acceptable' deviance statuses.
+            elif lateral[index]['status'] <= 1:
+                    line_left = Line(1,bar_start,1,bar_start+area_lengths[index]-1,0x00FF00)
+                    line_right = Line(self.display.width-2,bar_start,self.display.width-2,bar_start+area_lengths[index]-1,0x00FF00)
+                    # if things are spot on, light both sides.
+                    if lateral[index]['direction'] is None:
+                        si_group.append(line_left)
+                        si_group.append(line_right)
+                    elif lateral[index]['direction'] is 'L':
+                        si_group.append(line_left)
+                    elif lateral[index]['direction'] is 'R':
+                        si_group.append(line_right)
+            elif lateral[index]['status'] == 2:
+                    line_left = Line(1,bar_start,1,bar_start+area_lengths[index]-1,0xFFFF00)
+                    line_right = Line(self.display.width-2,bar_start,self.display.width-2,bar_start+area_lengths[index]-1,0xFFFF00)
+                    # if things are spot on, light both sides.
+                    if lateral[index]['direction'] is 'L':
+                        si_group.append(line_left)
+                    elif lateral[index]['direction'] is 'R':
+                        si_group.append(line_right)
+            elif lateral[index]['status'] == 3:
+                    line_left = Line(1,bar_start,1,bar_start+area_lengths[index]-1,0xFF0000)
+                    line_right = Line(self.display.width-2,bar_start,self.display.width-2,bar_start+area_lengths[index]-1,0xFF0000)
+                    # if things are spot on, light both sides.
+                    if lateral[index]['direction'] is 'L':
+                        si_group.append(line_left)
+                    elif lateral[index]['direction'] is 'R':
+                        si_group.append(line_right)
 
-                    # How big is the deviance and how is it displayed.
-                    # Within the 'dead zone', no report is given, it's treated as being spot on.
-                    if abs(position_deviance) <= self.config['bay']['lateral'][index]['ok_spread']:
-                        self.lateral_status[index]['deviance_side'] = 0
-                    # Between the dead zone and the warning zone, we show white, an indicator but nothing serious.
-                    elif self.config['bay']['lateral'][index]['ok_spread'] < abs(position_deviance) < self.config['bay']['lateral'][index]['warn_spread']:
-                        self.lateral_status[index]['deviance_side'] = 1
-                    # Way off, huge warning.
-                    elif abs(position_deviance) >= self.config['bay']['lateral'][index]['red_spread']:
-                        self.lateral_status[index]['deviance_side'] = 3
-                    # Notably off, warn yellow.
-                    elif abs(position_deviance) >= self.config['bay']['lateral'][index]['warn_spread']:
-                        self.lateral_status[index]['deviance_side'] = 2
-                        
-                    print("Lateral status: " + str(self.lateral_status[index]['deviance_side']))
-
-            else:
-                # Remove the length of this indicator so it doesn't get used.
-                vert_start = vert_start - self.config['bay']['lateral'][index]['indicator_length']
-
-
+            # Increment so the next bar starts in the correct place.
+            bar_start = bar_start + area_lengths[index]
         return si_group   
 
-    async def UpdateDisplay(self,sensor_values):
-        self.sensor_values.update(sensor_values)
+    # Draw signal bars with an origin of X,Y
+    def _SignalBars(self,strength,origin):
+        signalbar_group = displayio.Group()
+        
+        # Draw a background box.
+        #signalbar_group.append(Rect(origin[0],origin[1],5,5,fill=0xFFFFFF))
+        
+        # Draw the bars.
+        i = 1
+        while i <= strength:
+            bar = Line(origin[0]-1+i,origin[1]+5,origin[0]-1+i,origin[1]+(5-i),0x00FF00)
+            signalbar_group.append(bar)
+            i += 1
+        
+        return(signalbar_group)
+        
+    def _MQTTIcon(self,mqtt_status,origin):
+        mqttstatus_group = displayio.Group()
+        if mqtt_status:
+            color_fill = 0xFFFFFF
+            color_fg = 0x00008B
+        else:
+            color_fill = 0x000000
+            color_fg = 0xFF0000
+        # Add the background box.    
+        #mqttstatus_group.append(Rect(origin[0],origin[1],5,5,fill=color_fill))
+        # Draw the letter M.
+        ## Left side.
+        mqttstatus_group.append(Line(origin[0],origin[1],origin[0],origin[1]+4,color_fg))
+        ## Right downstroke
+        mqttstatus_group.append(Line(origin[0]+4,origin[1],origin[0]+4,origin[1]+4,color_fg))
+        ## Left slant.
+        mqttstatus_group.append(Line(origin[0],origin[1],origin[0]+2,origin[1]+2,color_fg))
+        ## Right slant
+        mqttstatus_group.append(Line(origin[0]+2,origin[1]+2,origin[0]+4,origin[1],color_fg))
+        
+        # Return it.
+        return mqttstatus_group
+        
+        
+    def DisplayIdle(self,system_state):
         master_group = displayio.Group()
-        master_group.append(self._Frame())
-        master_group.append(self._SideIndicators())
-        #master_group.append(self._ApproachStrobe())
-        master_group.append(self._DisplayDistance())
+        master_group.append(self._SignalBars(system_state['signal_strength'],(59,27)))
+        master_group.append(self._MQTTIcon(system_state['mqtt_status'],(0,27)))
         self.display.show(master_group)
-        await asyncio.sleep(0)
+
+    # Update the display from the provided bay state.
+    def DisplayDock(self,bay_state):
+        # Display group for the output.
+        master_group = displayio.Group()
+        # Frame is always contstant, so we add this right away.
+        master_group.append(self._Frame())
+        # Display the strobe based on range. 
+        master_group.append(self._ApproachStrobe(bay_state['range'],bay_state['range_pct']))
+        # Display the distance.
+        master_group.append(self._DisplayDistance(bay_state['range'],bay_state['range_pct']))
+        # Display the side indicators
+        master_group.append(self._SideIndicators(bay_state['lateral'],bay_state['lateral_num']))
+        self.display.show(master_group)
