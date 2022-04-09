@@ -4,18 +4,22 @@
 # Connects to the network to report bay status and take basic start/stop commands.
 ####
 
-import board, busio, microcontroller, supervisor
+import board
+import busio
+import microcontroller
+import supervisor
 from digitalio import DigitalInOut
 import adafruit_esp32spi.adafruit_esp32spi_socket as socket
 from adafruit_esp32spi import adafruit_esp32spi
-#from adafruit_esp32spi import adafruit_esp32spi_wifimanager
-#import adafruit_requests as requests
+# from adafruit_esp32spi import adafruit_esp32spi_wifimanager
+# import adafruit_requests as requests
 import adafruit_minimqtt.adafruit_minimqtt as MQTT
 from math import floor
 import adafruit_logging as logging
 
+
 class Network:
-    def __init__(self,config):
+    def __init__(self, config):
         # Create the logger.
         self._logger = logging.getLogger('network')
         self._logger.info('Network: Initializing...')
@@ -28,7 +32,8 @@ class Network:
             self._logger.error('Network: No secrets.py file, cannot get connection details.')
             raise
 
-        # Convert the system_id to lower case and use that. Making everything in MQTT all lower-case just saves headache.
+        # Convert the system_id to lower case and use that.
+        # Making everything in MQTT all lower-case just saves headache.
         self._system_id = self._config['global']['system_id'].lower()
 
         # List for commands to send upward.
@@ -48,7 +53,7 @@ class Network:
 
         # Setup ESP32
 
-        if self.esp.status in (adafruit_esp32spi.WL_NO_SHIELD,adafruit_esp32spi.WL_NO_MODULE):
+        if self.esp.status in (adafruit_esp32spi.WL_NO_SHIELD, adafruit_esp32spi.WL_NO_MODULE):
             self._logger.error('Network: No ESP32 module found!')
             raise IOError("No ESP32 module found!")
         elif self.esp.status is not adafruit_esp32spi.WL_IDLE_STATUS:
@@ -57,91 +62,96 @@ class Network:
             self.esp.reset()
 
         # Setup MQTT Client
-        MQTT.set_socket(socket,self.esp)
+        MQTT.set_socket(socket, self.esp)
         self._mqtt = MQTT.MQTT(
-            broker = secrets['mqtt']['broker'],
-            port = secrets['mqtt']['port'],
-            username = secrets['mqtt']['user'],
-            password = secrets['mqtt']['password'],
-            client_id = self._system_id
+            broker=secrets['mqtt']['broker'],
+            port=secrets['mqtt']['port'],
+            username=secrets['mqtt']['user'],
+            password=secrets['mqtt']['password'],
+            client_id=self._system_id
             )
 
         # Set up Topics.
         self._topics = {
-            'device_config': { 'topic': 'cobrabay/binary_sensor/' + self._system_id + '/config'},
-            'device_state': { 'topic': 'cobrabay/binary_sensor/' + self._system_id + '/state' },
-            'device_control': { 'topic': 'cobrabay/device/' + self._system_id + '/reset', 'callback': self._cb_device_reset },
-            'bay_state': { 'topic': 'cobrabay/sensor/' + self._system_id + '/state' },
-            'bay_dock': { 'topic': 'cobrabay/' + self._system_id + '/dock', 'callback': self._cb_bay_dock },
-            'bay_undock': { 'topic': 'cobrabay/' + self._system_id + '/undock', 'callback': self._cb_bay_undock },
-            'bay_abort': { 'topic': 'cobrabay/' + self._system_id + '/abort', 'callback': self._cb_bay_abort },
-            'bay_verify': { 'topic': 'cobrabay/' + self._system_id + '/verify', 'callback': self._cb_bay_verify }
+            'device_config': {'topic': 'cobrabay/binary_sensor/' + self._system_id + '/config'},
+            'device_state': {'topic': 'cobrabay/binary_sensor/' + self._system_id + '/state'},
+            'device_control': {'topic': 'cobrabay/device/' + self._system_id + '/reset', 'callback': self._cb_device_reset},
+            'bay_state': {'topic': 'cobrabay/sensor/' + self._system_id + '/state'},
+            'bay_dock': {'topic': 'cobrabay/' + self._system_id + '/dock', 'callback': self._cb_bay_dock},
+            'bay_undock': {'topic': 'cobrabay/' + self._system_id + '/undock', 'callback': self._cb_bay_undock},
+            'bay_abort': {'topic': 'cobrabay/' + self._system_id + '/abort', 'callback': self._cb_bay_abort},
+            'bay_verify': {'topic': 'cobrabay/' + self._system_id + '/verify', 'callback': self._cb_bay_verify}
         }
 
         # Set up our last will. This ensures an offline message will be set if we go offline unexpectedly.
-        self._mqtt.will_set('cobrabay/binary_sensor/' + self._system_id + '/state','offline')
+        self._mqtt.will_set('cobrabay/binary_sensor/' + self._system_id + '/state', 'offline')
         # Set up callbacks for topics we need to listen to.
         self._logger.info('Network: Attaching MQTT callbacks.')
         for item in self._topics:
             if 'callback' in self._topics[item]:
-                self._mqtt.add_topic_callback(self._topics[item]['topic'],self._topics[item]['callback'])
+                self._mqtt.add_topic_callback(self._topics[item]['topic'], self._topics[item]['callback'])
                       
         self._logger.info('Network: Initialization complete.')
 
     # Topic Callbacks
-    def _cb_message(self,client,topic,message):
+
+    # Debugging callback.
+    @staticmethod
+    def _cb_message(client, topic, message):
         print("Got message on topic " + topic + ": " + message)
 
-    def _cb_device_state(self,client,topic,message):
+    # Device state. May get built out later, currently GNDN
+    def _cb_device_state(self, client, topic, message):
         pass
 
-    def _cb_device_rescan_sensors(self,client,topic,message):
+    def _cb_device_rescan_sensors(self, client, topic, message):
         self._upward_commands.append('rescan_sensors')
 
     # Reset command to the entire device. Does a hard reset to the controller.
-    def _cb_device_reset(self,client,topic,message):
+    def _cb_device_reset(self, client, topic, message):
         self.Disconnect('resetting')
         microcontroller.reset()
 
-    def _cb_bay_state(self,client,topic,message):
+    # Check the state of the bay, to find out if it's occupied. To be written later.
+    def _cb_bay_state(self, client, topic, message):
         pass
 
     # Command to start docking process.
-    def _cb_bay_dock(self,client,topic,message):
+    def _cb_bay_dock(self, client, topic, message):
         self._logger.debug('Network: Received dock command')
         self._upward_commands.append('dock')
         
     # Command to start undocking process. NOT YET IMPLEMENTED.
-    def _cb_bay_undock(self,client,topic,message):
+    def _cb_bay_undock(self, client, topic, message):
         self._logger.debug('Network: Received undock command')
         self._upward_commands.append('undock')
         
     # Command to immediately abort any in-progress dock or undock.
-    def _cb_bay_abort(self,client,topic,message):
+    def _cb_bay_abort(self, client, topic, message):
         self._logger.debug('Network: Received abort command')
         self._upward_commands.append('abort')
         
     # Command to verify occupancy status.
-    def _cb_bay_verify(self,client,topic,message):
+    def _cb_bay_verify(self, client, topic, message):
         self._logger.debug('Network: Received verify command')
         self._upward_commands.append('verify')
 
     # Publish out the bay's state.
-    def _pub_bay_state(self,state):
+    def _pub_bay_state(self, state):
         # If the state has changed, record it and publish it out. Otherwise, do nothing.
         if state != self._bay_state:
             self._bay_state = state
-            self._mqtt.publish(self._topics['bay_state']['topic'],self._bay_state)
+            self._mqtt.publish(self._topics['bay_state']['topic'], self._bay_state)
 
-    def _pub_device_state(self,state):
+    def _pub_device_state(self, state):
         # If the state has changed, record it and publish it out. Otherwise, do nothing.
         if state != self._device_state:
             self._device_state = state
-            self._mqtt.publish(self._topics['device_state']['topic'],self._device_state)
+            self._mqtt.publish(self._topics['device_state']['topic'], self._device_state)
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
-    def Poll(self,device_state,bay_state):
+    def Poll(self, device_state, bay_state):
         # Send the device and bay state out for publishing.
         self._pub_device_state(device_state)
         self._pub_bay_state(bay_state)
@@ -189,10 +199,10 @@ class Network:
         # Subscribe to all the appropriate topics
         for item in self._topics:
             if 'callback' in self._topics[item]:
-                    self._mqtt.subscribe(self._topics[item]['topic'])
+                self._mqtt.subscribe(self._topics[item]['topic'])
         # Send a discovery message and an online notification.
         self._logger.info('Network: Sending online message')
-        self._mqtt.publish('cobrabay/binary_sensor/' + self._system_id + '/state','online')
+        self._mqtt.publish('cobrabay/binary_sensor/' + self._system_id + '/state', 'online')
 
         return True
 
@@ -223,14 +233,14 @@ class Network:
             self._Connect_MQTT()
         return True
 
-    def Disconnect(self,message = None):
+    def Disconnect(self, message=None):
         self._logger.info('Network: Planned disconnect with message "' + str(message) + '"')
         # If we have a disconnect message, send it to the device topic.
         if message is not None:
-            self._mqtt.publish(self._topics['device_state']['topic'],message)
+            self._mqtt.publish(self._topics['device_state']['topic'], message)
         else:
-            self._mqtt.publish(self._topics['device_state']['topic'],'offline')
-        self._mqtt.publish(self._topics['bay_state']['topic'],'unavailable')
+            self._mqtt.publish(self._topics['device_state']['topic'], 'offline')
+        self._mqtt.publish(self._topics['bay_state']['topic'], 'unavailable')
         # Disconnect from broker
         self._mqtt.disconnect()
         # Disconnect from Wifi.
@@ -246,7 +256,7 @@ class Network:
         elif self.esp.rssi >= max_rssi:
             return levels - 1
         else:
-            input_range = -1*((min_rssi)-(max_rssi))
+            input_range = -1*(min_rssi-max_rssi)
             output_range = levels - 1
             return floor((self.esp.rssi - min_rssi) * (output_range / input_range))
         

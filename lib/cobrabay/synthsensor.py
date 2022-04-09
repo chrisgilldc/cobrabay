@@ -6,8 +6,9 @@
 
 from time import monotonic
 
-class SynthSensor():
-    def __init__(self,config):
+
+class SynthSensor:
+    def __init__(self, config):
         self._init_timestamp = monotonic()
         
         # Store the start value and role, we'll need those later.
@@ -24,7 +25,6 @@ class SynthSensor():
             self._variance = config['variance']
             self._side_vector = 1
 
-        
     @property
     def distance(self):
         return self._dist_calculate()
@@ -41,7 +41,8 @@ class SynthSensor():
             return self._distance
         elif self._role == 'side':
             self._distance = self._distance + self._side_vector
-            if self._distance >= self._start_value + self._variance or self._distance <= self._start_value - self._variance:
+            if self._distance >= self._start_value + self._variance or \
+                    self._distance <= self._start_value - self._variance:
                 self._side_vector = self._side_vector * -1
                 self._distance = self._distance + self._side_vector
             return self._distance

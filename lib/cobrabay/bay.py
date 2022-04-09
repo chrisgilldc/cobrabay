@@ -8,12 +8,13 @@
 ####
 #
 # Class output type: 'dict'
-# 'range' - range of the vehicle from the stopping point. NOT the sensor. Will be negative if overshot (ie: need to back up)
-#   and None if vehicle is not detected/out of range.
-# 'lateral' - List of dicts representing each lateral detection zone, ordered closest to the stopping point to furthest. Dict contains:
-#   'size' - How far off the vehicle is from the ideal lateral position.
-#   'direction' - Direction of the position deviance. 'L' or 'R', relative to the range sensor.
-#   'status' - Which status this zone is in, as defined by the distances in the config, 'red','yellow','green'
+# 'range' - range of the vehicle from the stopping point. NOT the sensor. Will be negative if overshot (ie: need to
+#   back up) and None if vehicle is not detected/out of range.
+# 'lateral' - List of dicts representing each lateral detection zone, ordered closest to the stopping point to furthest.
+#   Dict contains:
+#       'size' - How far off the vehicle is from the ideal lateral position.
+#       'direction' - Direction of the position deviance. 'L' or 'R', relative to the range sensor.
+#       'status' - Which status this zone is in, as defined by the distances in the config, 'red','yellow','green'
 # 'lateral_num' - Number of lateral zones. This is the true expected number, while errors in sensors *may* give a different
 #   numbers of entries in the lateral list.
 #
@@ -49,14 +50,14 @@ class Bay:
         for lateral in self._config['lateral']:
             self._used_sensors.append(lateral['sensor'])
 
-        if not self._HaveAllSensors(sensor_status):
+        if not self._haveallsensors(sensor_status):
             self._bay_state = 'unavailable'
         else:
             self._bay_state = 'ready'
             
         self._logger.info('Bay: Initialization complete.')
 
-    def _HaveAllSensors(self,sensor_status):
+    def _haveallsensors(self, sensor_status):
         for sensor in self._used_sensors:
             self._logger.debug('Bay: Checking sensor: ' + str(sensor))
             # If we can't find a sensor, or it's unavailable, return False immediately.
@@ -73,7 +74,7 @@ class Bay:
         # IF we've gotten here without returning, then we must have all sensors.
         return True
 
-    def _LateralArea(self,area,sensors):
+    def _lateralarea(self, area, sensors):
         self._logger.debug('Bay: Checking lateral area ' + str(area))
         # Create a dictionary for the return values
         return_dict = {}
@@ -117,7 +118,7 @@ class Bay:
         return return_dict
         
     # Process the lateral detection areas. These are in order, closest to furthest.
-    def _Lateral(self,sensor_values):
+    def _lateral(self, sensor_values):
         self._logger.debug('Bay: Checking latera areas.')
         return_list = []
         for area in range(len(self._config['lateral'])):
@@ -127,14 +128,14 @@ class Bay:
             # Check if the vehicle is close enough to trigger this lateral sensor. If so, evaluate the lateral position, otherwise, ignore.
             elif sensor_values[self._config['range']['sensor']] <= self._config['lateral'][area]['intercept_range']:
                 # Pass the area ID and required sensor for evaluation.
-                return_list.append(self._LateralArea(area,sensor_values))
+                return_list.append(self._lateralarea(area, sensor_values))
             else:
                 # Put a Beyond Range marker and move on.
                 return_list.append('BR')
         return return_list
         
     # Create an adjusted range
-    def _AdjustedRange(self,range = None):
+    def _adjusted_range(self, range = None):
         # We never really should get this, but if we do, turn around and return None back, beacuse, WTF?
         if range is None:
             return (None, None)
@@ -146,23 +147,23 @@ class Bay:
             range_pct = ( adjusted_range / self._config['range']['dist_max'] )
             return ( adjusted_range, range_pct )
             
-    def State(self,sensor_states = None):
+    def state(self, sensor_states = None):
         # If we're given new sensor states, do a recheck here.
         if sensor_states is not None:
             pass
         return self._bay_state
             
     # Called when the main loop has updated sensor values the bay needs to interpret.
-    def Update(self,sensor_values):
+    def update(self, sensor_values):
         if self._bay_state == 'unavailable':
             self._logger.debug('Bay: Bay state is unavailable, returning None')
             return None
         else:
-            range, range_pct = (None, None) if self._config['range']['sensor'] not in sensor_values else self._AdjustedRange(sensor_values[self._config['range']['sensor']])
+            range, range_pct = (None, None) if self._config['range']['sensor'] not in sensor_values else self._adjusted_range(sensor_values[self._config['range']['sensor']])
             bay_state = {
                 'range': range,
                 'range_pct': range_pct,
-                'lateral': self._Lateral(sensor_values),
+                'lateral': self._lateral(sensor_values),
                 'lateral_num': len(self._config['lateral'])
                 }
             return bay_state

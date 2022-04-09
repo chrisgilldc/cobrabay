@@ -65,4 +65,4 @@ cb = cobrabay.CobraBay(config)
 
 print("Starting main operating loop")
 # Start the main operating loop.
-cb.Run()
+cb.run()
