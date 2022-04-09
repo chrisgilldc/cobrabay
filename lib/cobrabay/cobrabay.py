@@ -4,7 +4,7 @@
 
 import adafruit_logging as logging
 
-import board, digitalio, sys, time
+import board, digitalio, sys, time, gc
 
 # Experimental asyncio support so we can keep updating the display while sensors update.
 #import asyncio
@@ -19,6 +19,7 @@ class CobraBay():
     def __init__(self,config):
         self._logger = logging.getLogger('cobrabay')
         self._logger.info('CobraBay: CobraBay Initializing...')
+        self._logger.debug('Available memory: {}'.format(gc.mem_free()))
         # check for all basic options.
         for option in ('global','sensors','bay'):
             if option not in config:
@@ -87,8 +88,9 @@ class CobraBay():
         try:
             self._display = Display(self.config)
         except MemoryError as e:
-            self._logger.error('CobraBay: Memory error while initializing display.')
-            self._device_state = 'unavailable'
+             self._logger.error('Display: Memory error while initializing display.')
+             self._logger.error(dir(e))
+             self._device_state = 'unavailable'
 
         self._logger.info('CobraBay: Initialization complete.')
         
@@ -99,8 +101,7 @@ class CobraBay():
         system_state = { 'signal_strength': 0, 'mqtt_status': False }
         while True:
             ## Have the network object make any necessary reconnections.
-            self._network.Reconnect()
-               
+            self._network.Reconnect()   
             network_data = self._network.Poll(self._device_state,self._bay.State())
             ## Poll the network messages queue.
             # If there are commands passed up, process them.
@@ -113,13 +114,13 @@ class CobraBay():
                 if 'undock' in network_data['commands']:
                     self.Undock()
             else:
-                # Throw up the idle status.
+            # Throw up the idle status.
                 system_state['signal_strength'] = network_data['signal_strength']
                 system_state['mqtt_status'] = network_data['mqtt_status']
-                try:
-                    self._display.DisplayIdle(system_state)
-                except:
-                    pass
+            try:
+                self._display.DisplayIdle(system_state)
+            except:
+                pass
 
     # Start sensors and display to guide parking.
     def Dock(self):
