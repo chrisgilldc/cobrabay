@@ -1,13 +1,13 @@
 ####
 # Cobra Bay - Network
 #
-# Connects to the network to report bay status and take basic start/stop commands.
+# Connects to the network to report bay status and take various commands.
 ####
 
 import board
 import busio
 import microcontroller
-import supervisor
+# import supervisor
 from digitalio import DigitalInOut
 import adafruit_esp32spi.adafruit_esp32spi_socket as socket
 from adafruit_esp32spi import adafruit_esp32spi
@@ -76,6 +76,7 @@ class Network:
             'device_config': {'topic': 'cobrabay/binary_sensor/' + self._system_id + '/config'},
             'device_state': {'topic': 'cobrabay/binary_sensor/' + self._system_id + '/state'},
             'device_control': {'topic': 'cobrabay/device/' + self._system_id + '/reset', 'callback': self._cb_device_reset},
+            'display_mode': {'topic': 'display/' + self._system_id + '/mode', 'callback': self._cb_display_mode},
             'bay_state': {'topic': 'cobrabay/sensor/' + self._system_id + '/state'},
             'bay_dock': {'topic': 'cobrabay/' + self._system_id + '/dock', 'callback': self._cb_bay_dock},
             'bay_undock': {'topic': 'cobrabay/' + self._system_id + '/undock', 'callback': self._cb_bay_undock},
@@ -105,12 +106,17 @@ class Network:
         pass
 
     def _cb_device_rescan_sensors(self, client, topic, message):
-        self._upward_commands.append('rescan_sensors')
+        self._upward_commands.append({'cmd': 'rescan_sensors')
 
     # Reset command to the entire device. Does a hard reset to the controller.
     def _cb_device_reset(self, client, topic, message):
         self.Disconnect('resetting')
         microcontroller.reset()
+
+    # Set the display mode to show readings from a particular sensor.
+    def _cb_display_mode(self,client, topic, message):
+        self._upward_commands.append({'cmd': 'display_mode', 'option': message)
+
 
     # Check the state of the bay, to find out if it's occupied. To be written later.
     def _cb_bay_state(self, client, topic, message):
@@ -119,22 +125,22 @@ class Network:
     # Command to start docking process.
     def _cb_bay_dock(self, client, topic, message):
         self._logger.debug('Network: Received dock command')
-        self._upward_commands.append('dock')
+        self._upward_commands.append({'cmd': 'dock'})
         
     # Command to start undocking process. NOT YET IMPLEMENTED.
     def _cb_bay_undock(self, client, topic, message):
         self._logger.debug('Network: Received undock command')
-        self._upward_commands.append('undock')
+        self._upward_commands.append({'cmd': 'undock'})
         
     # Command to immediately abort any in-progress dock or undock.
     def _cb_bay_abort(self, client, topic, message):
         self._logger.debug('Network: Received abort command')
-        self._upward_commands.append('abort')
+        self._upward_commands.append({'cmd': 'abort'})
         
     # Command to verify occupancy status.
     def _cb_bay_verify(self, client, topic, message):
         self._logger.debug('Network: Received verify command')
-        self._upward_commands.append('verify')
+        self._upward_commands.append({'cmd': 'verify'})
 
     # Publish out the bay's state.
     def _pub_bay_state(self, state):
