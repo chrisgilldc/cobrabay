@@ -5,19 +5,15 @@
 ####
 
 import board
-import digitalio
 import displayio
 import framebufferio
 import rgbmatrix
-import sys
 import time
-import terminalio 
 from adafruit_display_shapes.rect import Rect
 from adafruit_display_shapes.line import Line
 from adafruit_display_text.label import Label
 from adafruit_bitmap_font import bitmap_font
-from adafruit_display_text import bitmap_label
-from math import floor, ceil
+from math import floor
 
 
 class Display:
@@ -272,29 +268,19 @@ class Display:
         # Return it.
         return mqttstatus_group
 
-    # Blank display, except for system state icons.
-    def display_idle(self, system_state):
-
+    # Display state icons, and optionally a single sensor.
+    def display_generic(self, system_state, sensor = None):
         master_group = displayio.Group()
-
-        master_group.append(self._signal_bars(system_state['signal_strength'], (59, 27)))
-        master_group.append(self._mqtt_icon(system_state['mqtt_status'], (0, 27)))
-        self.display.show(master_group)
-
-
-    # Display a single sensor reading, along with state icons.
-    def display_sensor(self, system_state, sensor_distance):
-        # Open up a group.
-        master_group = displayio.Group()
-        master_group.append(
-            Label(
-                font=self.base_font,
-                color=0x00FF00,
-                anchor_point=(0.4, 0.5),
-                anchored_position=(floor(self.display.width / 2),floor((self.display.height - 4) / 2)),
-                text=self._distance_label(sensor_distance)
+        if sensor is not None:
+            master_group.append(
+                Label(
+                    font=self.base_font,
+                    color=0xFFFFFF,
+                    anchor_point=(0.4, 0.5),
+                    anchored_position=(floor(self.display.width / 2), floor((self.display.height - 4) / 2)),
+                    text=self._distance_label(sensor)
+                )
             )
-        )
         master_group.append(self._signal_bars(system_state['signal_strength'], (59, 27)))
         master_group.append(self._mqtt_icon(system_state['mqtt_status'], (0, 27)))
         self.display.show(master_group)

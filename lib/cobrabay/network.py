@@ -7,6 +7,7 @@
 import board
 import busio
 import microcontroller
+import json
 # import supervisor
 from digitalio import DigitalInOut
 import adafruit_esp32spi.adafruit_esp32spi_socket as socket
@@ -74,10 +75,12 @@ class Network:
         # Set up Topics.
         self._topics = {
             'device_config': {'topic': 'cobrabay/binary_sensor/' + self._system_id + '/config'},
-            'device_state': {'topic': 'cobrabay/binary_sensor/' + self._system_id + '/state'},
-            'device_control': {'topic': 'cobrabay/device/' + self._system_id + '/reset', 'callback': self._cb_device_reset},
-            'display_mode': {'topic': 'display/' + self._system_id + '/mode', 'callback': self._cb_display_mode},
-            'bay_state': {'topic': 'cobrabay/sensor/' + self._system_id + '/state'},
+            'device_state': {'topic': 'cobrabay/binary_sensor/' + self._system_id + '/state', 'previous_state': None},
+            'device_reset': {'topic': 'cobrabay/device/' + self._system_id + '/reset',
+                               'callback': self._cb_device_reset},
+            'display_sensor': {'topic': 'cobrabay/device/' + self._system_id + '/display',
+                               'callback': self._cb_device_display_sensor},
+            'bay_state': {'topic': 'cobrabay/sensor/' + self._system_id + '/state', 'previous_state': None},
             'bay_dock': {'topic': 'cobrabay/' + self._system_id + '/dock', 'callback': self._cb_bay_dock},
             'bay_undock': {'topic': 'cobrabay/' + self._system_id + '/undock', 'callback': self._cb_bay_undock},
             'bay_abort': {'topic': 'cobrabay/' + self._system_id + '/abort', 'callback': self._cb_bay_abort},
@@ -101,22 +104,17 @@ class Network:
     def _cb_message(client, topic, message):
         print("Got message on topic " + topic + ": " + message)
 
-    # Device state. May get built out later, currently GNDN
-    def _cb_device_state(self, client, topic, message):
-        pass
-
     def _cb_device_rescan_sensors(self, client, topic, message):
-        self._upward_commands.append({'cmd': 'rescan_sensors')
+        self._upward_commands.append({'cmd': 'rescan_sensors'})
 
     # Reset command to the entire device. Does a hard reset to the controller.
     def _cb_device_reset(self, client, topic, message):
-        self.Disconnect('resetting')
+        self.disconnect('resetting')
         microcontroller.reset()
 
     # Set the display mode to show readings from a particular sensor.
-    def _cb_display_mode(self,client, topic, message):
-        self._upward_commands.append({'cmd': 'display_mode', 'option': message)
-
+    def _cb_device_display_sensor(self,client, topic, message):
+        self._upward_commands.append({'cmd': 'display_sensor', 'options': json.loads(message)})
 
     # Check the state of the bay, to find out if it's occupied. To be written later.
     def _cb_bay_state(self, client, topic, message):
@@ -155,19 +153,31 @@ class Network:
             self._device_state = state
             self._mqtt.publish(self._topics['device_state']['topic'], self._device_state)
 
+    def _pub_message(self,topic,message,only_changed=False):
+        # If we're only supposed to update on changes, and it hasn't changed, skip it.
+        if only_changed:
+            if message == self._topics[topic]['previous_state']:
+                return
+        self._topics[topic]['previous_state'] = message
+        self._mqtt.publish(self._topics[topic]['topic'],message)
+
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
-    def Poll(self, device_state, bay_state):
-        # Send the device and bay state out for publishing.
-        self._pub_device_state(device_state)
-        self._pub_bay_state(bay_state)
+    def poll(self, outbound_messages = None):
+        # Publish messages outbound
+        if isinstance(outbound_messages,dict):
+            # Send the device and bay state out for publishing.
+            for message in outbound_messages:
+                self._pub_message(message['topic'],message['message'],message['only_changed'])
+            # self._pub_device_state(device_state)
+            # self._pub_bay_state(bay_state)
         
         # Check for any incoming commands.
         self._mqtt.loop()
         
         # Yank any commands to send upward and clear it for the next run.
         upward_data = {
-            'signal_strength': self._SignalStrength(),
+            'signal_strength': self._signal_strength(),
             'mqtt_status': self._mqtt.is_connected(),
             'commands': self._upward_commands
             }
@@ -175,7 +185,7 @@ class Network:
         
         return upward_data
 
-    def _Connect_Wifi(self):
+    def _connect_wifi(self):
         if self.esp.is_connected:
             raise UserWarning("Already connected. Recommended to explicitly disconnect first.")
 
@@ -194,7 +204,7 @@ class Network:
         
         return True
 
-    def _Connect_MQTT(self):
+    def _connect_mqtt(self):
         try:
             self._mqtt.connect()
         except Exception as e:
@@ -213,33 +223,33 @@ class Network:
         return True
 
     # Convenience method to start everything network related at once.
-    def Connect(self):
+    def connect(self):
         try:
-            self._Connect_Wifi()
+            self._connect_wifi()
         except Exception as e:
             raise
         try:
-            self._Connect_MQTT()
+            self._connect_mqtt()
         except Exception as e:
             raise
             
         return None
 
     # Reconnect function to call from the main event loop to reconnect if need be.
-    def Reconnect(self):
+    def reconnect(self):
         # If Wifi is down, we'll need to reconnect both Wifi and MQTT.
         if not self.esp.is_connected:
             self._logger.info('Network: Found network not connected. Reconnecting.')
-            self.Connect()
+            self.connect()
         # If only MQTT is down, retry that.
         try:
             mqtt_status = self._mqtt.is_connected
         except:
             self._logger.info('Network: Found MQTT not connected. Reconnecting.')
-            self._Connect_MQTT()
+            self._connect_mqtt()
         return True
 
-    def Disconnect(self, message=None):
+    def disconnect(self, message=None):
         self._logger.info('Network: Planned disconnect with message "' + str(message) + '"')
         # If we have a disconnect message, send it to the device topic.
         if message is not None:
@@ -253,7 +263,7 @@ class Network:
         self.esp.disconnect()
         
     # Get a 'signal strength' out of RSSI. Based on the Android algorithm. Probably has issues, but hey, it's something.
-    def _SignalStrength(self):
+    def _signal_strength(self):
         min_rssi = -100
         max_rssi = -55
         levels = 4

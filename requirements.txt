@@ -1,9 +1,9 @@
-adafruit_aw9523
-adafruit_bitmap_font
-adafruit_display_shapes
-adafruit_display_text
-adafruit_esp32spi
-adafruit_hcsr04
-adafruit_register
-adafruit_vl53l1x
-Also copy the fonts.
+adafruit-circuitpython-aw9523
+adafruit-circuitpython-bitmap-font
+adafruit-circuitpython-display-shapes
+adafruit-circuitpython-display-text
+adafruit-circuitpython-esp32spi
+adafruit-circuitpython-hcsr04
+adafruit-circuitpython-register
+adafruit-circuitpython-vl53l1x
+Adafruit-Blinka

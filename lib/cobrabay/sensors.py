@@ -185,14 +185,6 @@ class Sensors:
     def rescan(self):
         self._init_sensors(self.config['sensors'])
 
-    # Utility function to just list all the sensors found.
-    def sensor_state(self, sensor=None):
-        if sensor is None:
-            return self._sensor_state
-        elif sensor in self._sensor_state:
-            return self._sensor_state[sensor]
-        else:
-            raise ValueError("Sensor name not found.")
 
     def vl53(self, action):
         if action not in ('start', 'stop'):
@@ -242,3 +234,28 @@ class Sensors:
                 if value is not None:
                     sensor_data[sensor] = value
         return sensor_data
+
+    # Utility function to just list all the sensors found.
+    def sensor_state(self, sensor=None):
+        if sensor is None:
+            return self._sensor_state
+        elif sensor in self._sensor_state:
+            return self._sensor_state[sensor]
+        else:
+            raise ValueError("Sensor name not found.")
+
+    def get_sensor(self,sensor_name):
+        print("Get sensor for: {}".format(sensor_name))
+        if sensor_name not in self._sensors.keys():
+            print("Sensor name does not exist.")
+            return None
+        if self._sensor_state[sensor_name] == 'unavailable':
+            print("Sensor not available!")
+            return 'unavailable'
+        if self._sensors[sensor_name]['type'] == 'vl53':
+            print("Sensor type VL53")
+            self._sensors[sensor_name]['obj'].start_ranging()
+            value = self._read_sensor(sensor_name)
+            self._sensors[sensor_name]['obj'].stop_ranging()
+            return value
+        return None
