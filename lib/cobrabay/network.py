@@ -37,6 +37,9 @@ class Network:
         # Making everything in MQTT all lower-case just saves headache.
         self._system_id = self._config['global']['system_id'].lower()
 
+        # Set homeassistant integration state.
+        self._homeassistant = self._config['global']['homeassistant']
+
         # List for commands to send upward.
         self._upward_commands = []
 
@@ -72,20 +75,47 @@ class Network:
             client_id=self._system_id
             )
 
+
         # Set up Topics.
-        self._topics = {
-            'device_config': {'topic': 'cobrabay/binary_sensor/' + self._system_id + '/config'},
-            'device_state': {'topic': 'cobrabay/binary_sensor/' + self._system_id + '/state', 'previous_state': None},
-            'device_reset': {'topic': 'cobrabay/device/' + self._system_id + '/reset',
-                               'callback': self._cb_device_reset},
-            'display_sensor': {'topic': 'cobrabay/device/' + self._system_id + '/display',
-                               'callback': self._cb_device_display_sensor},
-            'bay_state': {'topic': 'cobrabay/sensor/' + self._system_id + '/state', 'previous_state': None},
-            'bay_dock': {'topic': 'cobrabay/' + self._system_id + '/dock', 'callback': self._cb_bay_dock},
-            'bay_undock': {'topic': 'cobrabay/' + self._system_id + '/undock', 'callback': self._cb_bay_undock},
-            'bay_abort': {'topic': 'cobrabay/' + self._system_id + '/abort', 'callback': self._cb_bay_abort},
-            'bay_verify': {'topic': 'cobrabay/' + self._system_id + '/verify', 'callback': self._cb_bay_verify}
-        }
+        # If set to integrate with Home Assistant, use HA-style topics. Otherwise, use standard style topics.
+        if self._homeassistant:
+            self._logger.info("Using Home Assistant integration...")
+            self._topics = {
+                'device_state':
+                    {'ha_type': 'sensor', 'name': '' },
+                'device_reset':
+                    {'topic': 'cobrabay/device/' + self._system_id + '/reset', 'callback': self._cb_device_reset},
+                'display_sensor':
+                    {'ha_type': 'select', 'name': 'display', 'values': '', 'callback': self._cb_device_display_sensor},
+                'bay_status':
+                    {'ha_type': 'sensor', 'name': 'status' },
+                'bay_dock':
+                    {'ha_type': 'switch', 'name': 'dock', 'callback': self._cb_bay_dock },
+                'bay_undock':
+                    {'ha_type': 'switch', 'name': 'undock', 'callback': self._cb_bay_undock},
+                'bay_abort':
+                    {'ha_type': 'switch', 'name': 'abort', 'callback': self._cb_bay_abort}
+                'bay_verify':
+                    {'ha_type': 'switch', 'name': 'undock', 'callback': self._cb_bay_verify}
+            }
+            # Send
+
+
+        else:
+            self._logger.info("Using standard MQTT set.")
+            self._topics = {
+                'device_config': {'topic': 'cobrabay/device/' + self._system_id + '/config'},
+                'device_state': {'topic': 'cobrabay/device/' + self._system_id + '/state', 'previous_state': None},
+                'device_reset': {'topic': 'cobrabay/device/' + self._system_id + '/reset',
+                                 'callback': self._cb_device_reset},
+                'display_sensor': {'topic': 'cobrabay/device/' + self._system_id + '/display',
+                                   'callback': self._cb_device_display_sensor},
+                'bay_state': {'topic': 'cobrabay/sensor/' + self._system_id + '/state', 'previous_state': None},
+                'bay_dock': {'topic': 'cobrabay/' + self._system_id + '/dock', 'callback': self._cb_bay_dock},
+                'bay_undock': {'topic': 'cobrabay/' + self._system_id + '/undock', 'callback': self._cb_bay_undock},
+                'bay_abort': {'topic': 'cobrabay/' + self._system_id + '/abort', 'callback': self._cb_bay_abort},
+                'bay_verify': {'topic': 'cobrabay/' + self._system_id + '/verify', 'callback': self._cb_bay_verify}
+            }
 
         # Set up our last will. This ensures an offline message will be set if we go offline unexpectedly.
         self._mqtt.will_set('cobrabay/binary_sensor/' + self._system_id + '/state', 'offline')
@@ -96,6 +126,12 @@ class Network:
                 self._mqtt.add_topic_callback(self._topics[item]['topic'], self._topics[item]['callback'])
                       
         self._logger.info('Network: Initialization complete.')
+
+    def _mqtt_std(self):
+
+    # Send discovery information to Home Assistant
+    def _ha_discovery(self,topic_data):
+        if topic_data['']
 
     # Topic Callbacks
 
