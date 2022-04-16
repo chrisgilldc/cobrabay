@@ -39,19 +39,24 @@ class CobraBay:
                 self._logger.error('CobraBay: Lateral zone ' + str(index) + ' does not have sensor assigned.')
                 sys.exit(1)
 
+        # Default out the Home Assistant option.
+        if 'homeassistant' not in config['global']:
+            config['global']['homeassistant'] = False
+
         # Basic checks passed. Good enough! Assign it.
         self.config = config
 
         # Set watchdog pin high to keep the TPL5110 from restarting the system.
         # Holding the delay pin high will prevent restart. If that ever drops, the TPL5110
         # will restart us.
-        
-        watchdog_pin = digitalio.DigitalInOut(eval("board.D{}".format(config['global']['watchdog_pin'])))
-        watchdog_pin.direction = digitalio.Direction.OUTPUT
-        self._logger.info("Current Watchdog pin state: {}".format(watchdog_pin.value))
-        self._logger.info("Setting high to keep watchdog from triggering.")
-        watchdog_pin.value = True
-        self._logger.info("New Watchdog pin state: {}".format(watchdog_pin.value))
+        # Only set up watchdogging if a Watchdog pin is set.
+        if 'watchdog_pin' in config['global']:
+            watchdog_pin = digitalio.DigitalInOut(eval("board.D{}".format(config['global']['watchdog_pin'])))
+            watchdog_pin.direction = digitalio.Direction.OUTPUT
+            self._logger.info(f"Current Watchdog pin state: {watchdog_pin.value}")
+            self._logger.info("Setting high to keep watchdog from triggering.")
+            watchdog_pin.value = True
+            self._logger.info("New Watchdog pin state: {}".format(watchdog_pin.value))
 
         # General Processing
         # All internal work is done in metric.
