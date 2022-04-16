@@ -19,7 +19,8 @@ config = {
     'global': {
         'units': 'imperial', # Defaults to 'metric' if set to anything other than 'imperial'.
         'sensor_pacing': 5, # Time in seconds between each ultrasonic sensor ping, to prevent echos.
-        'system_id': 'Bay2' # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
+        'system_id': 'Bay2', # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
+        'homeassistant': False  # Integrate with Home Assistant?
         },
     # Define sensors to be used in the Bay definition.
     'sensors': {
