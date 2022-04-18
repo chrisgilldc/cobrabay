@@ -34,7 +34,8 @@ class Bay:
  
         # Bay State
         self._bay_state = 'init'
- 
+        self._name = bay_config['name']
+
         # Make sure the lateral zones are sorted by distance.
         self._config['lateral'] = sorted(self._config['lateral'], key=lambda x: x['intercept_range'])
 
@@ -146,7 +147,15 @@ class Bay:
             adjusted_range = range - self._config['range']['dist_stop']
             range_pct = ( adjusted_range / self._config['range']['dist_max'] )
             return ( adjusted_range, range_pct )
-            
+
+    @property
+    def sensor_list(self):
+        return self._used_sensors
+
+    @property
+    def name(self):
+        return self._name
+
     def state(self, sensor_states = None):
         # If we're given new sensor states, do a recheck here.
         if sensor_states is not None:
