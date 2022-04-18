@@ -19,7 +19,7 @@ config = {
     'global': {
         'units': 'imperial', # Defaults to 'metric' if set to anything other than 'imperial'.
         'sensor_pacing': 5, # Time in seconds between each ultrasonic sensor ping, to prevent echos.
-        'system_id': 'Bay2', # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
+        'system_id': 'CobraBay2', # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
         'homeassistant': False  # Integrate with Home Assistant?
         },
     # Define sensors to be used in the Bay definition.
@@ -31,7 +31,9 @@ config = {
         #'lat_front': {'type': 'synth', 'role': 'side', 'start_value': 10, 'variance': 10 },
         #'lat_rear': {'type': 'synth', 'role': 'side', 'start_value': 10, 'variance': 10 }
         },
-    'bay': {
+    'bay': {  # Bay definition. ONLY ONE IS SUPPORTED NOW!
+        'active': True,  # Is the bay active?
+        'name': 'bay2',  # Name to use for the bay in MQTT. Will be made all lower-case.
         # How to range-find the vehicle
         'range': {
             'dist_max': 276, # Maximum range to report at
@@ -58,9 +60,9 @@ config = {
               'side': 'L' # Side of the bay the sensor is mounted on, 'L' or 'R'. This is relative to the range sensor.
               }
             ]
+        }
     }
 }
-
 # Initialize the object.
 cb = cobrabay.CobraBay(config)
 
