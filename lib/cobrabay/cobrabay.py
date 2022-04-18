@@ -81,18 +81,22 @@ class CobraBay:
         # Information to display a sensor on the idle screen.
         self._display_sensor = { 'sensor': None }
 
-        self._logger.info('CobraBay: Connecting to network...')
-        # Create Network object.
-        self._network = Network(self.config)
-        # Connect to the network.
-        self._network.connect()
-
         self._logger.info('CobraBay: Creating sensors...')
         # Create master sensor object to hold all necessary sensor sub-objects.
         self._sensors = Sensors(self.config)
-        
+
         # Create master bay object for defined docking bay
         self._bay = Bay(self.config['bay'], self._sensors.sensor_state())
+
+        self._logger.info('CobraBay: Connecting to network...')
+        # Create Network object.
+        self._network = Network(
+            system_id=config['global']['system_id'],
+            bay=(self._bay),  # Pass a ref to the bay object. Multiple bays may be supported later.
+            homeassistant=config['global']['homeassistant']
+        )
+        # Connect to the network.
+        self._network.connect()
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
