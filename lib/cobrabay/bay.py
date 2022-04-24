@@ -19,7 +19,7 @@
 #   numbers of entries in the lateral list.
 #
 ####
-
+import time
 import adafruit_logging as logging
 
 class Bay:
@@ -35,6 +35,9 @@ class Bay:
         # Bay State
         self._bay_state = 'init'
         self._name = bay_config['name']
+        # Initial previous range.
+        self._previous_range = 1000000
+        self._motion_type = None
 
         # Make sure the lateral zones are sorted by distance.
         self._config['lateral'] = sorted(self._config['lateral'], key=lambda x: x['intercept_range'])
@@ -71,7 +74,6 @@ class Bay:
             # If we find an available sensor, we can continue.
             elif sensor_status[sensor] == 'available':
                 self._logger.debug('Bay: available, returning true')
-                pass
         # IF we've gotten here without returning, then we must have all sensors.
         return True
 
@@ -115,18 +117,18 @@ class Bay:
         # Notably off, warn yellow.
         elif abs(position_deviance) >= self._config['lateral'][area]['warn_spread']:
             return_dict['status'] = 2
-   
         return return_dict
         
     # Process the lateral detection areas. These are in order, closest to furthest.
     def _lateral(self, sensor_values):
-        self._logger.debug('Bay: Checking latera areas.')
+        self._logger.debug('Bay: Checking lateral areas.')
         return_list = []
         for area in range(len(self._config['lateral'])):
             # Check if the sensor actually has a value.
             if sensor_values[self._config['lateral'][area]['sensor']] is None:
                 return_list.append('NP')
-            # Check if the vehicle is close enough to trigger this lateral sensor. If so, evaluate the lateral position, otherwise, ignore.
+            # Check if the vehicle is close enough to trigger this lateral sensor. If so, evaluate the
+            # lateral position, otherwise, ignore.
             elif sensor_values[self._config['range']['sensor']] <= self._config['lateral'][area]['intercept_range']:
                 # Pass the area ID and required sensor for evaluation.
                 return_list.append(self._lateralarea(area, sensor_values))
@@ -156,23 +158,99 @@ class Bay:
     def name(self):
         return self._name
 
-    def state(self, sensor_states = None):
-        # If we're given new sensor states, do a recheck here.
-        if sensor_states is not None:
-            pass
+    @property
+    def state(self):
         return self._bay_state
-            
-    # Called when the main loop has updated sensor values the bay needs to interpret.
+
+    @property
+    def occupied(self):
+        if self._bay_state in ('occupied','vacant'):
+            return 'on'
+        if self._bay_state == 'unavailable':
+            return 'unknown'
+        else:
+            return 'off'
+
+    @property
+    def position(self):
+        return self._bay_position
+
+    @property
+    def motion(self):
+        return self._motion_type
+
+    @motion.setter
+    def motion(self,type):
+        if type in ('dock','undock',None):
+            self._motion_type = type
+        if type == 'dock':
+            self._bay_state = 'docking'
+        if type == 'undock':
+            self._bay_state = 'undocking'
+        if type is None:
+            if self._bay_state == 'docking':
+                self._bay_state = 'occupied'
+            if self._bay_state == 'undocking':
+                self._bay_state == 'vacant'
+
+    # Called when there are new sensor values to be interpreted against the bay's parameters.
     def update(self, sensor_values):
         if self._bay_state == 'unavailable':
-            self._logger.debug('Bay: Bay state is unavailable, returning None')
-            return None
+            raise OSError("Bay is not available")
+
+        # Get range and range percentage. Make this none if we don't have the range sensor.
+        if self._config['range']['sensor'] not in sensor_values:
+            range, range_pct = (None, None)
         else:
-            range, range_pct = (None, None) if self._config['range']['sensor'] not in sensor_values else self._adjusted_range(sensor_values[self._config['range']['sensor']])
-            bay_state = {
-                'range': range,
-                'range_pct': range_pct,
-                'lateral': self._lateral(sensor_values),
-                'lateral_num': len(self._config['lateral'])
-                }
-            return bay_state
+            range, range_pct = self._adjusted_range(sensor_values[self._config['range']['sensor']])
+            # If range is actually a value we can evaluate, figure out range change.
+            if not isinstance(range,str):
+                # Evaluate for vehicle movement. We allow for a little wobble.
+                if abs(self._previous_range - range) > 1:
+                    self._last_move_time = int(time.localtime())
+                    if self._previous_range > range:
+                        self._bay_state = 'docking'
+                    if self._previous_range < range:
+                        self._bay_state = 'undocking'
+                else:
+                    if int(time.localtime()) - self._last_move_time >= self._config['park_time']:
+                        self.motion(None)
+
+        # Update the bay position dict.
+        self._bay_position = dict(
+            range=range,
+            range_pct=range_pct,
+            lateral=self._lateral(sensor_values),
+            lateral_num=len(self._config['lateral']))
+
+    # Special version of update that processes one sensor sweep to determine bay occupancy.
+    def verify(self, sensor_values):
+        if self._bay_state == 'unavailable':
+            raise OSError("Bay is not available")
+
+        if self._config['range']['sensor'] not in sensor_values:
+            range, range_pct = (None, None)
+        else:
+            range, range_pct = self._adjusted_range(sensor_values[self._config['range']['sensor']])
+
+        if range == 'BR':
+            # Since the reliable range should cover most of the parking space, if we go beyond range, this means we're
+            # not occupied.
+            self._bay_state = 'vacant'
+        elif range >= self._config['range']['dist_stop'] * 3:
+            # If detected range over three times stopping distance is hitting *something*, but probably not a vehicle.
+            self._bay_state = 'vacant'
+        else:
+            # Otherwise we can't figure it out. Do some extra logic with the lateral sensors here....later.
+            self._bay_state = 'unknown'
+
+        # Get the lateral sensors, even if we're not evaluating them (yet).
+        lateral = self._lateral(sensor_values)
+
+        # Update the bay position dict.
+        self._bay_position = {
+            'range': range,
+            'range_pct': range_pct,
+            'lateral': lateral,
+            'lateral_num': len(self._config['lateral'])
+            }

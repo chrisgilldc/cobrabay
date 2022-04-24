@@ -17,12 +17,10 @@ import adafruit_logging as logging
 
 
 class Network:
-    def __init__(self, system_id, bay, homeassistant=False ):
+    def __init__(self, system_id, bay, homeassistant=False):
         # Create the logger.
         self._logger = logging.getLogger('network')
         self._logger.info('Network: Initializing...')
-        # Save the config.
-        self._config = config
         try:
             from secrets import secrets
             self.secrets = secrets
@@ -34,7 +32,7 @@ class Network:
         # Making everything in MQTT all lower-case just saves headache.
         self._system_id = system_id.lower()
         # Bay name
-        self._bay_name = bay['name']
+        self._bay_name = bay.name
         # Set homeassistant integration state.
         self._homeassistant = homeassistant
 
@@ -50,7 +48,7 @@ class Network:
         esp32_cs = DigitalInOut(board.ESP_CS)
         esp32_ready = DigitalInOut(board.ESP_BUSY)
         esp32_reset = DigitalInOut(board.ESP_RESET)
-        
+
         # Create ESP object
         spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
         self.esp = adafruit_esp32spi.ESP_SPIcontrol(spi, esp32_cs, esp32_ready, esp32_reset)
@@ -73,17 +71,25 @@ class Network:
             username=secrets['mqtt']['user'],
             password=secrets['mqtt']['password'],
             client_id=self._system_id
-            )
+        )
 
         # Define topic reference.
         self._topics = {
-            'device_state': {'topic': 'cobrabay/device/' + self._system_id + '/state', 'ha_type': 'sensor',
-                             'previous_state': None},
+            'device_state': {'topic': 'cobrabay/device/' + self._system_id + '/state', 'ha_type': 'binary_sensor',
+                             'previous_state': {}},
+            'device_mem': {'topic': 'cobrabay/device/' + self._system_id + '/mem', 'ha_type': 'sensor',
+                           'previous_state': {}},
             'device_command': {'topic': 'cobrabay/device/' + self._system_id + '/set',
-                             'callback': self._cb_device_command},
+                               'callback': self._cb_device_command},
+            'bay_occupied': {'topic': 'cobrabay/' + self._bay_name + '/occupied', 'ha_type': 'binary_sensor',
+                             'previous_state': None},
             'bay_state': {'topic': 'cobrabay/' + self._bay_name + '/state', 'ha_type': 'sensor',
-                          'previous_state': None},
-            'bay_command': {'topic': 'cobrabay/' + self._bay_name + 'set', 'ha_type': 'select',
+                             'previous_state': None},
+            'bay_position': {'topic': 'cobrabay/' + self._bay_name + '/position', 'ha_type': 'sensor',
+                          'previous_state': {}},
+            'bay_sensors': {'topic': 'cobrabay/' + self._bay_name + '/sensors', 'ha_type': 'sensor',
+                            'previous_state': {}},
+            'bay_command': {'topic': 'cobrabay/' + self._bay_name + '/set', 'ha_type': 'select',
                             'callback': self._cb_bay_command}
         }
 
@@ -91,26 +97,24 @@ class Network:
         for item in self._topics:
             if 'callback' in self._topics[item]:
                 self._logger.debug("Creating callback for {}".format(item))
-                self._mqtt.add_topic_callback(self._topics[item]['topic'],self._topics[item]['callback'])
+                self._mqtt.add_topic_callback(self._topics[item]['topic'], self._topics[item]['callback'])
         # Create last will, goes to the device topic.
         self._logger.info("Setting up last will.")
-        self._mqtt.will_set(self._topics['device_state']['topic'], 'offline')
-            
-        # Set up our last will. This ensures an offline message will be set if we go offline unexpectedly.
-        # This sends to the 'device_state' topic.
+        self._mqtt.will_set(self._topics['device_state']['topic'], 'off')
 
         self._logger.info('Network: Initialization complete.')
 
     # Topic Callbacks
 
     # Device Command callback
-    def _cb_device_command(self, client, topic, message):
+    def _cb_device_command(self, client, topic, raw_message):
         # Try to decode the JSON.
         try:
             message = json.loads(raw_message)
         except:
             self._logger.error("Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
             # Ignore the error itself, plow through.
+            return False
 
         # Proceed on valid commands.
         if 'cmd' not in message:
@@ -123,10 +127,10 @@ class Network:
         elif message['cmd'] == 'display_sensor':
             # If displaying a sensor, have to pass up other parameters as well.
             # Remove the command, since we already have that, then put the rest into the options field.
-            del(message,'cmd')
-            self._upward_commands({'cmd': 'display_sensor', 'options': message})
+            del message['cmd']
+            self._upward_commands.append({'cmd': 'display_sensor', 'options': message})
         elif message['cmd'] == 'rescan_sensors':
-            self._upward_commands({'cmd': 'rescan_sensors'})
+            self._upward_commands.append({'cmd': 'rescan_sensors'})
         else:
             self._logger.info("Received unknown MQTT device command '{}'".format(message['cmd']))
 
@@ -136,48 +140,76 @@ class Network:
         try:
             message = json.loads(raw_message)
         except:
-            self._logger.error("Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic,raw_message))
+            self._logger.error("Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
             # Ignore the message and return, as if we never got int.
             return
-
         # Proceed on valid commands.
         if 'cmd' not in message:
             self._logger.error("MQTT message for topic {} does not contain a cmd directive".format(topic))
-        elif message['cmd'] in ('dock','undock','abort','verify'):
+        elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify'):
             # If it's a valid bay command, pass it upward.
             self._upward_commands.append({'cmd': message['cmd']})
         else:
             self._logger.info("Received unknown MQTT bay command '{}'".format(message['cmd']))
 
     # Message publishing method
-    def _pub_message(self, topic, message, only_changed=False):
-        # If we're only supposed to update on changes, and it hasn't changed, skip it.
-        if only_changed:
-            if message == self._topics[topic]['previous_state']:
+    def _pub_message(self, topic, message, repeat=False):
+        previous_state = self._topics[topic]['previous_state']
+        # Send flag.
+        send = False
+        # By default, check to see if the data changed before sending it.
+        if repeat is False:
+            # Both strings, compare, process if different
+            if isinstance(message, str) and isinstance(previous_state, str):
+                if message != previous_state:
+                    send = True
+                else:
+                    return
+            elif isinstance(message, dict) and isinstance(previous_state, dict):
+                for item in message:
+                    if item not in previous_state:
+                        send = True
+                        break
+                    if message[item] != previous_state[item]:
+                        send = True
+                        break
                 return
-        self._topics[topic]['previous_state'] = message
-        self._mqtt.publish(self._topics[topic]['topic'], message)
+            else:
+                if type(message) != type(previous_state):
+                    send = True
+                else:
+                    return
+        # The 'repeat' option can be used in cases when a caller wants to send no matter the changed state.
+        # Using this too much can make things super chatty.
+        elif repeat is True:
+            send = True
+        if send:
+            self._topics[topic]['previous_state'] = message
+            if isinstance(message,dict):
+                message = json.dumps(message)
+            self._mqtt.publish(self._topics[topic]['topic'], message)
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
-    def poll(self, outbound_messages = None):
+    def poll(self, outbound_messages=None):
         # Publish messages outbound
-        if isinstance(outbound_messages,dict):
-            # Send the device and bay state out for publishing.
-            for message in outbound_messages:
-                self._pub_message(message['topic'],message['message'],message['only_changed'])
-        
+        for message in outbound_messages:
+            if 'repeat' in message:
+                repeat = True
+            else:
+                repeat = False
+            self._pub_message(message['topic'], message['message'], repeat)
+
         # Check for any incoming commands.
         self._mqtt.loop()
-        
+
         # Yank any commands to send upward and clear it for the next run.
         upward_data = {
             'signal_strength': self._signal_strength(),
             'mqtt_status': self._mqtt.is_connected(),
             'commands': self._upward_commands
-            }
+        }
         self._upward_commands = []
-        
         return upward_data
 
     def _connect_wifi(self):
@@ -194,9 +226,9 @@ class Network:
                     raise IOError("Could not connect to AP." + e)
                 try_counter += 1
                 continue
-        
+
         self._logger.info('Network: Connected to ' + self.secrets["ssid"])
-        
+
         return True
 
     def _connect_mqtt(self):
@@ -213,7 +245,7 @@ class Network:
                 self._mqtt.subscribe(self._topics[item]['topic'])
         # Send a discovery message and an online notification.
         self._logger.info('Network: Sending online message')
-        self._mqtt.publish('cobrabay/binary_sensor/' + self._system_id + '/state', 'online')
+        self._mqtt.publish(self._topics['device_state']['topic'], 'on')
 
         return True
 
@@ -227,7 +259,7 @@ class Network:
             self._connect_mqtt()
         except Exception as e:
             raise
-            
+
         return None
 
     # Reconnect function to call from the main event loop to reconnect if need be.
@@ -247,16 +279,17 @@ class Network:
     def disconnect(self, message=None):
         self._logger.info('Network: Planned disconnect with message "' + str(message) + '"')
         # If we have a disconnect message, send it to the device topic.
-        if message is not None:
-            self._mqtt.publish(self._topics['device_state']['topic'], message)
-        else:
-            self._mqtt.publish(self._topics['device_state']['topic'], 'offline')
-        self._mqtt.publish(self._topics['bay_state']['topic'], 'unavailable')
+        # if message is not None:
+        #     self._mqtt.publish(self._topics['device_state']['topic'], message)
+        # else:
+        # Make the Device Off and the Bay Offline. This is because device is a binary_sensor and bay is a sensor.
+        self._mqtt.publish(self._topics['device_state']['topic'], 'off')
+        self._mqtt.publish(self._topics['bay_state']['topic'], 'offline')
         # Disconnect from broker
         self._mqtt.disconnect()
         # Disconnect from Wifi.
         self.esp.disconnect()
-        
+
     # Get a 'signal strength' out of RSSI. Based on the Android algorithm. Probably has issues, but hey, it's something.
     def _signal_strength(self):
         min_rssi = -100
@@ -267,7 +300,6 @@ class Network:
         elif self.esp.rssi >= max_rssi:
             return levels - 1
         else:
-            input_range = -1*(min_rssi-max_rssi)
+            input_range = -1 * (min_rssi - max_rssi)
             output_range = levels - 1
             return floor((self.esp.rssi - min_rssi) * (output_range / input_range))
-        

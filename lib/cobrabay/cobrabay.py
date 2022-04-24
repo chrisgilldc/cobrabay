@@ -17,7 +17,19 @@ from .sensors import Sensors
 
 class CobraBay:
     def __init__(self, config):
+        # Set up Syslog if enabled.
         self._logger = logging.getLogger('cobrabay')
+        if 'syslog' in config['global']:
+            try:
+                import syslog_handler
+                syslog = SysLogHandler(
+                    address=config['global']['syslog']['host'],
+                    facility=config['global']['syslog']['facility'])
+                self._logger.addHandler(syslog)
+            except Exception as e:
+                self._logger.error("Could not set up Syslog logging: {}".format(e))
+            else:
+                print("Attached syslog handler.")
         self._logger.info('CobraBay: CobraBay Initializing...')
         self._logger.debug('Available memory: {}'.format(mem_free()))
 
@@ -75,7 +87,7 @@ class CobraBay:
             self.config['units'] = 'metric'
 
         # Initial device state
-        self._device_state = 'ready'
+        self._device_state = 'on'
         # Queue for outbound messages.
         self._outbound_messages = []
         # Information to display a sensor on the idle screen.
@@ -105,7 +117,7 @@ class CobraBay:
         except MemoryError as e:
             self._logger.error('Display: Memory error while initializing display.')
             #self._logger.error(dir(e))
-            self._device_state = 'unavailable'
+            self._device_state = 'unknown'
 
         self._logger.info('CobraBay: Initialization complete.')
 
@@ -113,35 +125,63 @@ class CobraBay:
     def _process_commands(self,command_stack):
         # Might have more than one command in the stack, process each of them.
         for command in command_stack:
-            if 'rescan_sensors' in command['cmd']:
-                self._sensors.rescan()
-            if 'dock' in command['cmd']:
-                self.dock()
-            if 'undock' in command['cmd']:
-                self.undock()
-            if 'display_sensor' in command['cmd']:
-                if 'options' in command:
-                    options = command['options']
-                    if isinstance(options, dict):
-                        sensor = options['sensor']
-                        timeout = float(options['timeout'])
-                    elif isinstance(options, str):
-                        sensor = options
-                        timeout = float(360)
-                    else:
-                        return
-                    if sensor not in self._sensors.sensor_state().keys():
-                        return
+            if self._bay.state not in ('moving', 'docking', 'undocking'):
+                if 'rescan_sensors' in command['cmd']:
+                    self._sensors.rescan()
+                if 'dock' in command['cmd']:
+                    self.dock()
+                if 'undock' in command['cmd']:
+                    self.undock()
+                # Don't allow a verify when we're actually doing a motion.
+                if 'verify' in command['cmd'] and self._bay.state not in ('moving', 'docking', 'undocking'):
+                    self.verify()
+                # Don't allow a display sensor request to override an active motion
+                if 'display_sensor' in command['cmd']:
+                    if 'options' in command:
+                        options = command['options']
+                        if isinstance(options, dict):
+                            sensor = options['sensor']
+                            timeout = float(options['timeout'])
+                        elif isinstance(options, str):
+                            sensor = options
+                            timeout = float(360)
+                        else:
+                            return
+                        if sensor not in self._sensors.sensor_state().keys():
+                            return
 
-                    # Default to 1h if larger than 1h.
-                    if float(timeout) > 3600:
-                        timeout = float(3600)
-                    self._logger.info("Starting sensor display mode for: {}".format(sensor))
-                    self._display_sensor = {
-                        'sensor': sensor,
-                        'timeout': timeout,
-                        'start': time.monotonic()
-                    }
+                        # Default to 1h if larger than 1h.
+                        if float(timeout) > 3600:
+                            timeout = float(3600)
+                        self._logger.info("Starting sensor display mode for: {}".format(sensor))
+                        self._display_sensor = {
+                            'sensor': sensor,
+                            'timeout': timeout,
+                            'start': time.monotonic()
+                        }
+            else:
+                # Only allow the abort or complete commands while a motion is in action. Complete takes precedence.
+                if 'complete' in command['cmd']:
+                    return 'complete'
+                if 'abort' in command['cmd']:
+                    return 'abort'
+
+    def _network_handler(self):
+        # Always add a device state update and a memory message to the outbound message queue
+        # Have the network object make any necessary reconnections.
+        self._network.reconnect()
+        # Queue up outbound messages for processing. By default, the Network class will not
+        # send data that hasn't changed, so we can queue it up here without care.
+        self._outbound_messages.append(dict(topic='device_state', message=self._device_state))
+        self._outbound_messages.append(dict(topic='device_mem', message=mem_free()))
+        self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state))
+        # Poll the network, send any outbound messages there for MQTT publication.
+        network_data = self._network.poll(self._outbound_messages)
+        self._outbound_messages = []
+        # Check the network command queue. If there are commands, run them.
+        if len(network_data['commands']) > 0:
+            network_data['command'] = self._process_commands(network_data['commands'])
+        return network_data
 
     # Main operating loop.
     def run(self):
@@ -149,27 +189,11 @@ class CobraBay:
         # This loop runs while the system is idle. Process commands, increment various timers.
         system_state = {'signal_strength': 0, 'mqtt_status': False}
         while True:
-            # Have the network object make any necessary reconnections.
-            self._network.reconnect()
-            # network_data = self._network.poll(self._device_state, self._bay.state())
-            # Send device and bay state outbound to MQTT.
-            self._outbound_messages.append(dict(topic='device_state', message=self._device_state, only_changed=True))
-            self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state(), only_changed=True))
-
-            # Poll the network, send any outbound messages there for MQTT publication.
-            network_data = self._network.poll(self._outbound_messages)
-            self._outbound_messages = []
-            # Poll the network messages queue.
-            # If there are commands passed up, process them.
-            if len(network_data['commands']) > 0:
-                #try:
-                self._process_commands(network_data['commands'])
-                # except:
-                #     pass
-            else:
-                # No commands, so throw up the idle state.
-                system_state['signal_strength'] = network_data['signal_strength']
-                system_state['mqtt_status'] = network_data['mqtt_status']
+            # Do a network poll, this method handles all the default outbound messages and any incoming commands.
+            network_data = self._network_handler()
+            # Update the network components of the system state.
+            system_state['signal_strength'] = network_data['signal_strength']
+            system_state['mqtt_status'] = network_data['mqtt_status']
             # Should we display a given sensor during the generic display phase?
             if self._display_sensor['sensor'] is not None:
                 sensor_value=self._sensors.get_sensor(self._display_sensor['sensor'])
@@ -191,19 +215,22 @@ class CobraBay:
     # Start sensors and display to guide parking.
     def dock(self):
         self._logger.info('CobraBay: Beginning dock.')
+        # Change the bay's state to docking.
+        self._outbound_messages.append({'topic': 'bay_state', 'message': 'docking'})
         # Start the VL53 sensors ranging
         self._sensors.vl53('start')
-        while True:
+        done = False
+        aborted = False
+        while done is False:
             # Check the network for additional commands.
-            self._logger.debug('CobraBay: Polling network.')
-            network_data = self._network.poll(self._device_state, 'docking')
-            # If we got an abort command, stop the docking!
-            # Ignore all other commands, they don't make sense.
-            if 'abort' in network_data['commands']:
-                self._logger.info('CobraBay: Abort command, cancelling docking.')
-                break
-            # Check the sensors. By default, this will sweep all sensors.
-            self._logger.debug('CobraBay: Sweeping sensors.')
+            network_data = self._network_handler()
+            # Check for a complete or abort command.
+            if 'command' in network_data:
+                if network_data['command'] == 'complete':
+                    done = True
+                if network_data['command'] == 'abort':
+                    done = True
+                    aborted = True
             try:
                 sensor_data = self._sensors.sweep()
             except Exception as e:
@@ -213,26 +240,45 @@ class CobraBay:
                 self._network.disconnect('resetting')
                 microcontroller.reset()
             # Send the collected data to the bay object to interpret
-            self._logger.debug('CobraBay: Getting new bay state.')
-            bay_state = self._bay.update(sensor_data)
+            self._bay.update(sensor_data)
             # Display the current state of the bay.
-            self._logger.debug('CobraBay: Sending bay state to display.')
-            self._display.display_dock(bay_state)
-        self._logger.info('CobraBay: Dock complete.')
+            self._display.display_dock(self._bay.position)
+            # If the bay now considers itself occupied (ie: complete), then we complete.
+            if self._bay.state == 'occupied':
+                done = True
+        # If an abort was called, do a verify.
+        if aborted:
+            self.verify()
 
     def undock(self):
         self._logger.info('CobraBay: Undock not yet implemented.')
         return
 
+    def verify(self):
+        # Sweep the sensors once.
+        sensor_data = self._sensors.sweep()
+        # Calculate the bay state.
+        try:
+            self._bay.verify(sensor_data)
+        except OSError as e:
+            self._logger.debug("Bay is unavailable, cannot verify.")
+            return
+
+        # Append the bay state to the outbound message queue.
+        self._outbound_messages.append(dict(topic='bay_sensors', message=sensor_data, repeat=True))
+        self._outbound_messages.append(dict(topic='bay_position', message=self._bay.position, repeat=True))
+        self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=True))
+        self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=True))
+
     # Process to stop the docking or undocking process, shut down the sensors and return to the idle state.
-    def complete_dock_undock(self):
-        self._logger.info('CobraBay: Beginning power down.')
-        # Get all the current tasks, except ourself.
-        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        # Cancel all the running coroutines. This will inherently stop all the ultrasound sensors.
-        for task in tasks:
-            task.cancel()
-        # Explicitly stop any vl53 sensors, which range on their own.
-        self._sensors.vl53('stop')
-        # Release the display to allow proper reinitialization later.
-        displayio.release_displays()
+    # def complete_dock_undock(self):
+    #     self._logger.info('CobraBay: Beginning power down.')
+    #     # Get all the current tasks, except ourself.
+    #     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    #     # Cancel all the running coroutines. This will inherently stop all the ultrasound sensors.
+    #     for task in tasks:
+    #         task.cancel()
+    #     # Explicitly stop any vl53 sensors, which range on their own.
+    #     self._sensors.vl53('stop')
+    #     # Release the display to allow proper reinitialization later.
+    #     displayio.release_displays()

@@ -28,7 +28,8 @@ class Sensors:
 
         # General config.
         self.config = {
-            'sensor_pacing': 0.5
+            'sensor_pacing': 0.5,
+            'sensors': config['sensors']
         }
 
         # Try to pull over values from the config array.
