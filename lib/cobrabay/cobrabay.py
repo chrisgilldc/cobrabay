@@ -251,12 +251,17 @@ class CobraBay:
             # Send the collected data to the bay object to interpret
             self._bay.update(sensor_data)
             # Display the current state of the bay.
-            self._display.display_dock(self._bay.position)
+            try:
+                self._display.display_dock(self._bay.position)
+            except Exception as e:
+                self._logger.error("Got display error during docking: {}".format(e))
             # If the bay now considers itself occupied (ie: complete), then we complete.
             if self._bay.state == 'occupied':
+                self._logger.info("Received 'completion' message during docking. Finishing.")
                 done = True
         # If an abort was called, do a verify.
         if aborted:
+            self._logger.info("Docking aborted. Running verify to determine bay state.")
             self.verify()
 
     def undock(self):
