@@ -51,20 +51,23 @@ class Network:
 
         # Create ESP object
         spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
-        self.esp = adafruit_esp32spi.ESP_SPIcontrol(spi, esp32_cs, esp32_ready, esp32_reset)
+        self._esp = adafruit_esp32spi.ESP_SPIcontrol(spi, esp32_cs, esp32_ready, esp32_reset)
+
+        # Set the Socket' library's interface to this ESP instance.
+        socket.set_interface(self._esp)
 
         # Setup ESP32
 
-        if self.esp.status in (adafruit_esp32spi.WL_NO_SHIELD, adafruit_esp32spi.WL_NO_MODULE):
+        if self._esp.status in (adafruit_esp32spi.WL_NO_SHIELD, adafruit_esp32spi.WL_NO_MODULE):
             self._logger.error('Network: No ESP32 module found!')
             raise IOError("No ESP32 module found!")
-        elif self.esp.status is not adafruit_esp32spi.WL_IDLE_STATUS:
+        elif self._esp.status is not adafruit_esp32spi.WL_IDLE_STATUS:
             # If ESP32 isn't idle, reset it.
             self._logger.warning('Network: ESP32 not idle. Resetting.')
-            self.esp.reset()
+            self._esp.reset()
 
         # Setup MQTT Client
-        MQTT.set_socket(socket, self.esp)
+        MQTT.set_socket(socket, self._esp)
         self._mqtt = MQTT.MQTT(
             broker=secrets['mqtt']['broker'],
             port=secrets['mqtt']['port'],
@@ -213,13 +216,12 @@ class Network:
         return upward_data
 
     def _connect_wifi(self):
-        if self.esp.is_connected:
+        if self._esp.is_connected:
             raise UserWarning("Already connected. Recommended to explicitly disconnect first.")
-
         try_counter = 0
-        while not self.esp.is_connected and try_counter < 5:
+        while not self._esp.is_connected and try_counter < 5:
             try:
-                self.esp.connect_AP(self.secrets["ssid"], self.secrets["password"])
+                self._esp.connect_AP(self.secrets["ssid"], self.secrets["password"])
             except RuntimeError as e:
                 if try_counter >= 5:
                     self._logger.error('Network: Failed to connect to AP after five attempts.')
@@ -227,8 +229,8 @@ class Network:
                 try_counter += 1
                 continue
 
-        self._logger.info('Network: Connected to ' + self.secrets["ssid"])
-
+        self._logger.info("Connected to {} (RSSI: {})".format(str(self._esp.ssid,"utf-8"),self._esp.rssi))
+        self._logger.info("Have IP: {}".format(self._esp.pretty_ip(self._esp.ip_address)))
         return True
 
     def _connect_mqtt(self):
@@ -265,7 +267,7 @@ class Network:
     # Reconnect function to call from the main event loop to reconnect if need be.
     def reconnect(self):
         # If Wifi is down, we'll need to reconnect both Wifi and MQTT.
-        if not self.esp.is_connected:
+        if not self._esp.is_connected:
             self._logger.info('Network: Found network not connected. Reconnecting.')
             self.connect()
         # If only MQTT is down, retry that.
@@ -288,18 +290,18 @@ class Network:
         # Disconnect from broker
         self._mqtt.disconnect()
         # Disconnect from Wifi.
-        self.esp.disconnect()
+        self._esp.disconnect()
 
     # Get a 'signal strength' out of RSSI. Based on the Android algorithm. Probably has issues, but hey, it's something.
     def _signal_strength(self):
         min_rssi = -100
         max_rssi = -55
         levels = 4
-        if self.esp.rssi <= min_rssi:
+        if self._esp.rssi <= min_rssi:
             return 0
-        elif self.esp.rssi >= max_rssi:
+        elif self._esp.rssi >= max_rssi:
             return levels - 1
         else:
             input_range = -1 * (min_rssi - max_rssi)
             output_range = levels - 1
-            return floor((self.esp.rssi - min_rssi) * (output_range / input_range))
+            return floor((self._esp.rssi - min_rssi) * (output_range / input_range))
