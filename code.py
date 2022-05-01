@@ -19,7 +19,9 @@ config = {
         'system_id': 'CobraBay2', # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
         'homeassistant': False,  # Integrate with Home Assistant?
         'syslog':
-            { 'host': 'tachyon.jumpbeacon.net', 'facility': 'local7'}
+             {'host': 'tachyon.jumpbeacon.net',
+              'facility': 'local7',
+              'protocol': 'udp'}
         },
     # Define sensors to be used in the Bay definition.
     'sensors': {
