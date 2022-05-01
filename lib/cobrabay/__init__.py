@@ -13,5 +13,5 @@ __all__ = [
     "Bay",
     "CobraBay",
     "Display",
-#    "Network",
+    "Network",
     "Sensors" ]

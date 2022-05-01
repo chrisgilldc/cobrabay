@@ -19,7 +19,7 @@ import adafruit_logging as logging
 class Sensors:
     def __init__(self, config):
         # Grab the logger.
-        self._logger = logging.getLogger('sensors')
+        self._logger = logging.getLogger('cobrabay')
         self._logger.info('Sensors: Initializing...')
 
         # Boards with GPIO pins. Always has 'local' as the native board.

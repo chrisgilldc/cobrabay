@@ -36,11 +36,9 @@ class CobraBay:
         # Make sure sensors are assigned.
         if 'sensor' not in config['bay']['range']:
             self._logger.error('CobraBay: No range sensor assigned.')
-            sys.exit(1)
         for index in range(len(config['bay']['lateral'])):
             if 'sensor' not in config['bay']['lateral'][index]:
                 self._logger.error('CobraBay: Lateral zone ' + str(index) + ' does not have sensor assigned.')
-                sys.exit(1)
 
         # Default out the Home Assistant option.
         if 'homeassistant' not in config['global']:
@@ -109,23 +107,24 @@ class CobraBay:
                                      config['global']['syslog']['facility'],
                                      config['global']['syslog']['protocol']))
             from syslog_handler import SysLogHandler
-            syslog = SysLogHandler(
-                address=config['global']['syslog']['host'],
-                facility=config['global']['syslog']['facility'],
-                protocol=config['global']['syslog']['protocol'])
-            self._logger.addHandler(syslog)
-            # except Exception as e:
-            #     self._logger.error("Could not set up Syslog logging: {}".format(e))
-            # else:
-            #     print("Attached syslog handler.")
+            try:
+                self.syslog = SysLogHandler(
+                    address=config['global']['syslog']['host'],
+                    facility=config['global']['syslog']['facility'],
+                    protocol=config['global']['syslog']['protocol'])
+            except Exception as e:
+                self._logger.error("Could not set up Syslog logging: {}".format(e))
+            else:
+                self._logger.addHandler(self.syslog)
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
         try:
             self._display = Display(self.config)
-        except MemoryError as e:
+        except MemoryError. as e:
             self._logger.error('Display: Memory error while initializing display.')
-            #self._logger.error(dir(e))
+            self._logger.error(e)
+            # self._logger.error(dir(e))
             self._device_state = 'unknown'
 
         self._logger.info('CobraBay: Initialization complete.')

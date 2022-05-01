@@ -26,7 +26,7 @@ class Bay:
     # Initialization. Takes in the Bay component from the overall config.
     def __init__(self,bay_config,sensor_status):
         # Get the Bay logger.
-        self._logger = logging.getLogger('bay')
+        self._logger = logging.getLogger('cobrabay')
         self._logger.info('Bay: Initializing...')
         
         # Store the configuration for future reference.

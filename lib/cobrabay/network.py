@@ -19,7 +19,7 @@ import adafruit_logging as logging
 class Network:
     def __init__(self, system_id, bay, homeassistant=False):
         # Create the logger.
-        self._logger = logging.getLogger('network')
+        self._logger = logging.getLogger('cobrabay')
         self._logger.info('Network: Initializing...')
         try:
             from secrets import secrets
@@ -99,10 +99,10 @@ class Network:
         # For every topic that has a callback, add it.
         for item in self._topics:
             if 'callback' in self._topics[item]:
-                self._logger.debug("Creating callback for {}".format(item))
+                self._logger.debug("Network: Creating callback for {}".format(item))
                 self._mqtt.add_topic_callback(self._topics[item]['topic'], self._topics[item]['callback'])
         # Create last will, goes to the device topic.
-        self._logger.info("Setting up last will.")
+        self._logger.info("Network: Setting up last will.")
         self._mqtt.will_set(self._topics['device_state']['topic'], 'off')
 
         self._logger.info('Network: Initialization complete.')
@@ -115,16 +115,16 @@ class Network:
         try:
             message = json.loads(raw_message)
         except:
-            self._logger.error("Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
+            self._logger.error("Network: Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
             # Ignore the error itself, plow through.
             return False
 
         # Proceed on valid commands.
         if 'cmd' not in message:
-            self._logger.error("MQTT message for topic {} does not contain a 'cmd' directive".format(topic))
+            self._logger.error("Network: MQTT message for topic {} does not contain a 'cmd' directive".format(topic))
         elif message['cmd'] in ('reset'):
             # For reset command, don't pass upward, just do it.
-            self._logger.error("Received MQTT reset request. Doing it!")
+            self._logger.error("Network: Received MQTT reset request. Doing it!")
             self.disconnect('requested_reset')
             microcontroller.reset()
         elif message['cmd'] == 'display_sensor':
@@ -135,7 +135,7 @@ class Network:
         elif message['cmd'] == 'rescan_sensors':
             self._upward_commands.append({'cmd': 'rescan_sensors'})
         else:
-            self._logger.info("Received unknown MQTT device command '{}'".format(message['cmd']))
+            self._logger.info("Network: Received unknown MQTT device command '{}'".format(message['cmd']))
 
     # Bay Command callback
     def _cb_bay_command(self, client, topic, raw_message):
@@ -143,17 +143,18 @@ class Network:
         try:
             message = json.loads(raw_message)
         except:
-            self._logger.error("Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
+            self._logger.error("Network: Could not decode JSON from MQTT message '{}' on topic '{}'"
+                               .format(topic, raw_message))
             # Ignore the message and return, as if we never got int.
             return
         # Proceed on valid commands.
         if 'cmd' not in message:
-            self._logger.error("MQTT message for topic {} does not contain a cmd directive".format(topic))
+            self._logger.error("Network: MQTT message for topic {} does not contain a cmd directive".format(topic))
         elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify'):
             # If it's a valid bay command, pass it upward.
             self._upward_commands.append({'cmd': message['cmd']})
         else:
-            self._logger.info("Received unknown MQTT bay command '{}'".format(message['cmd']))
+            self._logger.info("Network: Received unknown MQTT bay command '{}'".format(message['cmd']))
 
     # Message publishing method
     def _pub_message(self, topic, message, repeat=False):
@@ -229,8 +230,8 @@ class Network:
                 try_counter += 1
                 continue
 
-        self._logger.info("Connected to {} (RSSI: {})".format(str(self._esp.ssid,"utf-8"),self._esp.rssi))
-        self._logger.info("Have IP: {}".format(self._esp.pretty_ip(self._esp.ip_address)))
+        self._logger.info("Network: Connected to {} (RSSI: {})".format(str(self._esp.ssid,"utf-8"),self._esp.rssi))
+        self._logger.info("Network: Have IP: {}".format(self._esp.pretty_ip(self._esp.ip_address)))
         return True
 
     def _connect_mqtt(self):
