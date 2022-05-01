@@ -96,5 +96,16 @@ A Bay can have the following states:
 | --- | --- |
 | dock | Start the docking process. |
 | undock | Start the undocking process. |
+| complete | Mark the docking as complete based on an external criteria |
 | abort | Abort a running docking or undocking. |
 | verify | Check occupancy of bay and update status. |
+
+# Future Enhancements
+Not-quite-bugs:
+* Get Syslog handler to attach to children.
+
+Features
+* Home Assistant Discovery
+* Include NTP client so real timestamps can be included
+* Separate configuration into YAML
+* Add ability to load/reload/save configuration via MQTT commands
