@@ -19,17 +19,8 @@ class CobraBay:
     def __init__(self, config):
         # Set up Syslog if enabled.
         self._logger = logging.getLogger('cobrabay')
-        if 'syslog' in config['global']:
-            try:
-                import syslog_handler
-                syslog = SysLogHandler(
-                    address=config['global']['syslog']['host'],
-                    facility=config['global']['syslog']['facility'])
-                self._logger.addHandler(syslog)
-            except Exception as e:
-                self._logger.error("Could not set up Syslog logging: {}".format(e))
-            else:
-                print("Attached syslog handler.")
+
+
         self._logger.info('CobraBay: CobraBay Initializing...')
         self._logger.debug('Available memory: {}'.format(mem_free()))
 
@@ -109,6 +100,24 @@ class CobraBay:
         )
         # Connect to the network.
         self._network.connect()
+
+        # Check for Syslog, if so, connect.
+        if 'syslog' in config['global']:
+            # try:
+            self._logger.info("Attempting to add Syslog handler to {} {} via {}".
+                              format(config['global']['syslog']['host'],
+                                     config['global']['syslog']['facility'],
+                                     config['global']['syslog']['protocol']))
+            from syslog_handler import SysLogHandler
+            syslog = SysLogHandler(
+                address=config['global']['syslog']['host'],
+                facility=config['global']['syslog']['facility'],
+                protocol=config['global']['syslog']['protocol'])
+            self._logger.addHandler(syslog)
+            # except Exception as e:
+            #     self._logger.error("Could not set up Syslog logging: {}".format(e))
+            # else:
+            #     print("Attached syslog handler.")
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
