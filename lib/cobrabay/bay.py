@@ -207,13 +207,13 @@ class Bay:
             if not isinstance(range,str):
                 # Evaluate for vehicle movement. We allow for a little wobble.
                 if abs(self._previous_range - range) > 1:
-                    self._last_move_time = int(time.localtime())
+                    self._last_move_time = time.monotonic()
                     if self._previous_range > range:
                         self._bay_state = 'docking'
                     if self._previous_range < range:
                         self._bay_state = 'undocking'
                 else:
-                    if int(time.localtime()) - self._last_move_time >= self._config['park_time']:
+                    if time.monotonic() - self._last_move_time >= self._config['park_time']:
                         self.motion(None)
 
         # Update the bay position dict.
