@@ -124,13 +124,17 @@ class CobraBay:
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
+        disp_mem_before = gc.mem_free()
         try:
             self._display = Display(self.config)
         except MemoryError as e:
             self._logger.error('Display: Memory error while initializing display. Have {}'.format(gc.mem_free()))
             # self._logger.error(dir(e))
             self._device_state = 'unknown'
-
+        else:
+            disp_mem_after = gc.mem_free()
+            self._logger.debug("Display initialized. Used {} bytes. ({} to {}".
+                               format(disp_mem_before-disp_mem_after,disp_mem_before,disp_mem_after))
         self._logger.info('CobraBay: Initialization complete.')
 
     # Command processor. This is a method because it can get called from multiple loops.
@@ -267,6 +271,7 @@ class CobraBay:
                 self._display.display_dock(self._bay.position)
             except Exception as e:
                 self._logger.error("Got display error during docking: {}".format(e))
+
             # If the bay now considers itself occupied (ie: complete), then we complete.
             if self._bay.state == 'occupied':
                 self._logger.info("Received 'completion' message during docking. Finishing.")
