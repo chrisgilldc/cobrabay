@@ -1,6 +1,7 @@
 ####
 # Cobra Bay - Main
 ####
+import gc
 
 import adafruit_logging as logging
 import digitalio
@@ -22,7 +23,11 @@ class CobraBay:
 
 
         self._logger.info('CobraBay: CobraBay Initializing...')
-        self._logger.debug('Available memory: {}'.format(mem_free()))
+        mem_before = mem_free()
+        gc.collect()
+        mem_after = mem_free()
+        self._logger.info('Available Memory: {}'.format(mem_after))
+        self._logger.info('Had been {} before collection. Recovered {}'.format(mem_before,mem_before-mem_after))
 
         # check for all basic options.
         for option in ('global', 'sensors', 'bay'):
@@ -122,8 +127,7 @@ class CobraBay:
         try:
             self._display = Display(self.config)
         except MemoryError. as e:
-            self._logger.error('Display: Memory error while initializing display.')
-            self._logger.error(e)
+            self._logger.error('Display: Memory error while initializing display. Have {}'.format(gc.mem_free()))
             # self._logger.error(dir(e))
             self._device_state = 'unknown'
 
