@@ -126,7 +126,7 @@ class CobraBay:
         # Create Display object
         try:
             self._display = Display(self.config)
-        except MemoryError. as e:
+        except MemoryError as e:
             self._logger.error('Display: Memory error while initializing display. Have {}'.format(gc.mem_free()))
             # self._logger.error(dir(e))
             self._device_state = 'unknown'
