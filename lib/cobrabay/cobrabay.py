@@ -27,7 +27,7 @@ class CobraBay:
         gc.collect()
         mem_after = mem_free()
         self._logger.info('Available Memory: {}'.format(mem_after))
-        self._logger.info('Had been {} before collection. Recovered {}'.format(mem_before,mem_before-mem_after))
+        self._logger.info('Had been {} before collection. Recovered {}'.format(mem_before,mem_after-mem_before))
 
         # check for all basic options.
         for option in ('global', 'sensors', 'bay'):
