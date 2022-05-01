@@ -147,16 +147,25 @@ class CobraBay:
                 # Don't allow a display sensor request to override an active motion
                 if 'display_sensor' in command['cmd']:
                     if 'options' in command:
+                        # Make sure all the options exist.
                         options = command['options']
-                        if isinstance(options, dict):
+                        print(options)
+                        try:
                             sensor = options['sensor']
-                            timeout = float(options['timeout'])
-                        elif isinstance(options, str):
-                            sensor = options
-                            timeout = float(360)
-                        else:
+
+                        except:
+                            self._logger.info("Got 'display_sensor' command but incorrect options: {}".
+                                              format(command['options']))
                             return
+                        try:
+                            timeout = float(options['timeout'])
+                        except KeyError:
+                            timeout = float(360)
+
+                        # Make sure the sensor really exists.
                         if sensor not in self._sensors.sensor_state().keys():
+                            self._logger.info(
+                                "Got 'display_sensor' command but sensor {} does not exist.".format(sensor))
                             return
 
                         # Default to 1h if larger than 1h.
@@ -207,7 +216,7 @@ class CobraBay:
             if self._display_sensor['sensor'] is not None:
                 sensor_value=self._sensors.get_sensor(self._display_sensor['sensor'])
                 # If timeout has expired, blank it.
-                print("Timer: {}\nTimeout: {}".format(time.monotonic() - self._display_sensor['start'],self._display_sensor['timeout']))
+                #print("Timer: {}\nTimeout: {}".format(time.monotonic() - self._display_sensor['start'],self._display_sensor['timeout']))
                 if ( time.monotonic() - self._display_sensor['start'] ) > self._display_sensor['timeout']:
                     self._display_sensor = { 'sensor': None }
                     self._logger.info("Ending sensor display mode.")
