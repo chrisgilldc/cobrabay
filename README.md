@@ -1,23 +1,48 @@
 # CobraBay
 ## A parking guidance system
 
+## Installing
+
+### CircuitPython
+
+* Update system to CircuitPython 7.2. This is the version tested on, future versions *should* work but have not been tested.
+
+### CobraBay
+* Copy 'cobrabay' to _device_/lib/cobrabay
+* Copy 'code.py' to _device_/code.py
+
+### Libraries
+Place the following in _device_/lib/:
+* From the Circuitpython Library Bundle
+  * adafruit_aw9523
+  * adafruit_bitmap_font
+  * adafruit_display_shapes
+  * adafruit_display_text
+  * adafruit_esp32spi
+  * adafruit_hcsr04
+  * adafruit_register
+  * adafruit_vl53l1x
+  
+* [adafruit_logging](https://github.com/adafruit/Adafruit_CircuitPython_Logging)
+* [adafruit_minimqtt](https://github.com/adafruit/Adafruit_CircuitPython_MiniMQTT)
+
+Optionally, if you want to send to remote syslog:
+* [syslog_handler](https://github.com/chrisgilldc/circuitpython_syslog_handler)
+
+### Fonts
+Place the fonts directory from the repo into _device_/fonts
+
 ### Hardware
+System has been built and tested with the following hardware:
+* Metro M4 Airlift
+* 64x32 RGB LED Matrix
+* AW9523 GPIO Expander
+* US-100 ultrasonic rangefinder
+* VL53L1X IR rangefinder
 
-I build the system with the parts below. You may be able to swap out some of these components, but no guarantee.
+It *may* work on other hardware configurations that are equivilent, but I haven't tested them and make no guarantees.
 
-| Item | Description | Source | Part # |
-| --- | --- | --- | --- |
-| Metro M4 Airlift | Microcontroller| Adafruit | [4000](https://www.adafruit.com/product/4000) |
-| 64x32 RGB LED Matrix @ 4mm pitch | Display | Adafruit | [4886](https://www.adafruit.com/product/4886) |
-| Matrix Shield | Display interface | Adafruit | [2601](https://www.adafruit.com/product/2601) |
-| AW9523 GPIO Expander | Additional GPIO | Adafruit | [4886](https://www.adafruit.com/product/4886) |
-| US-100 | Ultrasonic Rangefinder | Adafruit | [4019](https://www.adafruit.com/product/4019) |
-| VL53L1X | Laser Rangefinder | Adafruit | [3967](https://www.adafruit.com/product/3967) |
-| 5V4A Switching Supply | Power Supply | Adafruit | [1466](https://www.adafruit.com/product/1466) |
-| 2.1mm DC Barrel jack | Panel Power Jack | Adafruit | [610](https://www.adafruit.com/product/610) |
-| QT/Qwiic JST SH 4-pin to Male Headers | I2C Board Connectors | Adafruit | [4209](https://www.adafruit.com/product/4209) |
-| 5-pin DIN plug | Remote sensor cables | Parts Express | [092-150](https://www.parts-express.com/Rean-NYS322-5-Pin-DIN-Plug-092-150) |
-| 5-pin DIN female chassis connector | Remote sensor ports | Parts Express | [092-154](https://www.parts-express.com/Rean-NYS325-5-Pin-DIN-Female-Chassis-Connector-092-154) |
+Details on assembly, including models for 3d printing enclosures can be found here.
 
 ### Configuration
 
