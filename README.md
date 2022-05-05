@@ -49,15 +49,15 @@ Details on assembly, including models for 3d printing enclosures can be found he
 Configuration is handled in a dict at the beginning of code.py. It includes the following options. Defaults in bold.
 
 #### General
-| Option | Required? | Valid Options | Units | Description |
-| --- | --- | --- | --- | --- |
-| units | No | **'metric'**, 'imperial' | N/A | Sets units to use for other options and display. |
-| sensor_pacing | No | float | seconds | Time between sonic sensor firings. This should be tuned so that echos from one sensor doesn't interfere with another - exact timing will depend on the geometry of your garage. |
-| bay | Yes | ... | N/A | Sub-dict with information about the parking bay. See below. |
-| sensors | Yes | ... | N/A | Sensor name with sub-dict of sensor options. See below. |
-| network | No | True/False | N/A | Enable networking, yes or no. Defaults to False |
-| ssid | Yes if Network is True | str | N/A | SSID of WiFi network to use | 
-| psk | Yes if Network is True | str | N/A | Pre-Shared Key of WiFi network to use |
+| Option        | Required?              | Valid Options            | Units   | Description                                                                                                                                                                     |
+|---------------|------------------------|--------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| units         | No                     | **'metric'**, 'imperial' | N/A     | Sets units to use for other options and display.                                                                                                                                |
+| sensor_pacing | No                     | float                    | seconds | Time between sonic sensor firings. This should be tuned so that echos from one sensor doesn't interfere with another - exact timing will depend on the geometry of your garage. |
+| bay           | Yes                    | ...                      | N/A     | Sub-dict with information about the parking bay. See below.                                                                                                                     |
+| sensors       | Yes                    | ...                      | N/A     | Sensor name with sub-dict of sensor options. See below.                                                                                                                         |
+| network       | No                     | True/False               | N/A     | Enable networking, yes or no. Defaults to False                                                                                                                                 |
+| ssid          | Yes if Network is True | str                      | N/A     | SSID of WiFi network to use                                                                                                                                                     | 
+| psk           | Yes if Network is True | str                      | N/A     | Pre-Shared Key of WiFi network to use                                                                                                                                           |
 
 #### Bay Options
 Dimensions for the parking bay. All units are either in centimeters or inches, depending on the master units setting.
