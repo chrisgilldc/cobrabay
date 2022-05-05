@@ -198,7 +198,7 @@ class CobraBay:
         # Queue up outbound messages for processing. By default, the Network class will not
         # send data that hasn't changed, so we can queue it up here without care.
         self._outbound_messages.append(dict(topic='device_connectivity', message=self._device_state))
-        self._outbound_messages.append(dict(topic='device_mem', message=mem_free()))
+        self._outbound_messages.append(dict(topic='device_mem', message=(mem_free() / 1024)))
         self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state))
         # Poll the network, send any outbound messages there for MQTT publication.
         network_data = self._network.poll(self._outbound_messages)
