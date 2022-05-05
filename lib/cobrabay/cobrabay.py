@@ -97,9 +97,9 @@ class CobraBay:
         self._logger.info('CobraBay: Connecting to network...')
         # Create Network object.
         self._network = Network(
-            system_id=config['global']['system_id'],
-            bay=(self._bay),  # Pass a ref to the bay object. Multiple bays may be supported later.
-            homeassistant=config['global']['homeassistant']
+            system_name = config['global']['system_name'],
+            bay = (self._bay),  # Pass a ref to the bay object. Multiple bays may be supported later.
+            homeassistant = config['global']['homeassistant']
         )
         # Connect to the network.
         self._network.connect()
@@ -197,7 +197,7 @@ class CobraBay:
         self._network.reconnect()
         # Queue up outbound messages for processing. By default, the Network class will not
         # send data that hasn't changed, so we can queue it up here without care.
-        self._outbound_messages.append(dict(topic='device_state', message=self._device_state))
+        self._outbound_messages.append(dict(topic='device_connectivity', message=self._device_state))
         self._outbound_messages.append(dict(topic='device_mem', message=mem_free()))
         self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state))
         # Poll the network, send any outbound messages there for MQTT publication.
