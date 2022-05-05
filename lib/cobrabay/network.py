@@ -3,7 +3,9 @@
 #
 # Connects to the network to report bay status and take various commands.
 ####
+import time
 
+from .version import __version__
 import board
 import busio
 import microcontroller
@@ -17,7 +19,8 @@ import adafruit_logging as logging
 
 
 class Network:
-    def __init__(self, system_id, bay, homeassistant=False):
+    def __init__(self, system_name, bay, homeassistant=False):
+
         # Create the logger.
         self._logger = logging.getLogger('cobrabay')
         self._logger.info('Network: Initializing...')
@@ -30,11 +33,12 @@ class Network:
 
         # Convert the system_id to lower case and use that.
         # Making everything in MQTT all lower-case just saves headache.
-        self._system_id = system_id.lower()
+        self._system_name = system_name
         # Bay name
         self._bay_name = bay.name
         # Set homeassistant integration state.
         self._homeassistant = homeassistant
+        self._bay = bay
 
         # Current device state. Will get updated every time we're polled.
         self._device_state = 'unknown'
@@ -52,6 +56,7 @@ class Network:
         # Create ESP object
         spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
         self._esp = adafruit_esp32spi.ESP_SPIcontrol(spi, esp32_cs, esp32_ready, esp32_reset)
+        self._mac_address = "".join([f"{i:X}" for i in self._esp.MAC_address_actual])
 
         # Set the Socket' library's interface to this ESP instance.
         socket.set_interface(self._esp)
@@ -73,27 +78,76 @@ class Network:
             port=secrets['mqtt']['port'],
             username=secrets['mqtt']['user'],
             password=secrets['mqtt']['password'],
-            client_id=self._system_id
+            client_id=self._system_name.lower()
         )
 
         # Define topic reference.
         self._topics = {
-            'device_state': {'topic': 'cobrabay/device/' + self._system_id + '/state', 'ha_type': 'binary_sensor',
-                             'previous_state': {}},
-            'device_mem': {'topic': 'cobrabay/device/' + self._system_id + '/mem', 'ha_type': 'sensor',
-                           'previous_state': {}},
-            'device_command': {'topic': 'cobrabay/device/' + self._system_id + '/set',
-                               'callback': self._cb_device_command},
-            'bay_occupied': {'topic': 'cobrabay/' + self._bay_name + '/occupied', 'ha_type': 'binary_sensor',
-                             'previous_state': None},
-            'bay_state': {'topic': 'cobrabay/' + self._bay_name + '/state', 'ha_type': 'sensor',
-                             'previous_state': None},
-            'bay_position': {'topic': 'cobrabay/' + self._bay_name + '/position', 'ha_type': 'sensor',
-                          'previous_state': {}},
-            'bay_sensors': {'topic': 'cobrabay/' + self._bay_name + '/sensors', 'ha_type': 'sensor',
-                            'previous_state': {}},
-            'bay_command': {'topic': 'cobrabay/' + self._bay_name + '/set', 'ha_type': 'select',
-                            'callback': self._cb_bay_command}
+            'device_connectivity': {
+                'topic': 'cobrabay/' + self._mac_address + '/connectivity',
+                'previous_state': {},
+                'ha_discovery': {
+                    'name': '{} Connectivity'.format(self._system_name),
+                    'type': 'binary_sensor',
+                    'entity': 'connectivity',
+                    'class': 'connectivity'
+                }
+            },
+            'device_mem': {
+                'topic': 'cobrabay/' + self._mac_address + '/mem',
+                'previous_state': {},
+                'ha_discovery': {
+                    'type': 'sensor',
+                    'entity': 'memory_free'
+                }
+            },
+            'device_command': {
+                'topic': 'cobrabay/' + self._mac_address + '/set',
+                'callback': self._cb_device_command,
+                # 'ha_discovery': {
+                #     'type': 'select'
+                # }
+            },
+            'bay_occupied': {
+                'topic': 'cobrabay/' + self._bay_name + '/occupied',
+                'previous_state': None,
+                'ha_discovery': {
+                    'type': 'binary_sensor',
+                    'entity': 'occupied',
+                    'class': 'occupancy'
+                }
+            },
+            'bay_state': {
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/state',
+                'previous_state': None,
+                'ha_discovery': {
+                    'type': 'sensor',
+                    'entity': 'state'
+                }
+            },
+            'bay_position': {
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/position',
+                'ha_type': 'sensor',
+                'previous_state': {
+                    'type': 'sensor',
+                    'entity': 'position'
+                }
+            },
+            'bay_sensors': {
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/sensors',
+                'previous_state': {},
+                'ha_discovery': {
+                    'type': 'sensor',
+                    'entity': 'sensors'
+                }
+            },
+            'bay_command': {
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/set',
+                # 'ha_discovery': {
+                #     'type': 'select'
+                # },
+                'callback': self._cb_bay_command
+            }
         }
 
         # For every topic that has a callback, add it.
@@ -103,8 +157,7 @@ class Network:
                 self._mqtt.add_topic_callback(self._topics[item]['topic'], self._topics[item]['callback'])
         # Create last will, goes to the device topic.
         self._logger.info("Network: Setting up last will.")
-        self._mqtt.will_set(self._topics['device_state']['topic'], 'off')
-
+        self._mqtt.will_set(self._topics['device_connectivity']['topic'], 'off')
         self._logger.info('Network: Initialization complete.')
 
     # Topic Callbacks
@@ -115,7 +168,8 @@ class Network:
         try:
             message = json.loads(raw_message)
         except:
-            self._logger.error("Network: Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
+            self._logger.error(
+                "Network: Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
             # Ignore the error itself, plow through.
             return False
 
@@ -189,7 +243,7 @@ class Network:
             send = True
         if send:
             self._topics[topic]['previous_state'] = message
-            if isinstance(message,dict):
+            if isinstance(message, dict):
                 message = json.dumps(message)
             self._mqtt.publish(self._topics[topic]['topic'], message)
 
@@ -219,18 +273,19 @@ class Network:
     def _connect_wifi(self):
         if self._esp.is_connected:
             raise UserWarning("Already connected. Recommended to explicitly disconnect first.")
-        try_counter = 0
-        while not self._esp.is_connected and try_counter < 5:
+        connect_attempts = 0
+        while not self._esp.is_connected:
             try:
                 self._esp.connect_AP(self.secrets["ssid"], self.secrets["password"])
             except RuntimeError as e:
-                if try_counter >= 5:
-                    self._logger.error('Network: Failed to connect to AP after five attempts.')
-                    raise IOError("Could not connect to AP." + e)
-                try_counter += 1
-                continue
+                    connect_attempts += 1
+                    sleep_time = 30 * connect_attempts
+                    self._logger.error('Network: Could not connect to AP. Made {} attempts. Sleeping for {}s'.
+                                       format(connect_attempts,sleep_time))
+                    time.sleep(sleep_time)
+                    continue
 
-        self._logger.info("Network: Connected to {} (RSSI: {})".format(str(self._esp.ssid,"utf-8"),self._esp.rssi))
+        self._logger.info("Network: Connected to {} (RSSI: {})".format(str(self._esp.ssid, "utf-8"), self._esp.rssi))
         self._logger.info("Network: Have IP: {}".format(self._esp.pretty_ip(self._esp.ip_address)))
         return True
 
@@ -248,7 +303,10 @@ class Network:
                 self._mqtt.subscribe(self._topics[item]['topic'])
         # Send a discovery message and an online notification.
         self._logger.info('Network: Sending online message')
-        self._mqtt.publish(self._topics['device_state']['topic'], 'on')
+        print("Triggering Home Assistant Discovery...")
+        if self._homeassistant:
+            self._ha_discovery()
+        self._mqtt.publish(self._topics['device_connectivity']['topic'], 'on')
 
         return True
 
@@ -306,3 +364,43 @@ class Network:
             input_range = -1 * (min_rssi - max_rssi)
             output_range = levels - 1
             return floor((self._esp.rssi - min_rssi) * (output_range / input_range))
+
+    def _ha_discovery(self):
+        # Build the device JSON to include in other updates.
+        self._device_info = dict(
+            name=self._system_name,
+            identifiers=[self._mac_address],
+            suggested_area='Garage',
+            sw_version=str(__version__)
+        )
+
+        print("Device JSON: {}".format(self._device_info))
+
+        # Process the topics.
+        for item in self._topics:
+            if 'ha_discovery' in self._topics[item]:
+                self._ha_create(item)
+
+    def _ha_create(self, mqtt_item):
+        print("Got MQTT Item: {}".format(mqtt_item))
+        # Go get the details from the main topics dict.
+        ha_config = self._topics[mqtt_item]['ha_discovery']
+        config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'],self._mac_address,ha_config['entity'])
+        config_dict = {
+            'name': mqtt_item,
+            'device': self._device_info,
+            'state_topic': self._topics[mqtt_item]['topic'],
+            'unique_id': self._mac_address + '.' + ha_config['entity'],
+        }
+        # Optional parameters
+        for par in ('device_class', 'icon','unit_of_measurement', 'payload_on','payload_off'):
+            try:
+                config_dict[par] = ha_config[par]
+            except KeyError:
+                pass
+
+        # Send it!
+        print("Sending binary_sensor discovery...")
+        print(json.dumps(config_dict))
+        result = self._mqtt.publish(config_topic,json.dumps(config_dict))
+        print(result)
