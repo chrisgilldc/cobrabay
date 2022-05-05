@@ -90,7 +90,9 @@ class Network:
                     'name': '{} Connectivity'.format(self._system_name),
                     'type': 'binary_sensor',
                     'entity': 'connectivity',
-                    'class': 'connectivity'
+                    'device_class': 'connectivity',
+                    'payload_on': 'online',
+                    'payload_off': 'offline'
                 }
             },
             'device_mem': {
@@ -98,11 +100,14 @@ class Network:
                 'previous_state': {},
                 'ha_discovery': {
                     'type': 'sensor',
-                    'entity': 'memory_free'
+                    'name': 'Available Memory',
+                    'entity': 'memory_free',
+                    'unit_of_measurement': 'kB'
+                    'availability_topic':
                 }
             },
             'device_command': {
-                'topic': 'cobrabay/' + self._mac_address + '/set',
+                'topic': 'cobrabay/' + self._mac_address + '/cmd',
                 'callback': self._cb_device_command,
                 # 'ha_discovery': {
                 #     'type': 'select'
@@ -113,6 +118,8 @@ class Network:
                 'previous_state': None,
                 'ha_discovery': {
                     'type': 'binary_sensor',
+                    'availability_topic': 'bay_state',
+                    'name': 'Bay Occupied',
                     'entity': 'occupied',
                     'class': 'occupancy'
                 }
@@ -122,6 +129,7 @@ class Network:
                 'previous_state': None,
                 'ha_discovery': {
                     'type': 'sensor',
+                    'name': 'Bay State',
                     'entity': 'state'
                 }
             },
@@ -130,7 +138,8 @@ class Network:
                 'ha_type': 'sensor',
                 'previous_state': {
                     'type': 'sensor',
-                    'entity': 'position'
+                    'entity': 'position',
+                    'name': 'Bay Position'
                 }
             },
             'bay_sensors': {
@@ -138,11 +147,12 @@ class Network:
                 'previous_state': {},
                 'ha_discovery': {
                     'type': 'sensor',
+                    'name': 'Bay Sensors',
                     'entity': 'sensors'
                 }
             },
             'bay_command': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/set',
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/cmd',
                 # 'ha_discovery': {
                 #     'type': 'select'
                 # },
@@ -157,7 +167,7 @@ class Network:
                 self._mqtt.add_topic_callback(self._topics[item]['topic'], self._topics[item]['callback'])
         # Create last will, goes to the device topic.
         self._logger.info("Network: Setting up last will.")
-        self._mqtt.will_set(self._topics['device_connectivity']['topic'], 'off')
+        self._mqtt.will_set(self._topics['device_connectivity']['topic'], 'offline')
         self._logger.info('Network: Initialization complete.')
 
     # Topic Callbacks
@@ -306,7 +316,7 @@ class Network:
         print("Triggering Home Assistant Discovery...")
         if self._homeassistant:
             self._ha_discovery()
-        self._mqtt.publish(self._topics['device_connectivity']['topic'], 'on')
+        self._mqtt.publish(self._topics['device_connectivity']['topic'], 'online')
 
         return True
 
@@ -343,8 +353,9 @@ class Network:
         # if message is not None:
         #     self._mqtt.publish(self._topics['device_state']['topic'], message)
         # else:
-        # Make the Device Off and the Bay Offline. This is because device is a binary_sensor and bay is a sensor.
-        self._mqtt.publish(self._topics['device_state']['topic'], 'off')
+        # When disconnecting, mark the device and the bay as unavailable.
+        self._mqtt.publish(self._topics['device_state']['topic'], 'offline')
+        self._mqtt.publish(self._topics['bay_state']['topic'], 'offline')
         self._mqtt.publish(self._topics['bay_state']['topic'], 'offline')
         # Disconnect from broker
         self._mqtt.disconnect()
@@ -374,8 +385,6 @@ class Network:
             sw_version=str(__version__)
         )
 
-        print("Device JSON: {}".format(self._device_info))
-
         # Process the topics.
         for item in self._topics:
             if 'ha_discovery' in self._topics[item]:
@@ -387,7 +396,8 @@ class Network:
         ha_config = self._topics[mqtt_item]['ha_discovery']
         config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'],self._mac_address,ha_config['entity'])
         config_dict = {
-            'name': mqtt_item,
+            'name': ha_config['name'],
+            'object_id': self._system_name.replace(" ","").lower() + "_" + mqtt_item,
             'device': self._device_info,
             'state_topic': self._topics[mqtt_item]['topic'],
             'unique_id': self._mac_address + '.' + ha_config['entity'],
