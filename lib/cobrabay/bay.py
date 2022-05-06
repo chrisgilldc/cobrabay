@@ -38,6 +38,7 @@ class Bay:
         # Initial previous range.
         self._previous_range = 1000000
         self._motion_type = None
+        self._bay_position = {}
 
         # Make sure the lateral zones are sorted by distance.
         self._config['lateral'] = sorted(self._config['lateral'], key=lambda x: x['intercept_range'])
@@ -164,12 +165,7 @@ class Bay:
 
     @property
     def occupied(self):
-        if self._bay_state in ('occupied','vacant'):
-            return 'on'
-        if self._bay_state == 'unavailable':
-            return 'unknown'
-        else:
-            return 'off'
+        return self._bay_occupied
 
     @property
     def position(self):
