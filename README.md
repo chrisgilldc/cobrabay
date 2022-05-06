@@ -81,41 +81,87 @@ Dimensions for the parking bay. All units are either in centimeters or inches, d
 | echo | hcsr04 | Yes | int | N/A | Pin to listen for echo on. |
 | timeout | hcsr04 | Yes | float | seconds | How long to wait for the echo. |
 
-#### MQTT Topics
+## MQTT Topics
 
 The system uses MQTT to communicate out and get signals and commands to enter various modes. Two conceptual entities are
 available, a device, representing the entire system, and a bay, representing a specific parking space. Currently only
 one bay per device is supported, this may change in the future.
 
-The following topics are created, with 'state' topics reporting device state and set topics taking in commands.
-* cobrabay/device/<system_id>/state
-* cobrabay/device/<system_id>/set
-* cobrabay/<bay_id>/state
-* cobrabay/<bay_id>/set
 
-Commands are formatted 
+### Device Sensors
+Device-level sensors are reported under 'cobrabay/_MAC_/_Sensor_'.
 
-##### States
-A Device can have the following states:
+**Connectivity**
+
+Topic: '/cobrabay/_MAC_/connectivity'
 * online - Device is online and functioning
-* offline - Device is not connected to the network, not working. This is also the device's last-will, in case it goes offline unexecptedly.
+* offline - Device is not connected to the network, not working.
 
-A Device can accept the following commands:
+**Note:** This topic is also the last-will for the device. If Connectivity goes to offline, it can be safely assumed that all other topics are unavailable. 
 
-| Command | Options                                     | Action | 
-| --- |---------------------------------------------| --- |
-| reset | None                                        | Perform a soft reset of the whole system |
-| rescan_sensors | None                                        | Rescan the defined sensors |
+**Memory**
+
+Topic: '/cobrabay/_MAC_/mem'
+
+Available memory on the device, in kilobytes. Largely useful in debugging where we can wander into MemoryExceptions.
+
+### Device Commands
+
+A Device can accept the following commands through the topic 'cobrabay/_MAC_/cmd'
+
+| Command        | Options                                     | Action                                                                                                | 
+|----------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| reset          | None                                        | Perform a soft reset of the whole system                                                              |
+| rescan_sensors | None                                        | Rescan the defined sensors                                                                            |
 | display_sensor | sensor: *sensor_id*<br />timeout: *seconds* | Display reading from *sensor_id* on the display for *timeout* seconds. Timeout defaults to 360s (5m). | 
+| discover       | None                                        | Recalculate discovery and resend to Home Assistant.                                                   |
 
-A Bay can have the following states:
+### Bay Sensors
+Bay sensors are reported as a child of the device, under '/cobrabay/_MAC_/_bay_name_/_sensor_'
 
-* occupied - A vehicle is in the bay
-* vacant - A vehicle is not in the bay
+**Occupied**
+Current occupancy of the bay.
+Topic: '/cobrabay/_MAC_/_bay_name_/occupied'
+* on - Vehicle has been positively identified in the bay
+* off - No vehicle identified in the bay
+
+Note that the system presumes unoccupied as the default state, and will thus err on the side of false negatives rather than false positives.
+
+**State**
+
+Current operating state of the bay.
+
+Topic: 'cobrabay/_MAC_/_bay_name_/state'
+
+Will be on of the following:
+* ready - Bay is idle and ready to enter a command mode
 * docking - In the process of docking
 * undocking - In the process of undocking
-* verifying -
+* verifying - In the process of verifying.
 * unavailable - Bay is not able to operate due to an issue. Likely missing/offline sensors.
+
+**Position**
+
+Topic: 'cobrabay/_MAC_/_bay_name_/position'
+
+Reports the position 'quality' of the bay if bay is occupied.
+
+**Sensors**
+
+Reports the most recent sensor readings for this bay.
+
+
+
+A pr*ogression of sensors would look like this:*
+
+| | Bay Occupancy | Bay State |
+| --- | --- | --- |
+| No vehicle | 'ready' | 'off' |
+| Vehicle approaches to park | 'docking' | 'off' |
+| Vehicle stops briefly | 'docking' | 'off' |
+| Vehicle fully parked. | 'ready' | 'on' |
+
+### Bay Commands
 
 | Command | Action |
 | --- | --- |
@@ -124,6 +170,10 @@ A Bay can have the following states:
 | complete | Mark the docking as complete based on an external criteria |
 | abort | Abort a running docking or undocking. |
 | verify | Check occupancy of bay and update status. |
+
+
+
+
 
 # Future Enhancements
 Not-quite-bugs:
