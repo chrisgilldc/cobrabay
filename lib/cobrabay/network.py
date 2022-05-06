@@ -20,7 +20,10 @@ import adafruit_logging as logging
 
 class Network:
     def __init__(self, system_name, bay, homeassistant=False):
-
+        print("Dumping bay object...")
+        print(bay)
+        print(dir(bay))
+        print(bay.position)
         # Create the logger.
         self._logger = logging.getLogger('cobrabay')
         self._logger.info('Network: Initializing...')
@@ -103,18 +106,17 @@ class Network:
                     'name': 'Available Memory',
                     'entity': 'memory_free',
                     'unit_of_measurement': 'kB'
-                    'availability_topic':
                 }
             },
             'device_command': {
                 'topic': 'cobrabay/' + self._mac_address + '/cmd',
-                'callback': self._cb_device_command,
+                'callback': self._cb_device_command
                 # 'ha_discovery': {
                 #     'type': 'select'
                 # }
             },
             'bay_occupied': {
-                'topic': 'cobrabay/' + self._bay_name + '/occupied',
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/occupied',
                 'previous_state': None,
                 'ha_discovery': {
                     'type': 'binary_sensor',
@@ -408,9 +410,20 @@ class Network:
                 config_dict[par] = ha_config[par]
             except KeyError:
                 pass
+        # If this isn't device connectivity itself, make the entity depend on device connectivity
+        config_dict['availability_topic'] = self._topics['device_connectivity']['topic']
+
+        # If we need to create bay sensors,
+        if mqtt_item == 'bay_sensors':
+            pass
 
         # Send it!
         print("Sending binary_sensor discovery...")
         print(json.dumps(config_dict))
         result = self._mqtt.publish(config_topic,json.dumps(config_dict))
         print(result)
+
+        # sensor.tester_state:
+        # icon: mdi:test - tube
+        # templates:
+        # rgb_color: "if (state === 'on') return [251, 210, 41]; else return [54, 95, 140];"
