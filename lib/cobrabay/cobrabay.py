@@ -93,6 +93,8 @@ class CobraBay:
 
         # Create master bay object for defined docking bay
         self._bay = Bay(self.config['bay'], self._sensors.sensor_state())
+        # Run a verify to get some initial values.
+        self.verify()
 
         self._logger.info('CobraBay: Connecting to network...')
         # Create Network object.
