@@ -16,17 +16,17 @@ from adafruit_esp32spi import adafruit_esp32spi
 import adafruit_minimqtt.adafruit_minimqtt as MQTT
 from math import floor
 import adafruit_logging as logging
+from .units import Units
 
 
 class Network:
-    def __init__(self, system_name, bay, homeassistant=False):
-        print("Dumping bay object...")
-        print(bay)
-        print(dir(bay))
-        print(bay.position)
+    def __init__(self, config, bay):
+        # Save the config
+        self._config = config
         # Create the logger.
         self._logger = logging.getLogger('cobrabay')
         self._logger.info('Network: Initializing...')
+
         try:
             from secrets import secrets
             self.secrets = secrets
@@ -34,13 +34,19 @@ class Network:
             self._logger.error('Network: No secrets.py file, cannot get connection details.')
             raise
 
-        # Convert the system_id to lower case and use that.
-        # Making everything in MQTT all lower-case just saves headache.
-        self._system_name = system_name
+        self._system_name = config['global']['system_name']
         # Bay name
         self._bay_name = bay.name
         # Set homeassistant integration state.
-        self._homeassistant = homeassistant
+        try:
+            self._homeassistant = config['global']['homeassistant']
+        except:
+            self._homeassistant = False
+
+        # Create a unit converter
+        self.u = Units(self._config['global']['units'])
+
+        # Save the bay object.
         self._bay = bay
 
         # Current device state. Will get updated every time we're polled.
@@ -123,7 +129,9 @@ class Network:
                     'availability_topic': 'bay_state',
                     'name': 'Bay Occupied',
                     'entity': 'occupied',
-                    'class': 'occupancy'
+                    'class': 'occupancy',
+                    'payload_on': 'occupied',
+                    'payload_off': 'vacant'
                 }
             },
             'bay_state': {
@@ -139,18 +147,20 @@ class Network:
                 'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/position',
                 'ha_type': 'sensor',
                 'previous_state': {
-                    'type': 'sensor',
-                    'entity': 'position',
-                    'name': 'Bay Position'
+                    'type': 'multisensor',
+                    'list': bay.position,
                 }
             },
             'bay_sensors': {
                 'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/sensors',
                 'previous_state': {},
                 'ha_discovery': {
-                    'type': 'sensor',
-                    'name': 'Bay Sensors',
-                    'entity': 'sensors'
+                    'type': 'multisensor',
+                    'list': bay.sensor_list,  # Dict from which separate sensors will be created.
+                    'aliases': config['sensors'],  # Dict with list alias names.
+                    'icon': 'mdi:ruler',
+                    # Conveniently, we use the same string identifier for units as Home Assistant!
+                    'unit_of_measurement': self.u.mode_unit()
                 }
             },
             'bay_command': {
@@ -193,6 +203,9 @@ class Network:
             self._logger.error("Network: Received MQTT reset request. Doing it!")
             self.disconnect('requested_reset')
             microcontroller.reset()
+        elif message['cmd'] == 'rediscover':
+            # Rerun Home Assistant discovery
+            self._ha_discovery()
         elif message['cmd'] == 'display_sensor':
             # If displaying a sensor, have to pass up other parameters as well.
             # Remove the command, since we already have that, then put the rest into the options field.
@@ -356,7 +369,7 @@ class Network:
         #     self._mqtt.publish(self._topics['device_state']['topic'], message)
         # else:
         # When disconnecting, mark the device and the bay as unavailable.
-        self._mqtt.publish(self._topics['device_state']['topic'], 'offline')
+        self._mqtt.publish(self._topics['device_connectivity']['topic'], 'offline')
         self._mqtt.publish(self._topics['bay_state']['topic'], 'offline')
         self._mqtt.publish(self._topics['bay_state']['topic'], 'offline')
         # Disconnect from broker
@@ -389,11 +402,56 @@ class Network:
 
         # Process the topics.
         for item in self._topics:
+            # Only create items that have HA Discovery defined!
             if 'ha_discovery' in self._topics[item]:
-                self._ha_create(item)
+                # Multisensor isn't a pure Home Assistant type, but a special type here that will build multiple sensors
+                # out of a list.
+                if self._topics[item]['ha_discovery']['type'] == 'multisensor':
+                    self._ha_create_multisensor(item)
+                else:
+                    self._ha_create(item)
+
+    # Special method for creating multiple sensors for a list. Should probably merge this with the main _ha_create
+    # at some point.
+    def _ha_create_multisensor(self, mqtt_item):
+        # Pull over some variables to shortem them for convenience.
+        # HA discovery config.
+        ha_config = self._topics[mqtt_item]['ha_discovery']
+        print(ha_config)
+        # Iterate the provided list, create a sensor for each one.
+        for item in ha_config['list']:
+            print("Multisensor now processing: {}".format(item))
+            config_topic = "homeassistant/sensor/cobrabay-{}/{}/config".format(self._mac_address, item)
+            config_dict = {
+                'object_id': self._system_name.replace(" ", "").lower() + "_" + mqtt_item,
+                # Use the master device info.
+                'device': self._device_info,
+                'unique_id': self._mac_address + '.' + item,
+                # Each sensor gets the same state topic.
+                'state_topic': self._topics[mqtt_item]['topic'],
+                'value_template': '{{{{ value_json.{} }}}}'.format(item)
+            }
+            try:
+                # Use the item name a key to get an alias from the alias dict.
+                config_dict['name'] = ha_config['aliases'][item]['alias']
+            except:
+                # Otherwise just default it.
+                config_dict['name'] = item
+
+            # Optional parameters for sensors. All sensors in the group need to be the same, which really,
+            # they should be.
+            for par in ('device_class', 'icon', 'unit_of_measurement'):
+                try:
+                    config_dict[par] = ha_config[par]
+                except KeyError:
+                    pass
+
+            # Send the discovery!
+            print("Target topic: {}".format(config_topic))
+            print("Payload q: {}".format(json.dumps(config_dict)))
+            self._mqtt.publish(config_topic, json.dumps(config_dict))
 
     def _ha_create(self, mqtt_item):
-        print("Got MQTT Item: {}".format(mqtt_item))
         # Go get the details from the main topics dict.
         ha_config = self._topics[mqtt_item]['ha_discovery']
         config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'],self._mac_address,ha_config['entity'])
@@ -410,20 +468,15 @@ class Network:
                 config_dict[par] = ha_config[par]
             except KeyError:
                 pass
+
         # If this isn't device connectivity itself, make the entity depend on device connectivity
         config_dict['availability_topic'] = self._topics['device_connectivity']['topic']
 
-        # If we need to create bay sensors,
-        if mqtt_item == 'bay_sensors':
-            pass
-
         # Send it!
-        print("Sending binary_sensor discovery...")
-        print(json.dumps(config_dict))
-        result = self._mqtt.publish(config_topic,json.dumps(config_dict))
-        print(result)
+        self._mqtt.publish(config_topic,json.dumps(config_dict))
 
         # sensor.tester_state:
         # icon: mdi:test - tube
         # templates:
         # rgb_color: "if (state === 'on') return [251, 210, 41]; else return [54, 95, 140];"
+
