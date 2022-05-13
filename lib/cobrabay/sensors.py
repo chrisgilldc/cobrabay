@@ -14,6 +14,7 @@ from adafruit_aw9523 import AW9523
 from adafruit_vl53l1x import VL53L1X
 from .synthsensor import SynthSensor
 import adafruit_logging as logging
+from units import Unit
 
 
 class Sensors:
@@ -175,17 +176,16 @@ class Sensors:
             # Sensor can be wonky and return 0, even when it doesn't strictly timeout.
             # Catch these and return None instead.
             if distance > 0:
-                return distance
+                return Unit(distance,'cm')
             else:
                 return None
         if self._sensors[sensor]['type'] in ('vl53', 'synth'):
             distance = self._sensors[sensor]['obj'].distance
-            return distance
+            return Unit(distance,'cm')
 
     # External method to allow a rescan of the sensors.
     def rescan(self):
         self._init_sensors(self.config['sensors'])
-
 
     def vl53(self, action):
         if action not in ('start', 'stop'):
@@ -199,7 +199,9 @@ class Sensors:
                     if action == 'stop':
                         self._sensors[sensor]['obj'].stop_ranging()
 
-    def sweep(self, sensor_type=['all']):
+    def sweep(self, sensor_type=None):
+        if sensor_type is None:
+            sensor_type = ['all']
         sensor_data = {}
         for sensor in self._sensors:
             if self._sensors[sensor]['type'] in sensor_type or 'all' in sensor_type:

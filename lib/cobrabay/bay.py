@@ -21,6 +21,7 @@
 ####
 import time
 import adafruit_logging as logging
+from units import Unit
 
 class Bay:
     # Initialization. Takes in the Bay component from the overall config.
@@ -144,6 +145,7 @@ class Bay:
         if range is None:
             return (None, None)
         # If detected distance is beyond the reliable detection distance, return 'BR'
+        print("Comparing ranges: {} and {}".format(range,self._config['range']['dist_max']))
         if range > self._config['range']['dist_max']:
             return ('BR', None)
         else:
@@ -173,21 +175,7 @@ class Bay:
 
     @property
     def motion(self):
-        return self._motion_type
-
-    @motion.setter
-    def motion(self,type):
-        if type in ('dock','undock',None):
-            self._motion_type = type
-        if type == 'dock':
-            self._bay_state = 'docking'
-        if type == 'undock':
-            self._bay_state = 'undocking'
-        if type is None:
-            if self._bay_state == 'docking':
-                self._bay_state = 'occupied'
-            if self._bay_state == 'undocking':
-                self._bay_state == 'vacant'
+        return self._motion
 
     # Called when there are new sensor values to be interpreted against the bay's parameters.
     def update(self, sensor_values):
@@ -200,17 +188,18 @@ class Bay:
         else:
             range, range_pct = self._adjusted_range(sensor_values[self._config['range']['sensor']])
             # If range is actually a value we can evaluate, figure out range change.
+            # Bay position is still holding the previous range
             if not isinstance(range,str):
                 # Evaluate for vehicle movement. We allow for a little wobble.
-                if abs(self._previous_range - range) > 1:
+                if abs(self._bay_position['range'] - range) > 1:
                     self._last_move_time = time.monotonic()
-                    if self._previous_range > range:
-                        self._bay_state = 'docking'
-                    if self._previous_range < range:
-                        self._bay_state = 'undocking'
+                    if self._bay_position['range'] > range:
+                        self._motion = 'approaching'
+                    if self._bay_position['range'] < range:
+                        self._motion = 'receding'
                 else:
                     if time.monotonic() - self._last_move_time >= self._config['park_time']:
-                        self.motion(None)
+                        self._motion = 'still'
 
         # Update the bay position dict.
         self._bay_position = dict(
@@ -232,13 +221,14 @@ class Bay:
         if range == 'BR':
             # Since the reliable range should cover most of the parking space, if we go beyond range, this means we're
             # not occupied.
-            self._bay_state = 'vacant'
+            self._bay_occupied = 'vacant'
         elif range >= self._config['range']['dist_stop'] * 3:
             # If detected range over three times stopping distance is hitting *something*, but probably not a vehicle.
-            self._bay_state = 'vacant'
+            self._bay_occupied = 'vacant'
         else:
-            # Otherwise we can't figure it out. Do some extra logic with the lateral sensors here....later.
-            self._bay_state = 'unknown'
+            # Something is close enough to the range sensor, likely a vehicle! Should also add some extra logic here
+            # with the lateral sensors.
+            self._bay_occupied = 'occupied'
 
         # Get the lateral sensors, even if we're not evaluating them (yet).
         lateral = self._lateral(sensor_values)

@@ -26,7 +26,7 @@ CONVERSION_TABLE = {
     }
 }
 
-class Units:
+class UnitsConverter:
     def __init__(self,mode):
         self._logger = logging.getLogger('cobrabay')
         if mode not in ("metric","imperial"):
@@ -36,19 +36,7 @@ class Units:
         self._mode = mode
 
     # General-purpose converter.
-    def convert(self,value, input_unit,output_unit):
-        if input_unit not in CONVERSION_TABLE:
-            raise ValueError("{} is not a supported unit.".format(input_unit))
-        if output_unit not in CONVERSION_TABLE[input_unit]:
-            raise ValueError("Cannot make a conversion from {} to {}. (Be serious!)".format(input_unit,output_unit))
-        if output_unit is 'ft':
-            # Special handling to make a foot-inches dict. First convert to inches.
-            ( val_inches, unit ) = self.convert(value,input_unit,'in')
-            val_feet = floor(val_inches/12)
-            val_inches = val_inches % 12
-            return ({'ft': val_feet, 'in': val_inches}, output_unit)
-        else:
-            return (value * CONVERSION_TABLE[input_unit][output_unit], output_unit)
+
 
     # Standardize a sensor to the system's mode.
     # By default sensors are measured in centimeters.
@@ -82,3 +70,43 @@ class Units:
         else:
             return 'cm'
 
+class Unit:
+    def __init__(self, value: , unit: str) -> object:
+        self._value = value
+        self._unit = unit
+
+    @property
+    def unit(self):
+        return self._unit
+
+    @property
+    def value(self):
+        return self._value
+
+    @unit.setter
+    def unit(self,unit):
+        if unit not in CONVERSION_TABLE:
+            raise ValueError("Unit {} is not supported.".format(unit))
+        self._unit = unit
+
+    @value.setter
+    def value(self,value):
+        if not isinstance(value, (int,float)):
+            raise ValueError("Unit value must be int or float, {} input".format(type(value)))
+        self._value = value
+
+    def convert(self,output_unit):
+        if output_unit in CONVERSION_TABLE[self._unit]:
+            return Unit(self.value * CONVERSION_TABLE[self.unit][output_unit], output_unit)
+        else:
+            raise ValueError("Cannot make a conversion from {} to {}. (Be serious!)".format(self._unit,output_unit))
+
+    def _ft_in(self):
+        # Special handling to make a foot-inches dict. First convert to inches.
+        (val_inches, unit) = self.convert('in')
+        val_feet = floor(val_inches / 12)
+        val_inches = val_inches % 12
+        if val_inches == 0:
+            return Unit(val_feet, 'ft'), None
+        else:
+            return Unit(val_feet, 'ft'), Unit(val_inches, 'in')

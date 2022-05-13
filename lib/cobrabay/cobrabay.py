@@ -14,6 +14,7 @@ from .bay import Bay
 from .display import Display
 from .network import Network
 from .sensors import Sensors
+from .units import Units
 
 
 class CobraBay:
@@ -51,6 +52,7 @@ class CobraBay:
 
         # Basic checks passed. Good enough! Assign it.
         self.config = config
+        print(self.config['global'])
 
         # Set watchdog pin high to keep the TPL5110 from restarting the system.
         # Holding the delay pin high will prevent restart. If that ever drops, the TPL5110
@@ -65,20 +67,14 @@ class CobraBay:
             self._logger.info("New Watchdog pin state: {}".format(watchdog_pin.value))
 
         # General Processing
-        # All internal work is done in metric.
-        # Convert dimensions from inches to cm if necessary.
-        if self.config['global']['units'] == 'imperial':
-            self._logger.info('CobraBay: Converting to Imperial')
-            # Range distance options to convert
-            for option in ('dist_max', 'dist_stop'):
-                self.config['bay']['range'][option] = self.config['bay']['range'][option] * 2.54
-            # Lateral option distance options to convert
-            for index in range(len(self.config['bay']['lateral'])):
-                for option in ('intercept_range', 'ok_spread', 'warn_spread', 'red_spread'):
-                    self.config['bay']['lateral'][index][option] = self.config['bay']['lateral'][index][option] * 2.54
-        else:
-            # If we're defaulting to metric, make sure it's explicit set for later testing.
-            self.config['units'] = 'metric'
+        # Create a unit converter object.
+        u = Units(self.config['global']['units'])
+        for option in ('dist_max', 'dist_stop'):
+            self.config['bay']['range'][option] = u.normalize(self.config['bay']['range'][option])
+        # Lateral option distance options to convert
+        for index in range(len(self.config['bay']['lateral'])):
+            for option in ('intercept_range', 'ok_spread', 'warn_spread', 'red_spread'):
+                self.config['bay']['lateral'][index][option] = u.normalize(self.config['bay']['lateral'][index][option])
 
         # Initial device state
         self._device_state = 'on'
@@ -99,10 +95,10 @@ class CobraBay:
         self._logger.info('CobraBay: Connecting to network...')
         # Create Network object.
         self._network = Network(
-            system_name = config['global']['system_name'],
+            config = config,  # Network object needs the whole config, since parts (esp. HA discovery) needs to reference multiple parts of the config.
             bay = (self._bay),  # Pass a ref to the bay object. Multiple bays may be supported later.
-            homeassistant = config['global']['homeassistant']
         )
+
         # Connect to the network.
         self._network.connect()
 
@@ -143,7 +139,7 @@ class CobraBay:
     def _process_commands(self,command_stack):
         # Might have more than one command in the stack, process each of them.
         for command in command_stack:
-            if self._bay.state not in ('moving', 'docking', 'undocking'):
+            if self._bay.state not in ('docking', 'undocking'):
                 if 'rescan_sensors' in command['cmd']:
                     self._sensors.rescan()
                 if 'dock' in command['cmd']:
@@ -225,7 +221,6 @@ class CobraBay:
             if self._display_sensor['sensor'] is not None:
                 sensor_value=self._sensors.get_sensor(self._display_sensor['sensor'])
                 # If timeout has expired, blank it.
-                #print("Timer: {}\nTimeout: {}".format(time.monotonic() - self._display_sensor['start'],self._display_sensor['timeout']))
                 if ( time.monotonic() - self._display_sensor['start'] ) > self._display_sensor['timeout']:
                     self._display_sensor = { 'sensor': None }
                     self._logger.info("Ending sensor display mode.")
@@ -235,9 +230,6 @@ class CobraBay:
                 self._display.display_generic(system_state,sensor_value)
             except:
                 pass
-
-    def display_sensor(self):
-        pass
 
     # Start sensors and display to guide parking.
     def dock(self):
