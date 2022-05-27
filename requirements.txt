@@ -7,3 +7,4 @@ adafruit-circuitpython-hcsr04
 adafruit-circuitpython-register
 adafruit-circuitpython-vl53l1x
 Adafruit-Blinka
+https://github.com/chrisgilldc/circuitpython-units
