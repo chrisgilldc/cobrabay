@@ -14,14 +14,13 @@ from .bay import Bay
 from .display import Display
 from .network import Network
 from .sensors import Sensors
-from .units import Units
+from unit import Unit
 
 
 class CobraBay:
     def __init__(self, config):
         # Set up Syslog if enabled.
         self._logger = logging.getLogger('cobrabay')
-
 
         self._logger.info('CobraBay: CobraBay Initializing...')
         mem_before = mem_free()
@@ -66,15 +65,14 @@ class CobraBay:
             watchdog_pin.value = True
             self._logger.info("New Watchdog pin state: {}".format(watchdog_pin.value))
 
-        # General Processing
-        # Create a unit converter object.
-        u = Units(self.config['global']['units'])
+        # Convert inputs to Units.
         for option in ('dist_max', 'dist_stop'):
-            self.config['bay']['range'][option] = u.normalize(self.config['bay']['range'][option])
+            self.config['bay']['range'][option] = Unit(self.config['bay']['range'][option])
         # Lateral option distance options to convert
         for index in range(len(self.config['bay']['lateral'])):
             for option in ('intercept_range', 'ok_spread', 'warn_spread', 'red_spread'):
-                self.config['bay']['lateral'][index][option] = u.normalize(self.config['bay']['lateral'][index][option])
+                self.config['bay']['lateral'][index][option] = \
+                    Unit(self.config['bay']['lateral'][index][option])
 
         # Initial device state
         self._device_state = 'on'
@@ -241,15 +239,7 @@ class CobraBay:
         done = False
         aborted = False
         while done is False:
-            # Check the network for additional commands.
-            network_data = self._network_handler()
-            # Check for a complete or abort command.
-            if 'command' in network_data:
-                if network_data['command'] == 'complete':
-                    done = True
-                if network_data['command'] == 'abort':
-                    done = True
-                    aborted = True
+
             try:
                 sensor_data = self._sensors.sweep()
             except Exception as e:
@@ -265,6 +255,22 @@ class CobraBay:
                 self._display.display_dock(self._bay.position)
             except Exception as e:
                 self._logger.error("Got display error during docking: {}".format(e))
+
+            # Prep status messages to go out to the network.
+            self._outbound_messages.append(dict(topic='bay_sensors', message=sensor_data, repeat=True))
+            self._outbound_messages.append(dict(topic='bay_position', message=self._bay.position, repeat=True))
+            self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=True))
+            self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=True))
+
+            # Check the network for additional commands, and push out messages.
+            network_data = self._network_handler()
+            # Check for a complete or abort command.
+            if 'command' in network_data:
+                if network_data['command'] == 'complete':
+                    done = True
+                if network_data['command'] == 'abort':
+                    done = True
+                    aborted = True
 
             # If the bay now considers itself occupied (ie: complete), then we complete.
             if self._bay.state == 'occupied':
