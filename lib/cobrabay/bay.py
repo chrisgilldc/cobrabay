@@ -21,7 +21,8 @@
 ####
 import time
 import adafruit_logging as logging
-from units import Unit
+from unit import Unit
+from unit import NaN
 
 class Bay:
     # Initialization. Takes in the Bay component from the overall config.
@@ -42,6 +43,8 @@ class Bay:
         self._bay_position = {}
 
         # Make sure the lateral zones are sorted by distance.
+        for lat in self._config['lateral']:
+            print(dir(lat['intercept_range']))
         self._config['lateral'] = sorted(self._config['lateral'], key=lambda x: x['intercept_range'])
 
         # Create starting state for all areas, so nothing returns empty.
@@ -142,16 +145,32 @@ class Bay:
     # Create an adjusted range
     def _adjusted_range(self, range = None):
         # We never really should get this, but if we do, turn around and return None back, beacuse, WTF?
-        if range is None:
-            return (None, None)
+        if range is None or isinstance(range,NaN):
+            return NaN("Sensor was none, this is likely a bug.")
         # If detected distance is beyond the reliable detection distance, return 'BR'
         print("Comparing ranges: {} and {}".format(range,self._config['range']['dist_max']))
         if range > self._config['range']['dist_max']:
-            return ('BR', None)
+            return NaN("Beyond range")
         else:
             adjusted_range = range - self._config['range']['dist_stop']
-            range_pct = ( adjusted_range / self._config['range']['dist_max'] )
-            return ( adjusted_range, range_pct )
+            return adjusted_range
+
+    # Get range and range percentage out of the sensor values.
+    def _range_values(self, sensor_values):
+        # Find out if the range sensor exists in the sensor values dict
+        if self._config['range']['sensor'] not in sensor_values:
+            range = None
+            range_pct = None
+        else:
+            # Get the adjusted range of the sensor.
+            range = self._adjusted_range(sensor_values[self._config['range']['sensor']])
+            # When adjusted range can't get a reasonable value, it will return a NaN object. So if it's *not* a NaN,
+            # we can calculate a percentage properly.
+            if not isinstance(range,NaN):
+                range_pct = range / self._config['range']['dist_max']
+            else:
+                range_pct = NaN("Range did not return usable value")
+        return range, range_pct
 
     @property
     def sensor_list(self):
@@ -183,23 +202,21 @@ class Bay:
             raise OSError("Bay is not available")
 
         # Get range and range percentage. Make this none if we don't have the range sensor.
-        if self._config['range']['sensor'] not in sensor_values:
-            range, range_pct = (None, None)
-        else:
-            range, range_pct = self._adjusted_range(sensor_values[self._config['range']['sensor']])
-            # If range is actually a value we can evaluate, figure out range change.
-            # Bay position is still holding the previous range
-            if not isinstance(range,str):
-                # Evaluate for vehicle movement. We allow for a little wobble.
-                if abs(self._bay_position['range'] - range) > 1:
-                    self._last_move_time = time.monotonic()
-                    if self._bay_position['range'] > range:
-                        self._motion = 'approaching'
-                    if self._bay_position['range'] < range:
-                        self._motion = 'receding'
-                else:
-                    if time.monotonic() - self._last_move_time >= self._config['park_time']:
-                        self._motion = 'still'
+
+
+
+
+        if range >= 0:
+            # Evaluate for vehicle movement. We allow for a little wobble.
+            if abs(self._bay_position['range'] - range) > 1:
+                self._last_move_time = time.monotonic()
+                if self._bay_position['range'] > range:
+                    self._motion = 'approaching'
+                if self._bay_position['range'] < range:
+                    self._motion = 'receding'
+            else:
+                if time.monotonic() - self._last_move_time >= self._config['park_time']:
+                    self._motion = 'still'
 
         # Update the bay position dict.
         self._bay_position = dict(
@@ -213,12 +230,9 @@ class Bay:
         if self._bay_state == 'unavailable':
             raise OSError("Bay is not available")
 
-        if self._config['range']['sensor'] not in sensor_values:
-            range, range_pct = (None, None)
-        else:
-            range, range_pct = self._adjusted_range(sensor_values[self._config['range']['sensor']])
+        range, range_pct = self._range_values(sensor_values)
 
-        if range == 'BR':
+        if isinstance(range,NaN):
             # Since the reliable range should cover most of the parking space, if we go beyond range, this means we're
             # not occupied.
             self._bay_occupied = 'vacant'
