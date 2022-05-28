@@ -16,7 +16,8 @@ from adafruit_esp32spi import adafruit_esp32spi
 import adafruit_minimqtt.adafruit_minimqtt as MQTT
 from math import floor
 import adafruit_logging as logging
-from .units import Units
+from unit import Unit
+from unit import NaN
 
 
 class Network:
@@ -42,9 +43,6 @@ class Network:
             self._homeassistant = config['global']['homeassistant']
         except:
             self._homeassistant = False
-
-        # Create a unit converter
-        self.u = Units(self._config['global']['units'])
 
         # Save the bay object.
         self._bay = bay
@@ -158,9 +156,9 @@ class Network:
                     'type': 'multisensor',
                     'list': bay.sensor_list,  # Dict from which separate sensors will be created.
                     'aliases': config['sensors'],  # Dict with list alias names.
-                    'icon': 'mdi:ruler',
+                    'icon': 'mdi:ruler'
                     # Conveniently, we use the same string identifier for units as Home Assistant!
-                    'unit_of_measurement': self.u.mode_unit()
+                    # 'unit_of_measurement':
                 }
             },
             'bay_command': {
