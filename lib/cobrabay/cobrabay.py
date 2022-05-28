@@ -15,7 +15,7 @@ from .display import Display
 from .network import Network
 from .sensors import Sensors
 from unit import Unit
-
+from unit import NaN
 
 class CobraBay:
     def __init__(self, config):
@@ -51,7 +51,6 @@ class CobraBay:
 
         # Basic checks passed. Good enough! Assign it.
         self.config = config
-        print(self.config['global'])
 
         # Set watchdog pin high to keep the TPL5110 from restarting the system.
         # Holding the delay pin high will prevent restart. If that ever drops, the TPL5110
@@ -66,11 +65,12 @@ class CobraBay:
             self._logger.info("New Watchdog pin state: {}".format(watchdog_pin.value))
 
         # Convert inputs to Units.
+        self.config['bay']['park_time'] = Unit(self.config['bay']['park_time'])
         for option in ('dist_max', 'dist_stop'):
             self.config['bay']['range'][option] = Unit(self.config['bay']['range'][option])
         # Lateral option distance options to convert
         for index in range(len(self.config['bay']['lateral'])):
-            for option in ('intercept_range', 'ok_spread', 'warn_spread', 'red_spread'):
+            for option in ('intercept_range', 'dist_ideal', 'ok_spread', 'warn_spread', 'red_spread'):
                 self.config['bay']['lateral'][index][option] = \
                     Unit(self.config['bay']['lateral'][index][option])
 
@@ -152,7 +152,6 @@ class CobraBay:
                     if 'options' in command:
                         # Make sure all the options exist.
                         options = command['options']
-                        print(options)
                         try:
                             sensor = options['sensor']
 
