@@ -14,7 +14,7 @@ from adafruit_aw9523 import AW9523
 from adafruit_vl53l1x import VL53L1X
 from .synthsensor import SynthSensor
 import adafruit_logging as logging
-from units import Unit
+from unit import Unit, NaN
 
 
 class Sensors:
@@ -163,7 +163,7 @@ class Sensors:
         else:
             raise ValueError("Not a valid sensor type")
 
-    # Provides a uniform interface to access different types of sensors.
+    # Provides a uniform interface to access different types of sensors. Returns a Unit
     def _read_sensor(self, sensor):
         if self._sensors[sensor]['type'] == 'hcsr04':
             try:
@@ -174,14 +174,14 @@ class Sensors:
             except OSError:
                 raise
             # Sensor can be wonky and return 0, even when it doesn't strictly timeout.
-            # Catch these and return None instead.
+            # Catch these and return a NaN.
             if distance > 0:
-                return Unit(distance,'cm')
+                return Unit(distance, 'cm')
             else:
-                return None
+                return NaN('No sensor response')
         if self._sensors[sensor]['type'] in ('vl53', 'synth'):
             distance = self._sensors[sensor]['obj'].distance
-            return Unit(distance,'cm')
+            return Unit(distance, 'cm')
 
     # External method to allow a rescan of the sensors.
     def rescan(self):
@@ -207,7 +207,7 @@ class Sensors:
             if self._sensors[sensor]['type'] in sensor_type or 'all' in sensor_type:
                 # Get the raw sensor value.
                 try:
-                    value = self._read_sensor(sensor)
+                    reading = self._read_sensor(sensor)
                 # An OSError is raised when it literally can't be read. That means it's probably missing.
                 except OSError as e:
                     self._logger.debug('Sensors: Could not read sensor ' + sensor)
@@ -217,25 +217,27 @@ class Sensors:
                 if self._sensors[sensor]['type'] == 'hcsr04':
                     # Reject times when the sensor returns none or zero, because that's almost certainly a glitch. 
                     # You should never really be right up against the sensor!
-                    if value != 0 and value is not None:
+                    if reading != 0 and reading is not None:
                         # If queue is full, remove the oldest element.
                         if len(self._sensors[sensor]['queue']) >= self._sensors[sensor]['avg']:
                             del self._sensors[sensor]['queue'][0]
                         # Now add the new value and average.
                         self._sensors[sensor]['queue'].append(value)
-                        # Calculate the average
-                        avg_value = sum(self._sensors[sensor]['queue']) / self._sensors[sensor]['avg']
+                        # Calculate the average. These *must* be in the same unit, but we know HCSR04s are always in
+                        # "cm"
+                        avg_value = sum(
+                            [i._value for i in self._sensors[sensor]['queue']]
+                            / self._sensors[sensor]['avg']
+                        )
+                        # avg_value = sum(self._sensors[sensor]['queue']) / self._sensors[sensor]['avg']
                         # Send the average back.
-                        sensor_data[sensor] = avg_value
+                        sensor_data[sensor] = Unit(avg_value,"cm")
                     # Now ensure wait before the next check to prevent ultrasound interference.
                     time.sleep(self.config['sensor_pacing'])
                 else:
                     # For non-ultrasound sensors, send it directly back.
-                    sensor_data[sensor] = value
+                    sensor_data[sensor] = reading
 
-                # Only return non-none values
-                if value is not None:
-                    sensor_data[sensor] = value
         return sensor_data
 
     # Utility function to just list all the sensors found.
@@ -247,18 +249,14 @@ class Sensors:
         else:
             raise ValueError("Sensor name not found.")
 
-    def get_sensor(self,sensor_name):
-        print("Get sensor for: {}".format(sensor_name))
+    def get_sensor(self, sensor_name):
         if sensor_name not in self._sensors.keys():
-            print("Sensor name does not exist.")
-            return None
+            raise ValueError("Sensor does not exist.")
         if self._sensor_state[sensor_name] == 'unavailable':
-            print("Sensor not available!")
-            return 'unavailable'
+            return NaN('Sensor unavailable')
         if self._sensors[sensor_name]['type'] == 'vl53':
             print("Sensor type VL53")
             self._sensors[sensor_name]['obj'].start_ranging()
             value = self._read_sensor(sensor_name)
             self._sensors[sensor_name]['obj'].stop_ranging()
             return value
-        return None
