@@ -20,6 +20,7 @@ Raspberry Pi OS Lite 64-bit. Any other Pi with Raspberry Pi OS should work.
 * Need a library for the AW9523
 * [hcsr04sensor](https://github.com/alaudet/hcsr04sensor)
 * [vl53l1x-python](https://github.com/pimoroni/vl53l1x-python)
+* [paho-mqtt](https://github.com/eclipse/paho.mqtt.python)
 * [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix)
 
 ### CobraBay

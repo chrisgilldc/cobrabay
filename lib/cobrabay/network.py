@@ -5,8 +5,6 @@
 ####
 from time import sleep
 
-from gc import mem_free, collect
-
 from .version import __version__
 import board
 from busio import SPI
@@ -14,20 +12,12 @@ from microcontroller import reset as mc_reset
 from json import loads as json_loads
 from json import dumps as json_dumps
 from digitalio import DigitalInOut
-mem_before = mem_free()
 import adafruit_esp32spi.adafruit_esp32spi_socket as socket
-mem_socket = mem_before - mem_free()
-mem_before = mem_free()
 from adafruit_esp32spi import adafruit_esp32spi
-mem_esp32spi = mem_before - mem_free()
-mem_before = mem_free()
-import adafruit_minimqtt.adafruit_minimqtt as MQTT
-mem_mqtt = mem_before - mem_free()
+# import adafruit_minimqtt.adafruit_minimqtt as MQTT
+import paho.mqtt.client as mqtt
 from math import floor
 import adafruit_logging as logging
-
-print("Network memory use\n\tESP32 Socket: {}\n\tESP32 SPI: {}\n\tMQTT: {}".format(mem_socket,mem_esp32spi,mem_mqtt))
-del mem_mqtt, mem_before, mem_socket, mem_esp32spi
 
 # from unit import Unit
 # from unit import NaN
@@ -66,38 +56,41 @@ class Network:
 
         # List for commands to send upward.
         self._upward_commands = []
-
-        # Set up the on-board ESP32 pins. These are correct for the M4 Airlift. Check library reference for others.
-        esp32_cs = DigitalInOut(board.ESP_CS)
-        esp32_ready = DigitalInOut(board.ESP_BUSY)
-        esp32_reset = DigitalInOut(board.ESP_RESET)
-
-        # Create ESP object
-        spi = SPI(board.SCK, board.MOSI, board.MISO)
-        self._esp = adafruit_esp32spi.ESP_SPIcontrol(spi, esp32_cs, esp32_ready, esp32_reset)
-        self._mac_address = "".join([f"{i:X}" for i in self._esp.MAC_address_actual])
-
-        # Set the Socket' library's interface to this ESP instance.
-        socket.set_interface(self._esp)
-
-        # Setup ESP32
-        if self._esp.status in (adafruit_esp32spi.WL_NO_SHIELD, adafruit_esp32spi.WL_NO_MODULE):
-            self._logger.error('Network: No ESP32 module found!')
-            raise IOError("No ESP32 module found!")
-        elif self._esp.status is not adafruit_esp32spi.WL_IDLE_STATUS:
-            # If ESP32 isn't idle, reset it.
-            self._logger.warning('Network: ESP32 not idle. Resetting.')
-            self._esp.reset()
+        #
+        # # Set up the on-board ESP32 pins. These are correct for the M4 Airlift. Check library reference for others.
+        # esp32_cs = DigitalInOut(board.ESP_CS)
+        # esp32_ready = DigitalInOut(board.ESP_BUSY)
+        # esp32_reset = DigitalInOut(board.ESP_RESET)
+        #
+        # # Create ESP object
+        # spi = SPI(board.SCK, board.MOSI, board.MISO)
+        # self._esp = adafruit_esp32spi.ESP_SPIcontrol(spi, esp32_cs, esp32_ready, esp32_reset)
+        # self._mac_address = "".join([f"{i:X}" for i in self._esp.MAC_address_actual])
+        #
+        # # Set the Socket' library's interface to this ESP instance.
+        # socket.set_interface(self._esp)
+        #
+        # # Setup ESP32
+        # if self._esp.status in (adafruit_esp32spi.WL_NO_SHIELD, adafruit_esp32spi.WL_NO_MODULE):
+        #     self._logger.error('Network: No ESP32 module found!')
+        #     raise IOError("No ESP32 module found!")
+        # elif self._esp.status is not adafruit_esp32spi.WL_IDLE_STATUS:
+        #     # If ESP32 isn't idle, reset it.
+        #     self._logger.warning('Network: ESP32 not idle. Resetting.')
+        #     self._esp.reset()
 
         # Setup MQTT Client
-        MQTT.set_socket(socket, self._esp)
-        self._mqtt = MQTT.MQTT(
-            broker=secrets['mqtt']['broker'],
-            port=secrets['mqtt']['port'],
-            username=secrets['mqtt']['user'],
-            password=secrets['mqtt']['password'],
-            client_id=self._system_name.lower()
-        )
+        # MQTT.set_socket(socket, self._esp)
+        # self._mqtt = MQTT.MQTT(
+        #     broker=secrets['mqtt']['broker'],
+        #     port=secrets['mqtt']['port'],
+        #     username=secrets['mqtt']['user'],
+        #     password=secrets['mqtt']['password'],
+        #     client_id=self._system_name.lower()
+        # )
+        mqtt_client = mqtt.Client()
+        mqtt_client.on_connect = self._on_connect
+        mqtt_client.on_message = self._on_message
 
         # Unit of Measure to use for distances, based on the global setting.
         dist_uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
@@ -184,6 +177,10 @@ class Network:
             }
         }
 
+
+        self._logger.info('Network: Initialization complete.')
+
+    def _on_connect(self):
         # For every topic that has a callback, add it.
         for item in self._topics:
             if 'callback' in self._topics[item]:
@@ -192,7 +189,9 @@ class Network:
         # Create last will, goes to the device topic.
         self._logger.info("Network: Setting up last will.")
         self._mqtt.will_set(self._topics['device_connectivity']['topic'], 'offline')
-        self._logger.info('Network: Initialization complete.')
+
+    def _on_message(self):
+        pass
 
     # Topic Callbacks
 
