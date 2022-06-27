@@ -26,10 +26,7 @@ Raspberry Pi OS Lite 64-bit. Any other Pi with Raspberry Pi OS should work.
 * Copy 'cobrabay' to _device_/lib/cobrabay
 * Copy 'code.py' to _device_/code.py
 
-### Libraries
-
-
-
+### OLD Libraries
 Place the following in _device_/lib/:
 * From the Circuitpython Library Bundle
   * adafruit_aw9523
