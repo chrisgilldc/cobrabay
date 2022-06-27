@@ -3,15 +3,33 @@
 
 ## Installing
 
-### CircuitPython
+### Platform
 
-* Update system to CircuitPython 7.2. This is the version tested on, future versions *should* work but have not been tested.
+This system was originally written for CircuitPython, with the intention of running on microcontrollers (ie: Metro M4). Due to
+memory-management issues, it has been converted to a standard Python application. It has been tested on a Pi 3+ with 
+Raspberry Pi OS Lite 64-bit. Any other Pi with Raspberry Pi OS should work.
+
+### System Configuration
+* Install OS
+* Configure network (Wifi or Ethernet, as appropriate)
+* Enable I2C
+
+
+### Required Libraries
+
+* Need a library for the AW9523
+* [hcsr04sensor](https://github.com/alaudet/hcsr04sensor)
+* [vl53l1x-python](https://github.com/pimoroni/vl53l1x-python)
+* [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix)
 
 ### CobraBay
 * Copy 'cobrabay' to _device_/lib/cobrabay
 * Copy 'code.py' to _device_/code.py
 
 ### Libraries
+
+
+
 Place the following in _device_/lib/:
 * From the Circuitpython Library Bundle
   * adafruit_aw9523
@@ -172,15 +190,14 @@ A pr*ogression of sensors would look like this:*
 | verify | Check occupancy of bay and update status. |
 
 
-
-
-
 # Future Enhancements
 Not-quite-bugs:
 * Get Syslog handler to attach to children.
 
-Features
+Sort of working but not done yet:
 * Home Assistant Discovery
+
+Features
 * Include NTP client so real timestamps can be included
 * Separate configuration into YAML
 * Add ability to load/reload/save configuration via MQTT commands

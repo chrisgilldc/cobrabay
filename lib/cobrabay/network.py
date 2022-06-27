@@ -3,21 +3,34 @@
 #
 # Connects to the network to report bay status and take various commands.
 ####
-import time
+from time import sleep
+
+from gc import mem_free, collect
 
 from .version import __version__
 import board
-import busio
-import microcontroller
-import json
+from busio import SPI
+from microcontroller import reset as mc_reset
+from json import loads as json_loads
+from json import dumps as json_dumps
 from digitalio import DigitalInOut
+mem_before = mem_free()
 import adafruit_esp32spi.adafruit_esp32spi_socket as socket
+mem_socket = mem_before - mem_free()
+mem_before = mem_free()
 from adafruit_esp32spi import adafruit_esp32spi
+mem_esp32spi = mem_before - mem_free()
+mem_before = mem_free()
 import adafruit_minimqtt.adafruit_minimqtt as MQTT
+mem_mqtt = mem_before - mem_free()
 from math import floor
 import adafruit_logging as logging
-from unit import Unit
-from unit import NaN
+
+print("Network memory use\n\tESP32 Socket: {}\n\tESP32 SPI: {}\n\tMQTT: {}".format(mem_socket,mem_esp32spi,mem_mqtt))
+del mem_mqtt, mem_before, mem_socket, mem_esp32spi
+
+# from unit import Unit
+# from unit import NaN
 
 
 class Network:
@@ -36,8 +49,7 @@ class Network:
             raise
 
         self._system_name = config['global']['system_name']
-        # Bay name
-        self._bay_name = bay.name
+
         # Set homeassistant integration state.
         try:
             self._homeassistant = config['global']['homeassistant']
@@ -61,7 +73,7 @@ class Network:
         esp32_reset = DigitalInOut(board.ESP_RESET)
 
         # Create ESP object
-        spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
+        spi = SPI(board.SCK, board.MOSI, board.MISO)
         self._esp = adafruit_esp32spi.ESP_SPIcontrol(spi, esp32_cs, esp32_ready, esp32_reset)
         self._mac_address = "".join([f"{i:X}" for i in self._esp.MAC_address_actual])
 
@@ -69,7 +81,6 @@ class Network:
         socket.set_interface(self._esp)
 
         # Setup ESP32
-
         if self._esp.status in (adafruit_esp32spi.WL_NO_SHIELD, adafruit_esp32spi.WL_NO_MODULE):
             self._logger.error('Network: No ESP32 module found!')
             raise IOError("No ESP32 module found!")
@@ -87,6 +98,9 @@ class Network:
             password=secrets['mqtt']['password'],
             client_id=self._system_name.lower()
         )
+
+        # Unit of Measure to use for distances, based on the global setting.
+        dist_uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
 
         # Define topic reference.
         self._topics = {
@@ -120,7 +134,7 @@ class Network:
                 # }
             },
             'bay_occupied': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/occupied',
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay.name + '/occupied',
                 'previous_state': None,
                 'ha_discovery': {
                     'type': 'binary_sensor',
@@ -133,7 +147,7 @@ class Network:
                 }
             },
             'bay_state': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/state',
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay.name + '/state',
                 'previous_state': None,
                 'ha_discovery': {
                     'type': 'sensor',
@@ -142,7 +156,7 @@ class Network:
                 }
             },
             'bay_position': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/position',
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay.name + '/position',
                 'ha_type': 'sensor',
                 'previous_state': {
                     'type': 'multisensor',
@@ -150,19 +164,19 @@ class Network:
                 }
             },
             'bay_sensors': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/sensors',
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay.name + '/sensors',
                 'previous_state': {},
                 'ha_discovery': {
                     'type': 'multisensor',
                     'list': bay.sensor_list,  # Dict from which separate sensors will be created.
                     'aliases': config['sensors'],  # Dict with list alias names.
-                    'icon': 'mdi:ruler'
+                    'icon': 'mdi:ruler',
                     # Conveniently, we use the same string identifier for units as Home Assistant!
-                    # 'unit_of_measurement':
+                    'unit_of_measurement': dist_uom
                 }
             },
             'bay_command': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay_name + '/cmd',
+                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay.name + '/cmd',
                 # 'ha_discovery': {
                 #     'type': 'select'
                 # },
@@ -186,7 +200,7 @@ class Network:
     def _cb_device_command(self, client, topic, raw_message):
         # Try to decode the JSON.
         try:
-            message = json.loads(raw_message)
+            message = json_loads(raw_message)
         except:
             self._logger.error(
                 "Network: Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
@@ -200,7 +214,7 @@ class Network:
             # For reset command, don't pass upward, just do it.
             self._logger.error("Network: Received MQTT reset request. Doing it!")
             self.disconnect('requested_reset')
-            microcontroller.reset()
+            mc_reset()
         elif message['cmd'] == 'rediscover':
             # Rerun Home Assistant discovery
             self._ha_discovery()
@@ -218,7 +232,7 @@ class Network:
     def _cb_bay_command(self, client, topic, raw_message):
         # Try to decode the JSON.
         try:
-            message = json.loads(raw_message)
+            message = json_loads(raw_message)
         except:
             self._logger.error("Network: Could not decode JSON from MQTT message '{}' on topic '{}'"
                                .format(topic, raw_message))
@@ -265,10 +279,24 @@ class Network:
         elif repeat is True:
             send = True
         if send:
+            attempts = 0
             self._topics[topic]['previous_state'] = message
             if isinstance(message, dict):
-                message = json.dumps(message)
-            self._mqtt.publish(self._topics[topic]['topic'], message)
+                message = json_dumps(message)
+            while True:
+                try:
+                    self._mqtt.publish(self._topics[topic]['topic'], message)
+                except RuntimeError:
+                    #  Have we run up
+                    if attempts >= 3:
+                        self._logger.error("MQTT Publish caught ESP32 Runtime Error. Resetting...")
+                        mc_reset()
+                    else: # Nope, not enough tries, wait and try again.
+                        sleep(0.1)
+                        attempts += 1
+                else:  # If we succeeded, break.
+                    break
+
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
@@ -305,7 +333,7 @@ class Network:
                     sleep_time = 30 * connect_attempts
                     self._logger.error('Network: Could not connect to AP. Made {} attempts. Sleeping for {}s'.
                                        format(connect_attempts,sleep_time))
-                    time.sleep(sleep_time)
+                    sleep(sleep_time)
                     continue
 
         self._logger.info("Network: Connected to {} (RSSI: {})".format(str(self._esp.ssid, "utf-8"), self._esp.rssi))
@@ -323,7 +351,14 @@ class Network:
         # Subscribe to all the appropriate topics
         for item in self._topics:
             if 'callback' in self._topics[item]:
-                self._mqtt.subscribe(self._topics[item]['topic'])
+                try:
+                    self._mqtt.subscribe(self._topics[item]['topic'])
+                except RuntimeError as e:
+                    self._logger.error("Caught error while subscribing: {}".format(e))
+                    # Reset everything!
+                    self._logger.error("Resetting entire system.")
+                    mc_reset()
+
         # Send a discovery message and an online notification.
         self._logger.info('Network: Sending online message')
         print("Triggering Home Assistant Discovery...")
@@ -446,8 +481,8 @@ class Network:
 
             # Send the discovery!
             print("Target topic: {}".format(config_topic))
-            print("Payload q: {}".format(json.dumps(config_dict)))
-            self._mqtt.publish(config_topic, json.dumps(config_dict))
+            print("Payload q: {}".format(json_dumps(config_dict)))
+            self._mqtt.publish(config_topic, json_dumps(config_dict))
 
     def _ha_create(self, mqtt_item):
         # Go get the details from the main topics dict.
@@ -471,7 +506,7 @@ class Network:
         config_dict['availability_topic'] = self._topics['device_connectivity']['topic']
 
         # Send it!
-        self._mqtt.publish(config_topic,json.dumps(config_dict))
+        self._mqtt.publish(config_topic,json_dumps(config_dict))
 
         # sensor.tester_state:
         # icon: mdi:test - tube

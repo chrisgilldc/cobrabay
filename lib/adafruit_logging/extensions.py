@@ -13,7 +13,6 @@ CircuitPython logging extension for logging to files
 
 from . import LoggingHandler
 
-__version__ = "0.0.0-auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_Logging.git"
 
 

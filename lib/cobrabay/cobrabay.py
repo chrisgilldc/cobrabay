@@ -1,21 +1,35 @@
 ####
 # Cobra Bay - Main
 ####
-import gc
+from gc import mem_free, collect
+collect()
+print("Memory free at Cobra Bay load: {}".format(mem_free()))
 
 import adafruit_logging as logging
-import digitalio
-import sys
-import time
-from gc import mem_free
+from digitalio import DigitalInOut, Direction
+from sys import exit
+from time import monotonic, sleep
+from microcontroller import reset as mc_reset
+print("Memory free at after standard loads: {}".format(mem_free()))
 
 # Import the other CobraBay classes
+mem_before = mem_free()
 from .bay import Bay
+mem_bay = mem_before - mem_free()
+mem_before = mem_free()
 from .display import Display
+mem_display = mem_before - mem_free()
+mem_before = mem_free()
 from .network import Network
+mem_network = mem_before - mem_free()
+mem_before = mem_free()
 from .sensors import Sensors
+mem_sensors = mem_before - mem_free()
 from unit import Unit
 from unit import NaN
+print("Memory use during loading:\n\tBay: {}\n\tDisplay: {}\n\tNetwork: {}\n\tSensors: {}".format(
+    mem_bay,mem_display,mem_network,mem_sensors
+))
 
 class CobraBay:
     def __init__(self, config):
@@ -23,21 +37,16 @@ class CobraBay:
         self._logger = logging.getLogger('cobrabay')
 
         self._logger.info('CobraBay: CobraBay Initializing...')
-        mem_before = mem_free()
-        gc.collect()
-        mem_after = mem_free()
-        self._logger.info('Available Memory: {}'.format(mem_after))
-        self._logger.info('Had been {} before collection. Recovered {}'.format(mem_before,mem_after-mem_before))
 
         # check for all basic options.
         for option in ('global', 'sensors', 'bay'):
             if option not in config:
                 self._logger.error('CobraBay: Configuration does not include required section: "' + option + '"')
-                sys.exit(1)
+                exit(1)
         # Make sure at least one sensor exists.
         if len(config) == 0:
             self._logger.info('CobraBay: No sensors configured!')
-            sys.exit(1)
+            exit(1)
         # Make sure sensors are assigned.
         if 'sensor' not in config['bay']['range']:
             self._logger.error('CobraBay: No range sensor assigned.')
@@ -57,8 +66,8 @@ class CobraBay:
         # will restart us.
         # Only set up watchdogging if a Watchdog pin is set.
         if 'watchdog_pin' in config['global']:
-            watchdog_pin = digitalio.DigitalInOut(eval("board.D{}".format(config['global']['watchdog_pin'])))
-            watchdog_pin.direction = digitalio.Direction.OUTPUT
+            watchdog_pin = DigitalInOut(eval("board.D{}".format(config['global']['watchdog_pin'])))
+            watchdog_pin.direction = Direction.OUTPUT
             self._logger.info(f"Current Watchdog pin state: {watchdog_pin.value}")
             self._logger.info("Setting high to keep watchdog from triggering.")
             watchdog_pin.value = True
@@ -90,6 +99,23 @@ class CobraBay:
         # Run a verify to get some initial values.
         self.verify()
 
+        self._logger.info('CobraBay: Creating display...')
+        # Create Display object
+        disp_mem_before = mem_free()
+        try:
+            self._display = Display(self.config)
+        except MemoryError as e:
+            self._logger.error('Display: Memory error while initializing display. Have {}'.format(mem_free()))
+            # self._logger.error(dir(e))
+            self._device_state = 'unknown'
+            # print("Resetting in 10s.")
+            # sleep(10)
+            # mc_reset()
+        else:
+            disp_mem_after = mem_free()
+            self._logger.debug("Display initialized. Used {} bytes. ({} to {})".
+                               format(disp_mem_before-disp_mem_after,disp_mem_before,disp_mem_after))
+
         self._logger.info('CobraBay: Connecting to network...')
         # Create Network object.
         self._network = Network(
@@ -118,19 +144,8 @@ class CobraBay:
             else:
                 self._logger.addHandler(self.syslog)
 
-        self._logger.info('CobraBay: Creating display...')
-        # Create Display object
-        disp_mem_before = gc.mem_free()
-        try:
-            self._display = Display(self.config)
-        except MemoryError as e:
-            self._logger.error('Display: Memory error while initializing display. Have {}'.format(gc.mem_free()))
-            # self._logger.error(dir(e))
-            self._device_state = 'unknown'
-        else:
-            disp_mem_after = gc.mem_free()
-            self._logger.debug("Display initialized. Used {} bytes. ({} to {}".
-                               format(disp_mem_before-disp_mem_after,disp_mem_before,disp_mem_after))
+
+        collect()
         self._logger.info('CobraBay: Initialization complete.')
 
     # Command processor. This is a method because it can get called from multiple loops.
@@ -177,7 +192,7 @@ class CobraBay:
                         self._display_sensor = {
                             'sensor': sensor,
                             'timeout': timeout,
-                            'start': time.monotonic()
+                            'start': monotonic()
                         }
             else:
                 # Only allow the abort or complete commands while a motion is in action. Complete takes precedence.
@@ -218,7 +233,7 @@ class CobraBay:
             if self._display_sensor['sensor'] is not None:
                 sensor_value=self._sensors.get_sensor(self._display_sensor['sensor'])
                 # If timeout has expired, blank it.
-                if ( time.monotonic() - self._display_sensor['start'] ) > self._display_sensor['timeout']:
+                if ( monotonic() - self._display_sensor['start'] ) > self._display_sensor['timeout']:
                     self._display_sensor = { 'sensor': None }
                     self._logger.info("Ending sensor display mode.")
             else:
@@ -237,32 +252,47 @@ class CobraBay:
         self._sensors.vl53('start')
         done = False
         aborted = False
+        i = 1
         while done is False:
-
+            self._logger.debug("{},1 - Start,{}".format(i,mem_free()))
+            collect()
+            self._logger.debug("{},1.5 - Post-Collect,{}".format(i, mem_free()))
             try:
                 sensor_data = self._sensors.sweep()
             except Exception as e:
                 self._logger.error('CobraBay: Could not get sensor data. Will sleep 5m and reset.')
                 self._logger.error('CobraBay: ' + e)
-                time.sleep(360)
+                sleep(360)
                 self._network.disconnect('resetting')
                 microcontroller.reset()
+            collect()
+            self._logger.debug("{},2 - After Sweep,{}".format(i,mem_free()))
+            # print("Sensor data during sweep ---")
+            # print(sensor_data)
             # Send the collected data to the bay object to interpret
             self._bay.update(sensor_data)
+            collect()
+            self._logger.debug("{},3 - After Bay,{}".format(i, mem_free()))
+            # print("Bay position ---")
+            # print(self._bay.position)
             # Display the current state of the bay.
-            try:
-                self._display.display_dock(self._bay.position)
-            except Exception as e:
-                self._logger.error("Got display error during docking: {}".format(e))
+            #try:
+            self._display.display_dock(self._bay.position)
+            collect()
+            self._logger.debug("{},4 - After Display,{}".format(i, mem_free()))
+            # except Exception as e:
+            #     self._logger.error("Got display error during docking: {}".format(e))
 
             # Prep status messages to go out to the network.
             self._outbound_messages.append(dict(topic='bay_sensors', message=sensor_data, repeat=True))
             self._outbound_messages.append(dict(topic='bay_position', message=self._bay.position, repeat=True))
-            self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=True))
-            self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=True))
+            self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=False))
+            self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=False))
 
             # Check the network for additional commands, and push out messages.
             network_data = self._network_handler()
+            collect()
+            self._logger.debug("{},5 - After Network,{}".format(i, mem_free()))
             # Check for a complete or abort command.
             if 'command' in network_data:
                 if network_data['command'] == 'complete':
@@ -275,6 +305,7 @@ class CobraBay:
             if self._bay.state == 'occupied':
                 self._logger.info("Received 'completion' message during docking. Finishing.")
                 done = True
+            i += 1
         # If an abort was called, do a verify.
         if aborted:
             self._logger.info("Docking aborted. Running verify to determine bay state.")

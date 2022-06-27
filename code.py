@@ -2,12 +2,19 @@
 # CobraBay
 ####
 
+from gc import mem_free
+
+print("Initial free memory: {}".format(mem_free()))
+
 # Release any previous displays.
 import displayio
 displayio.release_displays()
 
 # Initialize CobraBay object
 import cobrabay
+print("Memory after importing Cobrabay: {}".format(mem_free()))
+import sys
+print("Memory after importing sys: {}".format(mem_free()))
 
 # Find a default 'config.py' file.
 try:

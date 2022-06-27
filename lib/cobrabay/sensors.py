@@ -5,10 +5,10 @@
 ####
 
 import board
-import digitalio
-import sys
-import time
-import terminalio
+# import digitalio
+# import sys
+from time import sleep
+# import terminalio
 from adafruit_hcsr04 import HCSR04
 from adafruit_aw9523 import AW9523
 from adafruit_vl53l1x import VL53L1X
@@ -181,7 +181,9 @@ class Sensors:
                 return NaN('No sensor response')
         if self._sensors[sensor]['type'] in ('vl53', 'synth'):
             distance = self._sensors[sensor]['obj'].distance
-            return Unit(distance, 'cm')
+            dist_unit = Unit(distance,"cm")
+            #print("Returning unit: {} ({})".format(dist_unit,type(dist_unit)))
+            return dist_unit
 
     # External method to allow a rescan of the sensors.
     def rescan(self):
@@ -233,11 +235,14 @@ class Sensors:
                         # Send the average back.
                         sensor_data[sensor] = Unit(avg_value,"cm")
                     # Now ensure wait before the next check to prevent ultrasound interference.
-                    time.sleep(self.config['sensor_pacing'])
+                    sleep(self.config['sensor_pacing'])
                 else:
                     # For non-ultrasound sensors, send it directly back.
                     sensor_data[sensor] = reading
-
+        # Sensor data:
+        # print("Sweep returning sensor data:")
+        # for sd in sensor_data:
+        #     print("\tSensor: {}\tValue: {}\tType: {}".format(sd,sensor_data[sd]._value,type(sensor_data[sd])))
         return sensor_data
 
     # Utility function to just list all the sensors found.

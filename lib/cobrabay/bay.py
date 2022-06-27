@@ -19,7 +19,7 @@
 #   numbers of entries in the lateral list.
 #
 ####
-import time
+from time import monotonic
 import adafruit_logging as logging
 from unit import Unit
 from unit import NaN
@@ -39,20 +39,13 @@ class Bay:
         self._name = bay_config['name']
         # Initial previous range.
         self._previous_range = 1000000
-        self._motion_type = None
+        self._motion = 'still'
         self._bay_position = {}
 
         # Make sure the lateral zones are sorted by distance.
         for lat in self._config['lateral']:
             print(dir(lat['intercept_range']))
         self._config['lateral'] = sorted(self._config['lateral'], key=lambda x: x['intercept_range'])
-
-        # Create starting state for all areas, so nothing returns empty.
-        #self.state = []
-        #i = 1
-        #while i <= len(self._config['lateral']):
-        #    self.state.append({ 'size': 0, 'direction': 'N', 'status': 0 })
-        #    i += 1
 
         # Make a list of used sensors
         self._used_sensors = [self._config['range']['sensor']]
@@ -83,7 +76,7 @@ class Bay:
         return True
 
     def _lateralarea(self, area, sensors):
-        self._logger.debug('Bay: Checking lateral area ' + str(area))
+        # self._logger.debug('Bay: Checking lateral area ' + str(area))
         # Create a dictionary for the return values
         return_dict = {}
 
@@ -126,7 +119,7 @@ class Bay:
         
     # Process the lateral detection areas. These are in order, closest to furthest.
     def _lateral(self, sensor_values):
-        self._logger.debug('Bay: Checking lateral areas.')
+        # self._logger.debug('Bay: Checking lateral areas.')
         return_list = []
         for area in range(len(self._config['lateral'])):
             # Check if the sensor actually has a value.
@@ -148,7 +141,6 @@ class Bay:
         if range is None or isinstance(range,NaN):
             return NaN("Sensor was none, this is likely a bug.")
         # If detected distance is beyond the reliable detection distance, return 'BR'
-        print("Comparing ranges: {} and {}".format(range,self._config['range']['dist_max']))
         if range > self._config['range']['dist_max']:
             return NaN("Beyond range")
         else:
@@ -157,6 +149,7 @@ class Bay:
 
     # Get range and range percentage out of the sensor values.
     def _range_values(self, sensor_values):
+        range_sensor_name = self._config['range']['sensor']
         # Find out if the range sensor exists in the sensor values dict
         if self._config['range']['sensor'] not in sensor_values:
             range = None
@@ -169,6 +162,7 @@ class Bay:
             if not isinstance(range,NaN):
                 range_pct = range / self._config['range']['dist_max']
             else:
+                # print("\tRange is a NaN, can't compute range percentage")
                 range_pct = NaN("Range did not return usable value")
         return range, range_pct
 
@@ -201,22 +195,33 @@ class Bay:
         if self._bay_state == 'unavailable':
             raise OSError("Bay is not available")
 
-        # Get range and range percentage. Make this none if we don't have the range sensor.
+        # Get range and range percentage. This will return a Unit if it's actually valid, and a NaN object if it's something else
+        range, range_pct = self._range_values(sensor_values)
 
-
-
-
-        if range >= 0:
+        # Update the bay motion state if values are being returned.
+        if isinstance(range,Unit) and isinstance(range_pct,float):
             # Evaluate for vehicle movement. We allow for a little wobble.
-            if abs(self._bay_position['range'] - range) > 1:
-                self._last_move_time = time.monotonic()
-                if self._bay_position['range'] > range:
-                    self._motion = 'approaching'
-                if self._bay_position['range'] < range:
-                    self._motion = 'receding'
+            try:
+                position_change = self._bay_position['range'] - range
+                #print("Calculated abs range change: {}".format(position_change))
+            except TypeError:
+                pass
             else:
-                if time.monotonic() - self._last_move_time >= self._config['park_time']:
-                    self._motion = 'still'
+                if position_change > 1:
+                    self._last_move_time = monotonic()
+                    if self._bay_position['range'] > range:
+                        self._motion = 'approaching'
+                    if self._bay_position['range'] < range:
+                        self._motion = 'receding'
+                else:
+                    try:
+                        time_diff = monotonic() - self._last_move_time
+                    except AttributeError:
+                        time_diff = 0
+                    #print("Time difference: {}".format(time_diff))
+                    if self._config['park_time'] <= time_diff:
+                        self._motion = 'still'
+        #print("New motion state: {}".format(self._motion))
 
         # Update the bay position dict.
         self._bay_position = dict(
