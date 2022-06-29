@@ -17,9 +17,6 @@ Raspberry Pi OS Lite 64-bit. Any other Pi with Raspberry Pi OS should work.
 
 ### Required Libraries
 
-* Need a library for the AW9523
-* [hcsr04sensor](https://github.com/alaudet/hcsr04sensor)
-* [vl53l1x-python](https://github.com/pimoroni/vl53l1x-python)
 * [paho-mqtt](https://github.com/eclipse/paho.mqtt.python)
 * [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix)
 
@@ -27,9 +24,7 @@ Raspberry Pi OS Lite 64-bit. Any other Pi with Raspberry Pi OS should work.
 * Copy 'cobrabay' to _device_/lib/cobrabay
 * Copy 'code.py' to _device_/code.py
 
-### OLD Libraries
-Place the following in _device_/lib/:
-* From the Circuitpython Library Bundle
+Install the following libraries:
   * adafruit_aw9523
   * adafruit_bitmap_font
   * adafruit_display_shapes
@@ -38,9 +33,15 @@ Place the following in _device_/lib/:
   * adafruit_hcsr04
   * adafruit_register
   * adafruit_vl53l1x
-  
-* [adafruit_logging](https://github.com/adafruit/Adafruit_CircuitPython_Logging)
-* [adafruit_minimqtt](https://github.com/adafruit/Adafruit_CircuitPython_MiniMQTT)
+  * paho-mqtt
+
+To install modules:
+```
+pip3 install adafruit-circuitpython-aw9523 adafruit_circuitpython_bitmap_font \
+  adafruit_circuitpython_display_shapes adafruit_circuitpython_display_text \
+  adafruit_circuitpython_hcsr04 adafruit_circuitpython_vl53l1x \
+  paho-mqtt
+```
 
 Optionally, if you want to send to remote syslog:
 * [syslog_handler](https://github.com/chrisgilldc/circuitpython_syslog_handler)
