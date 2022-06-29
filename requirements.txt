@@ -2,9 +2,7 @@ adafruit-circuitpython-aw9523
 adafruit-circuitpython-bitmap-font
 adafruit-circuitpython-display-shapes
 adafruit-circuitpython-display-text
-adafruit-circuitpython-esp32spi
 adafruit-circuitpython-hcsr04
 adafruit-circuitpython-register
 adafruit-circuitpython-vl53l1x
 Adafruit-Blinka
-https://github.com/chrisgilldc/circuitpython-units
