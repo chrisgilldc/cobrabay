@@ -4,31 +4,21 @@
 # Connects to the network to report bay status and take various commands.
 ####
 from time import sleep
-
 from .version import __version__
-import board
-from busio import SPI
-from microcontroller import reset as mc_reset
 from json import loads as json_loads
 from json import dumps as json_dumps
-from digitalio import DigitalInOut
-import adafruit_esp32spi.adafruit_esp32spi_socket as socket
-from adafruit_esp32spi import adafruit_esp32spi
-# import adafruit_minimqtt.adafruit_minimqtt as MQTT
 import paho.mqtt.client as mqtt
 from math import floor
-import adafruit_logging as logging
-
-# from unit import Unit
-# from unit import NaN
-
+import netifaces
+import logging
+import pint
 
 class Network:
     def __init__(self, config, bay):
         # Save the config
         self._config = config
         # Create the logger.
-        self._logger = logging.getLogger('cobrabay')
+        self._logger = logging.getLogger("cobrabay").getChild("network")
         self._logger.info('Network: Initializing...')
 
         try:
@@ -37,6 +27,16 @@ class Network:
         except ImportError:
             self._logger.error('Network: No secrets.py file, cannot get connection details.')
             raise
+
+        # Find a MAC to use as client_id. Wireless is preferred, but if we don't have a wireless interface, fall back on
+        # the ethernet interface.
+        self._client_id = None
+        for interface in ['wlan0','eth0']:
+            while self._client_id is None:
+                try:
+                    netifaces.ifaddresses(interface)
+                except:
+                    pass
 
         self._system_name = config['global']['system_name']
 
@@ -56,39 +56,16 @@ class Network:
 
         # List for commands to send upward.
         self._upward_commands = []
-        #
-        # # Set up the on-board ESP32 pins. These are correct for the M4 Airlift. Check library reference for others.
-        # esp32_cs = DigitalInOut(board.ESP_CS)
-        # esp32_ready = DigitalInOut(board.ESP_BUSY)
-        # esp32_reset = DigitalInOut(board.ESP_RESET)
-        #
-        # # Create ESP object
-        # spi = SPI(board.SCK, board.MOSI, board.MISO)
-        # self._esp = adafruit_esp32spi.ESP_SPIcontrol(spi, esp32_cs, esp32_ready, esp32_reset)
-        # self._mac_address = "".join([f"{i:X}" for i in self._esp.MAC_address_actual])
-        #
-        # # Set the Socket' library's interface to this ESP instance.
-        # socket.set_interface(self._esp)
-        #
-        # # Setup ESP32
-        # if self._esp.status in (adafruit_esp32spi.WL_NO_SHIELD, adafruit_esp32spi.WL_NO_MODULE):
-        #     self._logger.error('Network: No ESP32 module found!')
-        #     raise IOError("No ESP32 module found!")
-        # elif self._esp.status is not adafruit_esp32spi.WL_IDLE_STATUS:
-        #     # If ESP32 isn't idle, reset it.
-        #     self._logger.warning('Network: ESP32 not idle. Resetting.')
-        #     self._esp.reset()
 
-        # Setup MQTT Client
-        # MQTT.set_socket(socket, self._esp)
-        # self._mqtt = MQTT.MQTT(
-        #     broker=secrets['mqtt']['broker'],
-        #     port=secrets['mqtt']['port'],
-        #     username=secrets['mqtt']['user'],
-        #     password=secrets['mqtt']['password'],
-        #     client_id=self._system_name.lower()
-        # )
-        mqtt_client = mqtt.Client()
+        # Create the MQTT Client.
+        mqtt_client = mqtt.Client(
+            client_id=""
+        )
+        mqtt_client.username_pw_set(
+            self.secrets['mqtt']['username'],
+            password=self.secrets['mqtt']['password']
+        )
+
         mqtt_client.on_connect = self._on_connect
         mqtt_client.on_message = self._on_message
 
@@ -98,7 +75,7 @@ class Network:
         # Define topic reference.
         self._topics = {
             'device_connectivity': {
-                'topic': 'cobrabay/' + self._mac_address + '/connectivity',
+                'topic': 'cobrabay/' + self._client_id + '/connectivity',
                 'previous_state': {},
                 'ha_discovery': {
                     'name': '{} Connectivity'.format(self._system_name),
@@ -110,7 +87,7 @@ class Network:
                 }
             },
             'device_mem': {
-                'topic': 'cobrabay/' + self._mac_address + '/mem',
+                'topic': 'cobrabay/' + self._client_id + '/mem',
                 'previous_state': {},
                 'ha_discovery': {
                     'type': 'sensor',
@@ -120,14 +97,14 @@ class Network:
                 }
             },
             'device_command': {
-                'topic': 'cobrabay/' + self._mac_address + '/cmd',
+                'topic': 'cobrabay/' + self._client_id + '/cmd',
                 'callback': self._cb_device_command
                 # 'ha_discovery': {
                 #     'type': 'select'
                 # }
             },
             'bay_occupied': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay.name + '/occupied',
+                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/occupied',
                 'previous_state': None,
                 'ha_discovery': {
                     'type': 'binary_sensor',
@@ -140,7 +117,7 @@ class Network:
                 }
             },
             'bay_state': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay.name + '/state',
+                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/state',
                 'previous_state': None,
                 'ha_discovery': {
                     'type': 'sensor',
@@ -149,7 +126,7 @@ class Network:
                 }
             },
             'bay_position': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay.name + '/position',
+                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/position',
                 'ha_type': 'sensor',
                 'previous_state': {
                     'type': 'multisensor',
@@ -157,7 +134,7 @@ class Network:
                 }
             },
             'bay_sensors': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay.name + '/sensors',
+                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/sensors',
                 'previous_state': {},
                 'ha_discovery': {
                     'type': 'multisensor',
@@ -169,15 +146,13 @@ class Network:
                 }
             },
             'bay_command': {
-                'topic': 'cobrabay/' + self._mac_address + '/' + self._bay.name + '/cmd',
+                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/cmd',
                 # 'ha_discovery': {
                 #     'type': 'select'
                 # },
                 'callback': self._cb_bay_command
             }
         }
-
-
         self._logger.info('Network: Initialization complete.')
 
     def _on_connect(self):
@@ -427,7 +402,7 @@ class Network:
         # Build the device JSON to include in other updates.
         self._device_info = dict(
             name=self._system_name,
-            identifiers=[self._mac_address],
+            identifiers=[self._client_id],
             suggested_area='Garage',
             sw_version=str(__version__)
         )
@@ -453,12 +428,12 @@ class Network:
         # Iterate the provided list, create a sensor for each one.
         for item in ha_config['list']:
             print("Multisensor now processing: {}".format(item))
-            config_topic = "homeassistant/sensor/cobrabay-{}/{}/config".format(self._mac_address, item)
+            config_topic = "homeassistant/sensor/cobrabay-{}/{}/config".format(self._client_id, item)
             config_dict = {
                 'object_id': self._system_name.replace(" ", "").lower() + "_" + mqtt_item,
                 # Use the master device info.
                 'device': self._device_info,
-                'unique_id': self._mac_address + '.' + item,
+                'unique_id': self._client_id + '.' + item,
                 # Each sensor gets the same state topic.
                 'state_topic': self._topics[mqtt_item]['topic'],
                 'value_template': '{{{{ value_json.{} }}}}'.format(item)
@@ -486,13 +461,13 @@ class Network:
     def _ha_create(self, mqtt_item):
         # Go get the details from the main topics dict.
         ha_config = self._topics[mqtt_item]['ha_discovery']
-        config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'],self._mac_address,ha_config['entity'])
+        config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'],self._client_id,ha_config['entity'])
         config_dict = {
             'name': ha_config['name'],
             'object_id': self._system_name.replace(" ","").lower() + "_" + mqtt_item,
             'device': self._device_info,
             'state_topic': self._topics[mqtt_item]['topic'],
-            'unique_id': self._mac_address + '.' + ha_config['entity'],
+            'unique_id': self._client_id + '.' + ha_config['entity'],
         }
         # Optional parameters
         for par in ('device_class', 'icon','unit_of_measurement', 'payload_on','payload_off'):

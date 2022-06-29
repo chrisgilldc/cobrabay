@@ -19,16 +19,15 @@
 #   numbers of entries in the lateral list.
 #
 ####
+import logging
 from time import monotonic
-import adafruit_logging as logging
-from unit import Unit
-from unit import NaN
+import pint
 
 class Bay:
     # Initialization. Takes in the Bay component from the overall config.
     def __init__(self,bay_config,sensor_status):
         # Get the Bay logger.
-        self._logger = logging.getLogger('cobrabay')
+        self._logger = logging.getLogger("cobrabay").getChild("bay")
         self._logger.info('Bay: Initializing...')
         
         # Store the configuration for future reference.

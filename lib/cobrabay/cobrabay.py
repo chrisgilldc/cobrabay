@@ -5,7 +5,8 @@ from gc import mem_free, collect
 collect()
 print("Memory free at Cobra Bay load: {}".format(mem_free()))
 
-import adafruit_logging as logging
+import logging
+from logging.handlers import SysLogHandler
 from digitalio import DigitalInOut, Direction
 from sys import exit
 from time import monotonic, sleep
@@ -13,31 +14,29 @@ from microcontroller import reset as mc_reset
 print("Memory free at after standard loads: {}".format(mem_free()))
 
 # Import the other CobraBay classes
-mem_before = mem_free()
 from .bay import Bay
-mem_bay = mem_before - mem_free()
-mem_before = mem_free()
 from .display import Display
-mem_display = mem_before - mem_free()
-mem_before = mem_free()
 from .network import Network
-mem_network = mem_before - mem_free()
-mem_before = mem_free()
 from .sensors import Sensors
-mem_sensors = mem_before - mem_free()
+import Pint
+
 from unit import Unit
 from unit import NaN
-print("Memory use during loading:\n\tBay: {}\n\tDisplay: {}\n\tNetwork: {}\n\tSensors: {}".format(
-    mem_bay,mem_display,mem_network,mem_sensors
-))
 
 class CobraBay:
     def __init__(self, config):
-        # Set up Syslog if enabled.
-        self._logger = logging.getLogger('cobrabay')
+        # Set up Logging.
+        self._logger = logging.Logger('CobraBay')
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        #syslog_handler = logging.handlers.SysLogHandler()
+        #syslog_handler.setFormatter(formatter)
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        #self._logger.addHandler(syslog_handler)
+        self._logger.addHandler(console_handler)
+
 
         self._logger.info('CobraBay: CobraBay Initializing...')
-
         # check for all basic options.
         for option in ('global', 'sensors', 'bay'):
             if option not in config:
