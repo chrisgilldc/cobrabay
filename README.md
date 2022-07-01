@@ -19,6 +19,7 @@ Raspberry Pi OS Lite 64-bit. Any other Pi with Raspberry Pi OS should work.
 
 * [paho-mqtt](https://github.com/eclipse/paho.mqtt.python)
 * [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix)
+  *  Not available through pip, build as per instructions
 
 ### CobraBay
 * Copy 'cobrabay' to _device_/lib/cobrabay

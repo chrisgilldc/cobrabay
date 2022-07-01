@@ -4,7 +4,11 @@
 # Reads in defined sensors
 ####
 
-import board
+import logging
+import smbus
+
+
+# import board
 # import digitalio
 # import sys
 from time import sleep
@@ -13,19 +17,19 @@ from adafruit_hcsr04 import HCSR04
 from adafruit_aw9523 import AW9523
 from adafruit_vl53l1x import VL53L1X
 from .synthsensor import SynthSensor
-import adafruit_logging as logging
-from unit import Unit, NaN
-
+from pint import UnitRegistry, Quantity
 
 class Sensors:
     def __init__(self, config):
         # Grab the logger.
-        self._logger = logging.getLogger('cobrabay')
+        self._logger = logging.getLogger('cobrabay').getChild('sensors')
         self._logger.info('Sensors: Initializing...')
 
-        # Boards with GPIO pins. Always has 'local' as the native board.
-        # Can add additional boards (ie: AW9523) during initialization.
-        self.gpio_boards = {'local': board}
+        # Pint unit registry
+        self._ureg = UnitRegistry()
+
+        # Dict to hold boards with GPIO pins. Appropriate boards will be added during initialization.
+        self.gpio_boards = {}
 
         # General config.
         self.config = {
@@ -163,7 +167,7 @@ class Sensors:
         else:
             raise ValueError("Not a valid sensor type")
 
-    # Provides a uniform interface to access different types of sensors. Returns a Unit
+    # Provides a uniform interface to access different types of sensors.
     def _read_sensor(self, sensor):
         if self._sensors[sensor]['type'] == 'hcsr04':
             try:
@@ -176,13 +180,12 @@ class Sensors:
             # Sensor can be wonky and return 0, even when it doesn't strictly timeout.
             # Catch these and return a NaN.
             if distance > 0:
-                return Unit(distance, 'cm')
+                return Quantity(distance,self._ureg.centimeter)
             else:
                 return NaN('No sensor response')
         if self._sensors[sensor]['type'] in ('vl53', 'synth'):
             distance = self._sensors[sensor]['obj'].distance
-            dist_unit = Unit(distance,"cm")
-            #print("Returning unit: {} ({})".format(dist_unit,type(dist_unit)))
+            dist_unit = Quantity(distance,self._ureg.centimeter)
             return dist_unit
 
     # External method to allow a rescan of the sensors.

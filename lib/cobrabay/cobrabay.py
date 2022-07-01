@@ -1,27 +1,19 @@
 ####
 # Cobra Bay - Main
 ####
-from gc import mem_free, collect
-collect()
-print("Memory free at Cobra Bay load: {}".format(mem_free()))
 
 import logging
 from logging.handlers import SysLogHandler
 from digitalio import DigitalInOut, Direction
-from sys import exit
+import sys
 from time import monotonic, sleep
-from microcontroller import reset as mc_reset
-print("Memory free at after standard loads: {}".format(mem_free()))
 
 # Import the other CobraBay classes
 from .bay import Bay
 from .display import Display
 from .network import Network
 from .sensors import Sensors
-import Pint
-
-from unit import Unit
-from unit import NaN
+from pint import UnitRegistry, Quantity
 
 class CobraBay:
     def __init__(self, config):
@@ -41,11 +33,11 @@ class CobraBay:
         for option in ('global', 'sensors', 'bay'):
             if option not in config:
                 self._logger.error('CobraBay: Configuration does not include required section: "' + option + '"')
-                exit(1)
+                sys.exit(1)
         # Make sure at least one sensor exists.
         if len(config) == 0:
             self._logger.info('CobraBay: No sensors configured!')
-            exit(1)
+            sys.exit(1)
         # Make sure sensors are assigned.
         if 'sensor' not in config['bay']['range']:
             self._logger.error('CobraBay: No range sensor assigned.')
@@ -73,14 +65,14 @@ class CobraBay:
             self._logger.info("New Watchdog pin state: {}".format(watchdog_pin.value))
 
         # Convert inputs to Units.
-        self.config['bay']['park_time'] = Unit(self.config['bay']['park_time'])
+        self.config['bay']['park_time'] = Quantity(self.config['bay']['park_time'])
         for option in ('dist_max', 'dist_stop'):
-            self.config['bay']['range'][option] = Unit(self.config['bay']['range'][option])
+            self.config['bay']['range'][option] = Quantity(self.config['bay']['range'][option])
         # Lateral option distance options to convert
         for index in range(len(self.config['bay']['lateral'])):
             for option in ('intercept_range', 'dist_ideal', 'ok_spread', 'warn_spread', 'red_spread'):
                 self.config['bay']['lateral'][index][option] = \
-                    Unit(self.config['bay']['lateral'][index][option])
+                    Quantity(self.config['bay']['lateral'][index][option])
 
         # Initial device state
         self._device_state = 'on'
@@ -100,7 +92,6 @@ class CobraBay:
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
-        disp_mem_before = mem_free()
         try:
             self._display = Display(self.config)
         except MemoryError as e:
@@ -264,20 +255,17 @@ class CobraBay:
                 sleep(360)
                 self._network.disconnect('resetting')
                 microcontroller.reset()
-            collect()
             self._logger.debug("{},2 - After Sweep,{}".format(i,mem_free()))
             # print("Sensor data during sweep ---")
             # print(sensor_data)
             # Send the collected data to the bay object to interpret
             self._bay.update(sensor_data)
-            collect()
             self._logger.debug("{},3 - After Bay,{}".format(i, mem_free()))
             # print("Bay position ---")
             # print(self._bay.position)
             # Display the current state of the bay.
             #try:
             self._display.display_dock(self._bay.position)
-            collect()
             self._logger.debug("{},4 - After Display,{}".format(i, mem_free()))
             # except Exception as e:
             #     self._logger.error("Got display error during docking: {}".format(e))
@@ -290,7 +278,6 @@ class CobraBay:
 
             # Check the network for additional commands, and push out messages.
             network_data = self._network_handler()
-            collect()
             self._logger.debug("{},5 - After Network,{}".format(i, mem_free()))
             # Check for a complete or abort command.
             if 'command' in network_data:

@@ -22,6 +22,7 @@
 import logging
 from time import monotonic
 import pint
+from .nan import NaN
 
 class Bay:
     # Initialization. Takes in the Bay component from the overall config.
