@@ -13,7 +13,9 @@ from math import floor
 import pint
 from rgbmatrix import RGBMatrix, RGBMatrixOptions, graphics
 from .nan import NaN
+from pint import UnitRegistry, Quantity
 
+ureg = UnitRegistry()
 
 class Display:
     def __init__(self, config):
@@ -39,7 +41,9 @@ class Display:
         
         # Timer for the approach strobe
         self.timer_approach_strobe = monotonic_ns()
-
+        # Initialize the approach strobe offset. This needs to get kept from cycle to cycle.
+        self._approach_strobe_offset = 0
+        
         self._logger.info("Creating matrix...")
         # Create a matrix. This is hard-coded for now.
         matrix_options = RGBMatrixOptions()
@@ -63,7 +67,9 @@ class Display:
             'white': graphics.Color(255, 255, 255),
             'green': graphics.Color(0, 255, 0),
             'red': graphics.Color(255, 0, 0),
-            'darkblue': graphics.Color(0, 0, 139)
+            'darkblue': graphics.Color(0, 0, 139),
+            'orange': graphics.Color(255,153,51),
+            'yellow': graphics.Color(255,255,0)
         }
 
     # Basic frame for the display
@@ -89,113 +95,111 @@ class Display:
         graphics.DrawLine(self.matrix, x1, y2, x2, y2, color)
 
     def _distance_display(self, range, range_pct):
-        # Create the distance IO group.
-        range_group = Group()
-
-        # print("Display input:\n\tRange: {}\n\tRange Pct: {}".format(range,range_pct))
-
-        # Positioning for labels
-        label_position = ( 
-            floor(self.display.width / 2),  # X - Middle of the display
-            floor((self.display.height - 4) / 2))  # Y - half the height, with space removed for the approach strobe
-
-        # Default label setup. Logic will override these properties if needed.
-        approach_label = Label(
-                font=self.base_font,
-                color=0x00FF00,
-                anchor_point=(0.4, 0.5),
-                anchored_position=label_position
-                )
+        start_x = 4
+        # Lower box is three pixels, allow one for buffer, and adjust one more for 0-1 adjustment.
+        start_y = self.matrix.height - 4
 
         # If Range isn't a number, there's two options.
         if isinstance(range, NaN):
             # If the NaN reason is "Beyond range", throw up the "Approach" text
             if range.reason == 'Beyond range':
-                approach_label.color = 0x0000FF  # Blue
-                approach_label.text = "CLOSE"
-                approach_label.anchor_point = (0.5, 0.5)  # Anchor in the center
-                #approach_label.font = self.small_font
+                text = "CLOSE"
+                text_color = self._colors['blue']
             # Any other NaN indicates an error.
             else:
-                approach_label.text = "ERROR"
-                approach_label.color = 0xFF0000
-                approach_label.anchor_point = (0.5, 0.5)
-        elif range.value <= 1:
-            if range.value < 0 and abs(range.value) > 2:
-                approach_label.text = "BACK-UP"
-                approach_label.color = 0xFF0000
+                text = "ERROR"
+                text_color = self._colors['red']
+        elif range <= Quantity("1 inch"):
+            if range < 0 and abs(range) > 2:
+                text = "BACK-UP"
+                text_color = 0xFF0000
             else:
-                approach_label.text = "STOP!"
-                approach_label.color = 0xFF0000
+                text = "STOP!"
+                text_color = self._colors['red']
         else:
             # Determine what to use for range output.
-            if self.config['global']['units'] == 'imperial':
+            if True:
+            # if self.config['global']['units'] == 'imperial':
                 # For Imperial (ie: US) users, output as prime-notation Feet and Inches.
-                approach_label.text = range.asftin('prime')
+                text = self._ft_in(range)
+                print(text)
             else:
                 # For Metric (ie: Reasonable countries) users, output as decimal meters
-                approach_label.text = str(range.convert("m"))
+                text = str(range.to("meters"))
             # If under 20% of total distance, color the text differently.
             # Within 10% of range, orange
             if range_pct <= 0.10:
-                approach_label.color = 0xFF9933
+                text_color = self._colors['orange']
             # Within 20 % of range, yellow.
             elif range_pct <= 0.20:
-                approach_label.color = 0xFFFF00
-        range_group.append(approach_label)
+                text_color = self._colors['yellow']
+            else:
+                text_color = self._colors['white']
 
-        return range_group
-        
+        graphics.DrawText(self.matrix,self.base_font,start_x,start_y,text_color,text)
+
+    # @ureg.check('[length]',(None))
+    @staticmethod
+    def _ft_in(length,int_places = None):
+        # Convert to inches.
+        as_inches = length.to(ureg.inch)
+        feet = int(length.to(ureg.inch).magnitude // 12)
+        inches = round(length.to(ureg.inch).magnitude % 12,int_places)
+        return "{}'{}\"".format(feet,inches)
+
     def _approach_strobe(self, range, range_pct):
         # Available strobing width. Cut in half since we go from both sides, take out pixels for the frames.
         available_width = (self.matrix.width / 2) - 1
-        approach_strobe_offset = 1
+
         # If range isn't 'None' (sensor error) or 'BR' (beyond range), then we need to figure the strobe.
         if not isinstance(range, NaN):
             # Block the distance that's been covered.
             bar_blocker = floor(available_width * (1-range_pct))
-            # Left
-            graphics.DrawLine(self.matrix, 1,
-                              self.matrix.height - 2,
-                              1 + bar_blocker,
-                              self.matrix.height - 2,
-                              self._colors['white'])
-            # Right
-            graphics.DrawLine(self.matrix,
-                              self.matrix.width - 2,
-                              self.matrix.height - 2,
-                              self.matrix.width - 2 - bar_blocker,
-                              self.matrix.height - 2,
-                              self._colors['white'])
-            # Strober.
-            if monotonic_ns() - self.timer_approach_strobe >= self.config['approach_strobe_speed']:
-                if approach_strobe_offset > (available_width - bar_blocker)-1:
-                    approach_strobe_offset = 1
-                else:
-                    approach_strobe_offset = approach_strobe_offset + 1
-                self.timer_approach_strobe = monotonic_ns()
+            # Only draw a blocker bar if it would have length.
+            if bar_blocker > 0:
+                # Left
+                graphics.DrawLine(self.matrix, 1,
+                                  self.matrix.height - 2,
+                                  1 + bar_blocker,
+                                  self.matrix.height - 2,
+                                  self._colors['white'])
+                # Right
+                graphics.DrawLine(self.matrix,
+                                  self.matrix.width - 2,
+                                  self.matrix.height - 2,
+                                  self.matrix.width - 2 - bar_blocker,
+                                  self.matrix.height - 2,
+                                  self._colors['white'])
 
             # Blank out the strobing space.
             graphics.DrawLine(self.matrix,
                               2 + bar_blocker,
                               self.matrix.height - 2,
-                              self.matrix.width - 3 - bar_blocker,
+                              self.matrix.width - 2 - bar_blocker,
                               self.matrix.height - 2,
                               self._colors['black']
                               )
 
+            # Determine strober offset based on time.
+            if monotonic_ns() - self.timer_approach_strobe >= self.config['approach_strobe_speed']:
+                if self._approach_strobe_offset > (available_width - bar_blocker)-1:
+                    self._approach_strobe_offset = 1
+                else:
+                    self._approach_strobe_offset = self._approach_strobe_offset + 1
+                self.timer_approach_strobe = monotonic_ns()
+
             # Draw dots based on the offset.
             graphics.DrawLine(self.matrix,
-                              2 + bar_blocker + approach_strobe_offset,
+                              1 + bar_blocker + self._approach_strobe_offset,
                               self.matrix.height - 2,
-                              2 + bar_blocker + approach_strobe_offset + 1,
+                              1 + bar_blocker + self._approach_strobe_offset + 1,
                               self.matrix.height - 2,
                               self._colors['red']
                               )
             graphics.DrawLine(self.matrix,
-                              self.matrix.width - bar_blocker - approach_strobe_offset,
+                              self.matrix.width - bar_blocker - self._approach_strobe_offset,
                               self.matrix.height - 2,
-                              self.matrix.width - bar_blocker - approach_strobe_offset-1,
+                              self.matrix.width - bar_blocker - self._approach_strobe_offset-1,
                               self.matrix.height - 2,
                               self._colors['red']
                               )
@@ -313,6 +317,6 @@ class Display:
         # Display the strobe based on range. 
         self._approach_strobe(bay_state['range'], bay_state['range_pct'])
         # Display the distance.
-        #master_group.append(self._distance_display(bay_state['range'], bay_state['range_pct']))
+        self._distance_display(bay_state['range'], bay_state['range_pct'])
         # Display the side indicators
         #master_group.append(self._side_indicators(bay_state['lateral'], bay_state['lateral_num']))
