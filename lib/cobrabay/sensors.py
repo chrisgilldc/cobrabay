@@ -6,16 +6,11 @@
 
 import logging
 import smbus
-
-
-# import board
-# import digitalio
-# import sys
+import VL53L1X
 from time import sleep
-# import terminalio
 from adafruit_hcsr04 import HCSR04
 from adafruit_aw9523 import AW9523
-from adafruit_vl53l1x import VL53L1X
+# from adafruit_vl53l1x import VL53L1X
 from .synthsensor import SynthSensor
 from pint import UnitRegistry, Quantity
 
@@ -27,9 +22,6 @@ class Sensors:
 
         # Pint unit registry
         self._ureg = UnitRegistry()
-
-        # Dict to hold boards with GPIO pins. Appropriate boards will be added during initialization.
-        self.gpio_boards = {}
 
         # General config.
         self.config = {
@@ -60,20 +52,25 @@ class Sensors:
         for sensor in sensors:
             self._logger.info('Sensors: Trying setup for ' + sensor)
             try:
-                sensor_obj = self._create_sensor(sensors[sensor])
+                sensor_obj = self._create_sensor(sensor, sensors[sensor])
             except Exception as e:
                 self._logger.error('Sensors: Could not initialize ' + sensor + ', marking unavailable')
-                self._logger.error('Sensors: ' + str(e))
+                self._logger.error(e,exc_info=True)
                 self._sensor_state[sensor] = 'unavailable'
             else:
+                print("Sensor created.")
                 # if sensor_obj is not None:
                 self._sensors[sensor] = {
                     'type': sensors[sensor]['type'],
                     'obj': sensor_obj}
+                # For VL53L1X sensors, add the ranging mode. This is needed when ranging is started.
+                if self._sensors[sensor]['type'] == 'vl53':
+                    self._sensors[sensor]['ranging'] = sensors[sensor]['distance_mode']
                 # For ultrasound sensors, add in the averaging rate and initialize buffer.
                 if self._sensors[sensor]['type'] == 'hcsr04':
                     self._sensors[sensor]['avg'] = sensors[sensor]['avg']
                     self._sensors[sensor]['queue'] = []
+                print(self._sensors[sensor])
 
                 # Test the sensor and make sure we can get a result. 
                 # Value doesn't matter, just get *something*
@@ -82,7 +79,7 @@ class Sensors:
                     result = self._read_sensor(sensor)
                 except Exception as e:
                     self._logger.error('Sensors: Read test of sensor ' + sensor + ' failed, marking unavailable')
-                    self._logger.error('Sensors: ' + str(e))
+                    self._logger.error(e, exc_info=True)
                     self._sensor_state[sensor] = 'unavailable'
                 else:
                     self._logger.debug('Sensors: Read test of sensor ' + sensor + ' got: ' + str(result))
@@ -94,29 +91,16 @@ class Sensors:
             i += 1
         return i
 
-    def _create_sensor(self, options):
+    def _create_sensor(self, sensor_name, options):
         # VL53L1X sensor.
         if options['type'] == 'vl53':
+            print("Creating vl53")
             # Create the sensor
             try:
-                new_sensor = VL53L1X(board.I2C(), address=options['address'])
-            except Exception as e:
-                raise OSError("VL53L1X sensor not available at address '" + str(options['address']) + "'. Ignoring.")
-            # Set the defaults.
-            new_sensor.distance_mode = 2
-            new_sensor.timing_budget = 50
-            if 'distance_mode' in options:
-                if options['distance_mode'] == 'short':
-                    new_sensor.distance_mode = 1
-            if 'timing_budget' in options:
-                if options['timing_budget'] in (15, 20, 33, 50, 100, 200, 500):
-                    new_sensor.timing_budget = options['timing_budget']
-                else:
-                    self._logger.debug('Sensors: Requested timing budget ' + str(
-                        options['timing_budget']) + ' not supported. Keeping default of 50ms.')
-
-            new_sensor.start_ranging()
-
+                new_sensor = self._create_vl53l1x(sensor_name, options)
+            except:
+                raise
+            # It exists, now try to range it.
             return new_sensor
 
         # The HC-SR04 sensor, or US-100 in HC-SR04 compatibility mode
@@ -167,6 +151,61 @@ class Sensors:
         else:
             raise ValueError("Not a valid sensor type")
 
+    # Method to create a VL53L1X sensor.
+    def _create_vl53l1x(self,sensor_name,options):
+        defaults = {
+            'bus_id': 1,
+            'timing_budget': 50
+        }
+        # Assign the defaults, if need be.
+        for key in defaults:
+            if key not in options:
+                options[key] = defaults[key]
+        try:
+            new_sensor = VL53L1X.VL53L1X(i2c_bus=options['bus_id'],i2c_address=options['address'])
+        except:
+            raise
+        else:
+            # Set the distance mode. Default to Medium distance if unsuccessful.
+            try:
+                new_sensor.distance_mode = self._range_mode(options['distance_mode'])
+            except:
+                self._logger.error("Could not assign custom sensor mode to sensor {}. Using default of Medium (2).".format(sensor_name))
+                self._logger.error(e,exc_info=True)
+                new_sensor.distance_mode = 2
+            # Set the timing budget. Defaults to 50ms if unsuccessful.
+            try:
+                new_sensor.timing_budget = options['timing_budget']
+            except:
+                self._logger.error("Could not assign timing budget to sensor {}. Using default of 50ms".format(sensor_name))
+                self._logger.error(e,exc_info=True)
+                new_sensor.timing_budget = 50
+            return new_sensor
+
+    # Converts range mode back and forth between int and string.
+    @staticmethod
+    def _range_mode(rng_mode):
+        if isinstance(rng_mode,int):
+            if rng_mode == 1:
+                return 'short'
+            elif rng_mode == 2:
+                return 'medium'
+            elif rng_mode == 3:
+                return 'long'
+            else:
+                raise ValueError("Integer range mode '{}' not understood.".format(rng_mode))
+        elif isinstance(rng_mode,str):
+            if rng_mode.lower() == 'short':
+                return 1
+            elif rng_mode.lower() == 'medium':
+                return 2
+            elif rng_mode.lower() == 'long':
+                return 3
+            else:
+                raise ValueError("'{}' is not a valid range mode.".format(str))
+        else:
+            raise TypeError("Can only convert ints and strings")
+
     # Provides a uniform interface to access different types of sensors.
     def _read_sensor(self, sensor):
         if self._sensors[sensor]['type'] == 'hcsr04':
@@ -183,10 +222,17 @@ class Sensors:
                 return Quantity(distance,self._ureg.centimeter)
             else:
                 return NaN('No sensor response')
-        if self._sensors[sensor]['type'] in ('vl53', 'synth'):
+        elif self._sensors[sensor]['type'] == 'vl53':
+            self._sensors[sensor]['obj'].start_ranging(2)
+            measured_distance = Quantity(self._sensors[sensor]['obj'].get_distance(),self._ureg.centimeter)
+            self._sensors[sensor]['obj'].stop_ranging()
+            return measured_distance
+        elif self._sensors[sensor]['type'] == 'synth':
             distance = self._sensors[sensor]['obj'].distance
             dist_unit = Quantity(distance,self._ureg.centimeter)
             return dist_unit
+        else:
+            raise ValueError("Not a valid sensor type")
 
     # External method to allow a rescan of the sensors.
     def rescan(self):
