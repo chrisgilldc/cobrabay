@@ -49,13 +49,15 @@ class Display:
         matrix_options.parallel = 1
         matrix_options.hardware_mapping = 'adafruit-hat-pwm'
         matrix_options.disable_hardware_pulsing = True
-        matrix_options.gpio_slowdown = 2
+        matrix_options.gpio_slowdown = 4
         self.matrix = RGBMatrix(options=matrix_options)
 
         # load the fonts
-        self.base_font = graphics.Font()
-        self.base_font.LoadFont('fonts/Interval-Book-18.bdf')
-        # self.small_font = bitmap_font.load_font('fonts/Interval-Book-12.bdf')
+        self._font_dir = 'fonts'
+        self._base_font = 'Interval-Book'
+        self._font_sizes = [18,12,8]
+        self.font = graphics.Font()
+        self.font.LoadFont('fonts/Interval-Book-12.bdf')
 
         # Convenient dict for colors.
         self._colors = {
@@ -97,50 +99,87 @@ class Display:
         return canvas
 
     def _distance_display(self, canvas, range, range_pct):
-        start_x = 4
-        # Lower box is three pixels, allow one for buffer, and adjust one more for 0-1 adjustment.
-        start_y = self.matrix.height - 4
-
-        # If Range isn't a number, there's two options.
-        if isinstance(range, NaN):
-            # If the NaN reason is "Beyond range", throw up the "Approach" text
-            if range.reason == 'Beyond range':
-                text = "CLOSE"
-                text_color = self._colors['blue']
-            # Any other NaN indicates an error.
-            else:
-                text = "ERROR"
-                text_color = self._colors['red']
-        elif range <= Quantity("1 inch"):
-            if range < 0 and abs(range) > 2:
-                text = "BACK-UP"
-                text_color = 0xFF0000
-            else:
-                text = "STOP!"
-                text_color = self._colors['red']
-        else:
-            # Determine what to use for range output.
-            if True:
-            # if self.config['global']['units'] == 'imperial':
-                # For Imperial (ie: US) users, output as prime-notation Feet and Inches.
-                text = self._ft_in(range)
-                print(text)
-            else:
-                # For Metric (ie: Reasonable countries) users, output as decimal meters
-                text = str(range.to("meters"))
-            # If under 20% of total distance, color the text differently.
-            # Within 10% of range, orange
-            if range_pct <= 0.10:
-                text_color = self._colors['orange']
-            # Within 20 % of range, yellow.
-            elif range_pct <= 0.20:
-                text_color = self._colors['yellow']
-            else:
-                text_color = self._colors['white']
-
-        graphics.DrawText(canvas,self.base_font,start_x,start_y,text_color,text)
-
+        # # If Range isn't a number, there's two options.
+        # if isinstance(range, NaN):
+        #     # If the NaN reason is "Beyond range", throw up the "Approach" text
+        #     if range.reason == 'Beyond range':
+        #         text = "APPROACH"
+        #         text_color = self._colors['darkblue']
+        #     # Any other NaN indicates an error.
+        #     else:
+        #         text = "ERROR"
+        #         text_color = self._colors['red']
+        # elif range <= Quantity("1 inch"):
+        #     if range < 0 and abs(range) > 2:
+        #         text = "BACK-UP"
+        #         text_color = 0xFF0000
+        #     else:
+        #         text = "STOP!"
+        #         text_color = self._colors['red']
+        # else:
+        #     # Determine what to use for range output.
+        #     if True:
+        #     # if self.config['global']['units'] == 'imperial':
+        #         # For Imperial (ie: US) users, output as prime-notation Feet and Inches.
+        #         text = self._ft_in(range)
+        #         print(text)
+        #     # else:
+        #     #     # For Metric (ie: Reasonable countries) users, output as decimal meters
+        #     #     text = str(range.to("meters"))
+        #     # If under 20% of total distance, color the text differently.
+        #     # Within 10% of range, orange
+        #     if range_pct <= 0.10:
+        #         text_color = self._colors['orange']
+        #     # Within 20 % of range, yellow.
+        #     elif range_pct <= 0.20:
+        #         text_color = self._colors['yellow']
+        #     else:
+        #         text_color = self._colors['white']
+        #
+        # Scale the font based on the available space and size.
+        text = "TESTING!"
+        text_color = self._colors['darkblue']
+        selected_font = self._fit_string(text,self.matrix.width-8)
+        # Alignment variables to determine the proper lower-left corner of the string.
+        # Align vertically, based on canvas height with space removed for the lower strobe bar.
+        #x_start = 4 + ((canvas.width - 8)  / 2) - (self._string_width(text, selected_font) / 2)
+        #y_start = canvas.height - 4 - ((canvas.height-4)/2) + (selected_font.height/2)
+        x_start = 10
+        y_start = 15
+        # Add the string to the canvas, then return it.
+        print("Canvas size X:{}, Y:{}".format(canvas.width,canvas.height))
+        print("Using X:{}, Y:{}".format(x_start,y_start))
+        graphics.DrawText(canvas,
+                          selected_font,
+                          x_start,
+                          y_start,
+                          text_color,
+                          text)
+        #graphics.DrawText(canvas,self.font,x_start,y_start,text_color,text)
         return canvas
+
+    # Find a font size that will fit the given text in the available space.
+    # Returns a font so it can be used downstream.
+    def _fit_string(self,input_string,allowed_width=None):
+        font = graphics.Font()
+        if allowed_width is None:
+            allowed_width = self.matrix.width
+        for points in self._font_sizes:
+            font.LoadFont(self._font_dir + '/' + self._base_font + '-' + str(points) + '.bdf')
+            string_width = self._string_width(input_string,font)
+            if string_width <= allowed_width:
+                return font
+        # If we fail out the bottom, return the smallest font there is.
+        return font
+
+    # Calculate the width of a string given a certain font.
+    @staticmethod
+    def _string_width(input_string, font):
+        string_length = 0
+        for char in input_string:
+            char_width = font.CharacterWidth(ord(char))
+            string_length = string_length + char_width
+        return string_length
 
     # @ureg.check('[length]',(None))
     @staticmethod
@@ -312,6 +351,9 @@ class Display:
         self._mqtt_icon(canvas,system_state['mqtt_status'], (0, 27))
         self.matrix.SwapOnVSync(canvas)
 
+
+
+
     # Update the display from the provided bay state.
     def display_dock(self, bay_state):
         # Create a new canvas to display
@@ -320,10 +362,9 @@ class Display:
         # Display the Frame
         #self._staging_canvas = self._frame(self._staging_canvas)
         # Display the strobe based on range. 
-        #self._staging_canvas = self._approach_strobe(self._staging_canvas, bay_state['range'], bay_state['range_pct'])
+        # self._staging_canvas = self._approach_strobe(self._staging_canvas, bay_state['range'], bay_state['range_pct'])
         # Display the distance.
         self._staging_canvas = self._distance_display(self._staging_canvas, bay_state['range'], bay_state['range_pct'])
-        #self._distance_display(self.matrix, bay_state['range'], bay_state['range_pct'])
         # Display the side indicators
         #master_group.append(self._side_indicators(bay_state['lateral'], bay_state['lateral_num']))
         # Swap in the new canvas.
