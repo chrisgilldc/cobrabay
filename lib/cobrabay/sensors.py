@@ -94,7 +94,6 @@ class Sensors:
     def _create_sensor(self, sensor_name, options):
         # VL53L1X sensor.
         if options['type'] == 'vl53':
-            print("Creating vl53")
             # Create the sensor
             try:
                 new_sensor = self._create_vl53l1x(sensor_name, options)
@@ -105,7 +104,6 @@ class Sensors:
 
         # The HC-SR04 sensor, or US-100 in HC-SR04 compatibility mode
         elif options['type'] == 'hcsr04':
-
             # Confirm trigger, echo and board are set. These are *required*.
             for parameter in ('board', 'trigger', 'echo'):
                 if parameter not in options:
@@ -133,15 +131,6 @@ class Sensors:
                     trigger_pin=self.gpio_boards[options['board']].get_pin(options['trigger']),
                     echo_pin=self.gpio_boards[options['board']].get_pin(options['echo']),
                     timeout=timeout)
-            # 'Local' GPIO, directly on the board.
-            elif options['board'] == 'local':
-                # Use the exec call to convert the inbound pin number to the actual pin objects
-                tp = eval("board.D{}".format(options['trigger']))
-                ep = eval("board.D{}".format(options['echo']))
-                new_sensor = HCSR04(trigger_pin=tp, echo_pin=ep, timeout=timeout)
-            else:
-                raise OSError("GPIO board '" + options['board'] + "' not valid!")
-
             # No errors to this point, return the sensor.
             return new_sensor
 
@@ -163,23 +152,25 @@ class Sensors:
                 options[key] = defaults[key]
         try:
             new_sensor = VL53L1X.VL53L1X(i2c_bus=options['bus_id'],i2c_address=options['address'])
-        except:
+        except RuntimeError as e:
+            self._logger.error("VL53L1X not found on I2C bus {} address {}".format(options['bus_id'],options['address']))
             raise
         else:
             # Set the distance mode. Default to Medium distance if unsuccessful.
             try:
                 new_sensor.distance_mode = self._range_mode(options['distance_mode'])
-            except:
+            except Exception as e:
                 self._logger.error("Could not assign custom sensor mode to sensor {}. Using default of Medium (2).".format(sensor_name))
                 self._logger.error(e,exc_info=True)
                 new_sensor.distance_mode = 2
             # Set the timing budget. Defaults to 50ms if unsuccessful.
             try:
                 new_sensor.timing_budget = options['timing_budget']
-            except:
+            except Exception as e:
                 self._logger.error("Could not assign timing budget to sensor {}. Using default of 50ms".format(sensor_name))
                 self._logger.error(e,exc_info=True)
                 new_sensor.timing_budget = 50
+            new_sensor.open()
             return new_sensor
 
     # Converts range mode back and forth between int and string.
@@ -223,9 +214,7 @@ class Sensors:
             else:
                 return NaN('No sensor response')
         elif self._sensors[sensor]['type'] == 'vl53':
-            self._sensors[sensor]['obj'].start_ranging(2)
             measured_distance = Quantity(self._sensors[sensor]['obj'].get_distance(),self._ureg.centimeter)
-            self._sensors[sensor]['obj'].stop_ranging()
             return measured_distance
         elif self._sensors[sensor]['type'] == 'synth':
             distance = self._sensors[sensor]['obj'].distance
@@ -237,18 +226,6 @@ class Sensors:
     # External method to allow a rescan of the sensors.
     def rescan(self):
         self._init_sensors(self.config['sensors'])
-
-    def vl53(self, action):
-        if action not in ('start', 'stop'):
-            self._logger.error('Sensors: Requested invalid action for VL53 sensor. Must be either "start" or "stop".')
-            raise ValueError("Must be 'start' or 'stop'.")
-        else:
-            for sensor in self._sensors:
-                if self._sensors[sensor]['type'] == 'vl53':
-                    if action == 'start':
-                        self._sensors[sensor]['obj'].start_ranging()
-                    if action == 'stop':
-                        self._sensors[sensor]['obj'].stop_ranging()
 
     def sweep(self, sensor_type=None):
         if sensor_type is None:
@@ -262,7 +239,7 @@ class Sensors:
                 # An OSError is raised when it literally can't be read. That means it's probably missing.
                 except OSError as e:
                     self._logger.debug('Sensors: Could not read sensor ' + sensor)
-                    self._logger.debug('Sensors: ' + str(e))
+                    self._logger.error(e,exc_info=True)
                     raise
                 # Post-processing for the HC-SR04
                 if self._sensors[sensor]['type'] == 'hcsr04':
@@ -288,10 +265,6 @@ class Sensors:
                 else:
                     # For non-ultrasound sensors, send it directly back.
                     sensor_data[sensor] = reading
-        # Sensor data:
-        # print("Sweep returning sensor data:")
-        # for sd in sensor_data:
-        #     print("\tSensor: {}\tValue: {}\tType: {}".format(sd,sensor_data[sd]._value,type(sensor_data[sd])))
         return sensor_data
 
     # Utility function to just list all the sensors found.
@@ -310,7 +283,7 @@ class Sensors:
             return NaN('Sensor unavailable')
         if self._sensors[sensor_name]['type'] == 'vl53':
             print("Sensor type VL53")
-            self._sensors[sensor_name]['obj'].start_ranging()
+            self._sensors[sensor_name]['obj'].start_ranging(0)
             value = self._read_sensor(sensor_name)
             self._sensors[sensor_name]['obj'].stop_ranging()
             return value
