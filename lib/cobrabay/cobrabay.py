@@ -92,19 +92,7 @@ class CobraBay:
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
-        try:
-            self._display = Display(self.config)
-        except MemoryError as e:
-            self._logger.error('Display: Memory error while initializing display. Have {}'.format(mem_free()))
-            # self._logger.error(dir(e))
-            self._device_state = 'unknown'
-            # print("Resetting in 10s.")
-            # sleep(10)
-            # mc_reset()
-        else:
-            disp_mem_after = mem_free()
-            self._logger.debug("Display initialized. Used {} bytes. ({} to {})".
-                               format(disp_mem_before-disp_mem_after,disp_mem_before,disp_mem_after))
+        self._display = Display(self.config)
 
         self._logger.info('CobraBay: Connecting to network...')
         # Create Network object.
@@ -134,8 +122,6 @@ class CobraBay:
             else:
                 self._logger.addHandler(self.syslog)
 
-
-        collect()
         self._logger.info('CobraBay: Initialization complete.')
 
     # Command processor. This is a method because it can get called from multiple loops.
@@ -194,7 +180,7 @@ class CobraBay:
     def _network_handler(self):
         # Always add a device state update and a memory message to the outbound message queue
         # Have the network object make any necessary reconnections.
-        self._network.reconnect()
+        # self._network.reconnect()
         # Queue up outbound messages for processing. By default, the Network class will not
         # send data that hasn't changed, so we can queue it up here without care.
         self._outbound_messages.append(dict(topic='device_connectivity', message=self._device_state))
