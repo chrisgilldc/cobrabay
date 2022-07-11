@@ -4,6 +4,9 @@
 # Connects to the network to report bay status and take various commands.
 ####
 from time import sleep
+
+from pint import Quantity
+
 from .version import __version__
 from json import loads as json_loads
 from json import dumps as json_dumps
@@ -84,7 +87,7 @@ class Network:
         self._mqtt_client.on_message = self._on_message
 
         # Unit of Measure to use for distances, based on the global setting.
-        dist_uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
+        self.dist_uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
 
         # Define topic reference.
         self._topics = {
@@ -156,7 +159,7 @@ class Network:
                     'aliases': config['sensors'],  # Dict with list alias names.
                     'icon': 'mdi:ruler',
                     # Conveniently, we use the same string identifier for units as Home Assistant!
-                    'unit_of_measurement': dist_uom
+                    'unit_of_measurement': self.dist_uom
                 }
             },
             'bay_command': {
@@ -169,15 +172,16 @@ class Network:
         }
         self._logger.info('Network: Initialization complete.')
 
-    def _on_connect(self):
+    def _on_connect(self, userdata, flags, rc, properties=None):
+        self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
+        # Create last will, goes to the device topic.
+        self._logger.info("Network: Creating last will.")
+        self._mqtt_client.will_set(self._topics['device_connectivity']['topic'], payload='offline')
         # For every topic that has a callback, add it.
         for item in self._topics:
             if 'callback' in self._topics[item]:
                 self._logger.debug("Network: Creating callback for {}".format(item))
-                self._mqtt.add_topic_callback(self._topics[item]['topic'], self._topics[item]['callback'])
-        # Create last will, goes to the device topic.
-        self._logger.info("Network: Setting up last will.")
-        self._mqtt.will_set(self._topics['device_connectivity']['topic'], 'offline')
+                self._mqtt_client.message_callback_add(self._topics[item]['topic'], self._topics[item]['callback'])
 
     def _on_message(self):
         pass
@@ -236,74 +240,29 @@ class Network:
             self._logger.info("Network: Received unknown MQTT bay command '{}'".format(message['cmd']))
 
     # Message publishing method
-    def _pub_message(self, topic, message, repeat=False):
-        previous_state = self._topics[topic]['previous_state']
-        # Send flag.
-        send = False
-        # By default, check to see if the data changed before sending it.
-        if repeat is False:
-            # Both strings, compare, process if different
-            if isinstance(message, str) and isinstance(previous_state, str):
-                if message != previous_state:
-                    send = True
-                else:
-                    return
-            elif isinstance(message, dict) and isinstance(previous_state, dict):
-                for item in message:
-                    if item not in previous_state:
-                        send = True
-                        break
-                    if message[item] != previous_state[item]:
-                        send = True
-                        break
-                return
-            else:
-                if type(message) != type(previous_state):
-                    send = True
-                else:
-                    return
-        # The 'repeat' option can be used in cases when a caller wants to send no matter the changed state.
-        # Using this too much can make things super chatty.
-        elif repeat is True:
-            send = True
-        if send:
-            attempts = 0
-            self._topics[topic]['previous_state'] = message
-            if isinstance(message, dict):
-                message = json_dumps(message)
-            while True:
-                try:
-                    self._mqtt.publish(self._topics[topic]['topic'], message)
-                except RuntimeError:
-                    #  Have we run up
-                    if attempts >= 3:
-                        self._logger.error("MQTT Publish caught ESP32 Runtime Error. Resetting...")
-                        mc_reset()
-                    else: # Nope, not enough tries, wait and try again.
-                        sleep(0.1)
-                        attempts += 1
-                else:  # If we succeeded, break.
-                    break
-
+    def _pub_message(self, topic, message):
+        # Convert the message
+        if isinstance(message,dict):
+            outbound_message = json_dumps(self._dict_unit_convert(message, flatten=True))
+        else:
+            outbound_message = message
+        self._mqtt_client.publish(self._topics[topic]['topic'], outbound_message)
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
     def poll(self, outbound_messages=None):
         # Publish messages outbound
         for message in outbound_messages:
-            if 'repeat' in message:
-                repeat = True
-            else:
-                repeat = False
-            self._pub_message(message['topic'], message['message'], repeat)
+            self._pub_message(message['topic'], message['message'])
 
         # Check for any incoming commands.
-        self._mqtt.loop()
+        self._mqtt_client.loop()
 
         # Yank any commands to send upward and clear it for the next run.
         upward_data = {
-            'signal_strength': self._signal_strength(),
-            'mqtt_status': self._mqtt.is_connected(),
+            # 'signal_strength': self._signal_strength(),
+            'signal_strength': 5,
+            'mqtt_status': self._mqtt_client.is_connected(),
             'commands': self._upward_commands
         }
         self._upward_commands = []
@@ -328,7 +287,6 @@ class Network:
 
         # Send a discovery message and an online notification.
         self._logger.info('Network: Sending online message')
-        # print("Triggering Home Assistant Discovery...")
         # if self._homeassistant:
         #     self._ha_discovery()
         self._mqtt_client.publish(self._topics['device_connectivity']['topic'], payload='online')
@@ -348,7 +306,6 @@ class Network:
         # If we have a disconnect message, send it to the device topic.
         if message is not None:
              self._mqtt_client.publish(self._topics['device_state']['topic'], message)
-         else:
         # When disconnecting, mark the device and the bay as unavailable.
         self._mqtt_client.publish(self._topics['device_connectivity']['topic'], 'offline')
         self._mqtt_client.publish(self._topics['bay_state']['topic'], 'offline')
@@ -389,6 +346,19 @@ class Network:
                     self._ha_create_multisensor(item)
                 else:
                     self._ha_create(item)
+
+    # Utility method to go through an convert all quantities in nested dicts to a common unit. Optionally, flatten
+    # quantities to a string.
+    def _dict_unit_convert(self, the_dict, flatten=False):
+        new_dict = {}
+        for key in the_dict:
+            if isinstance(key,Quantity):
+                new_dict[key] = the_dict[key].to(self.dist_uom)
+                if flatten:
+                    new_dict[key] = str(the_dict[key])
+            if isinstance(key,dict):
+                new_dict[key] = self._dict_unit_convert(self,the_dict[key],flatten)
+        return new_dict
 
     # Special method for creating multiple sensors for a list. Should probably merge this with the main _ha_create
     # at some point.
