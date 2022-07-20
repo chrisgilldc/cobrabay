@@ -21,8 +21,10 @@ class Network:
         # Save the config
         self._config = config
         # Create the logger.
-        self._logger = logging.getLogger("cobrabay").getChild("network")
+        self._logger = logging.getLogger("CobraBay").getChild("Network")
+        self._logger.setLevel(logging.DEBUG)
         self._logger.info('Network: Initializing...')
+        print("Network start")
 
         try:
             from secrets import secrets
@@ -189,7 +191,13 @@ class Network:
     # Topic Callbacks
 
     # Device Command callback
-    def _cb_device_command(self, client, topic, raw_message):
+    def _cb_device_command(self, client, userdata, message):
+        rcv_topic = message.topic
+        payload = message.payload
+        qos = message.qos
+        retain = message.retain
+        print("Got message:\n\tTopic: {}\n\tPayload: {}\n\tQOS: {}\n\tRetail: {}".format(rcv_topic,payload,qos,retain))
+        return
         # Try to decode the JSON.
         try:
             message = json_loads(raw_message)
@@ -221,13 +229,13 @@ class Network:
             self._logger.info("Network: Received unknown MQTT device command '{}'".format(message['cmd']))
 
     # Bay Command callback
-    def _cb_bay_command(self, client, topic, raw_message):
+    def _cb_bay_command(self, client, userdata, message):
         # Try to decode the JSON.
         try:
-            message = json_loads(raw_message)
+            message = json_loads(message.payload)
         except:
             self._logger.error("Network: Could not decode JSON from MQTT message '{}' on topic '{}'"
-                               .format(topic, raw_message))
+                               .format(message.topic, message.payload))
             # Ignore the message and return, as if we never got int.
             return
         # Proceed on valid commands.
@@ -240,13 +248,45 @@ class Network:
             self._logger.info("Network: Received unknown MQTT bay command '{}'".format(message['cmd']))
 
     # Message publishing method
-    def _pub_message(self, topic, message):
-        # Convert the message
-        if isinstance(message,dict):
-            outbound_message = json_dumps(self._dict_unit_convert(message, flatten=True))
-        else:
-            outbound_message = message
-        self._mqtt_client.publish(self._topics[topic]['topic'], outbound_message)
+    def _pub_message(self, topic, message, repeat=False):
+        previous_state = self._topics[topic]['previous_state']
+        # Send flag.
+        send = False
+        # By default, check to see if the data changed before sending it.
+        if repeat is False:
+            # Both strings, compare, process if different
+            if isinstance(message, str) and isinstance(previous_state, str):
+                if message != previous_state:
+                    send = True
+                else:
+                    return
+            elif isinstance(message, dict) and isinstance(previous_state, dict):
+                for item in message:
+                    if item not in previous_state:
+                        send = True
+                        break
+                    if message[item] != previous_state[item]:
+                        send = True
+                        break
+                return
+            else:
+                if type(message) != type(previous_state):
+                    send = True
+                else:
+                    return
+        elif repeat is True:
+            send = True
+        # The 'repeat' option can be used in cases when a caller wants to send no matter the changed state.
+        # Using this too much can make things super chatty.
+        if send:
+            # New message becomes the previous message.
+            self._topics[topic]['previous_state'] = message
+            # Convert the message
+            if isinstance(message,dict):
+                outbound_message = json_dumps(self._dict_unit_convert(message, flatten=True))
+            else:
+                outbound_message = message
+            self._mqtt_client.publish(self._topics[topic]['topic'], outbound_message)
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
