@@ -21,7 +21,7 @@
 ####
 import logging
 from time import monotonic
-import pint
+from pint import Unit
 from .nan import NaN
 
 class Bay:
