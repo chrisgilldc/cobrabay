@@ -58,7 +58,6 @@ class Sensors:
                 self._logger.error(e,exc_info=True)
                 self._sensor_state[sensor] = 'unavailable'
             else:
-                print("Sensor created.")
                 # if sensor_obj is not None:
                 self._sensors[sensor] = {
                     'type': sensors[sensor]['type'],
@@ -70,7 +69,6 @@ class Sensors:
                 if self._sensors[sensor]['type'] == 'hcsr04':
                     self._sensors[sensor]['avg'] = sensors[sensor]['avg']
                     self._sensors[sensor]['queue'] = []
-                print(self._sensors[sensor])
 
                 # Test the sensor and make sure we can get a result. 
                 # Value doesn't matter, just get *something*
@@ -267,6 +265,15 @@ class Sensors:
                     sensor_data[sensor] = reading
         return sensor_data
 
+    # Method to turn on or off all VL53L1X sensors.
+    def vl53(self,action):
+        for sensor in self._sensors:
+            if self._sensors[sensor]['type'] == 'vl53':
+                if action == 'start':
+                    self._sensors[sensor]['obj'].start_ranging()
+                if action == 'stop':
+                    self._sensors[sensor]['obj'].stop_ranging()
+
     # Utility function to just list all the sensors found.
     def sensor_state(self, sensor=None):
         if sensor is None:
@@ -282,7 +289,6 @@ class Sensors:
         if self._sensor_state[sensor_name] == 'unavailable':
             return NaN('Sensor unavailable')
         if self._sensors[sensor_name]['type'] == 'vl53':
-            print("Sensor type VL53")
             self._sensors[sensor_name]['obj'].start_ranging(0)
             value = self._read_sensor(sensor_name)
             self._sensors[sensor_name]['obj'].stop_ranging()
