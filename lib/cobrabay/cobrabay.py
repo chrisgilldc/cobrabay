@@ -52,18 +52,6 @@ class CobraBay:
         # Basic checks passed. Good enough! Assign it.
         self.config = config
 
-        # Set watchdog pin high to keep the TPL5110 from restarting the system.
-        # Holding the delay pin high will prevent restart. If that ever drops, the TPL5110
-        # will restart us.
-        # Only set up watchdogging if a Watchdog pin is set.
-        if 'watchdog_pin' in config['global']:
-            watchdog_pin = DigitalInOut(eval("board.D{}".format(config['global']['watchdog_pin'])))
-            watchdog_pin.direction = Direction.OUTPUT
-            self._logger.info(f"Current Watchdog pin state: {watchdog_pin.value}")
-            self._logger.info("Setting high to keep watchdog from triggering.")
-            watchdog_pin.value = True
-            self._logger.info("New Watchdog pin state: {}".format(watchdog_pin.value))
-
         # Convert inputs to Units.
         self.config['bay']['park_time'] = Quantity(self.config['bay']['park_time'])
         for option in ('dist_max', 'dist_stop'):
@@ -184,7 +172,7 @@ class CobraBay:
         # Queue up outbound messages for processing. By default, the Network class will not
         # send data that hasn't changed, so we can queue it up here without care.
         self._outbound_messages.append(dict(topic='device_connectivity', message=self._device_state))
-        self._outbound_messages.append(dict(topic='device_mem', message=(mem_free() / 1024)))
+        # self._outbound_messages.append(dict(topic='device_mem', message=(mem_free() / 1024)))
         self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state))
         # Poll the network, send any outbound messages there for MQTT publication.
         network_data = self._network.poll(self._outbound_messages)
@@ -230,29 +218,16 @@ class CobraBay:
         aborted = False
         i = 1
         while done is False:
-            self._logger.debug("{},1 - Start,{}".format(i,mem_free()))
-            collect()
-            self._logger.debug("{},1.5 - Post-Collect,{}".format(i, mem_free()))
-            try:
-                sensor_data = self._sensors.sweep()
-            except Exception as e:
-                self._logger.error('CobraBay: Could not get sensor data. Will sleep 5m and reset.')
-                self._logger.error('CobraBay: ' + e)
-                sleep(360)
-                self._network.disconnect('resetting')
-                microcontroller.reset()
-            self._logger.debug("{},2 - After Sweep,{}".format(i,mem_free()))
+            sensor_data = self._sensors.sweep()
             # print("Sensor data during sweep ---")
             # print(sensor_data)
             # Send the collected data to the bay object to interpret
             self._bay.update(sensor_data)
-            self._logger.debug("{},3 - After Bay,{}".format(i, mem_free()))
             # print("Bay position ---")
             # print(self._bay.position)
             # Display the current state of the bay.
             #try:
             self._display.display_dock(self._bay.position)
-            self._logger.debug("{},4 - After Display,{}".format(i, mem_free()))
             # except Exception as e:
             #     self._logger.error("Got display error during docking: {}".format(e))
 
@@ -260,11 +235,11 @@ class CobraBay:
             self._outbound_messages.append(dict(topic='bay_sensors', message=sensor_data, repeat=True))
             self._outbound_messages.append(dict(topic='bay_position', message=self._bay.position, repeat=True))
             self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=False))
+            print("self._bay_state is {}".format(self._bay.state))
             self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=False))
 
             # Check the network for additional commands, and push out messages.
             network_data = self._network_handler()
-            self._logger.debug("{},5 - After Network,{}".format(i, mem_free()))
             # Check for a complete or abort command.
             if 'command' in network_data:
                 if network_data['command'] == 'complete':
