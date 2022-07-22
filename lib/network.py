@@ -277,6 +277,7 @@ class Network:
                 outbound_message = json_dumps(self._dict_unit_convert(message, flatten=True))
             else:
                 outbound_message = message
+            print("Trying to publish to {}: {}".format(self._topics[topic]['topic'],outbound_message))
             self._mqtt_client.publish(self._topics[topic]['topic'], outbound_message)
 
     # Method to be polled by the main run loop.
@@ -284,6 +285,7 @@ class Network:
     def poll(self, outbound_messages=None):
         # Publish messages outbound
         for message in outbound_messages:
+            print("Processing outbound message to {} with payload {}".format(message['topic'],message['message']))
             self._pub_message(message['topic'], message['message'])
 
         # Check for any incoming commands.
@@ -292,7 +294,7 @@ class Network:
         # Yank any commands to send upward and clear it for the next run.
         upward_data = {
             # 'signal_strength': self._signal_strength(),
-            'signal_strength': 5,
+            'signal_strength': 5,  # Replace later with eth/not eth logic.
             'mqtt_status': self._mqtt_client.is_connected(),
             'commands': self._upward_commands
         }

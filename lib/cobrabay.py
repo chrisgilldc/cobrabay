@@ -169,8 +169,6 @@ class CobraBay:
 
     def _network_handler(self):
         # Always add a device state update and a memory message to the outbound message queue
-        # Have the network object make any necessary reconnections.
-        # self._network.reconnect()
         # Queue up outbound messages for processing. By default, the Network class will not
         # send data that hasn't changed, so we can queue it up here without care.
         self._outbound_messages.append(dict(topic='device_connectivity', message=self._device_state))
