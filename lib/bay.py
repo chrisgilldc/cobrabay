@@ -160,9 +160,8 @@ class Bay:
             # When adjusted range can't get a reasonable value, it will return a NaN object. So if it's *not* a NaN,
             # we can calculate a percentage properly.
             if not isinstance(range,NaN):
-                range_pct = range / self._config['range']['dist_max']
+                range_pct = round(float(range / self._config['range']['dist_max'].to("cm")) * 100,2)
             else:
-                # print("\tRange is a NaN, can't compute range percentage")
                 range_pct = NaN("Range did not return usable value")
         return range, range_pct
 
@@ -197,13 +196,11 @@ class Bay:
 
         # Get range and range percentage. This will return a Unit if it's actually valid, and a NaN object if it's something else
         range, range_pct = self._range_values(sensor_values)
-
         # Update the bay motion state if values are being returned.
         if isinstance(range,Unit) and isinstance(range_pct,float):
             # Evaluate for vehicle movement. We allow for a little wobble.
             try:
                 position_change = self._bay_position['range'] - range
-                #print("Calculated abs range change: {}".format(position_change))
             except TypeError:
                 pass
             else:
@@ -218,10 +215,8 @@ class Bay:
                         time_diff = monotonic() - self._last_move_time
                     except AttributeError:
                         time_diff = 0
-                    #print("Time difference: {}".format(time_diff))
                     if self._config['park_time'] <= time_diff:
                         self._motion = 'still'
-        #print("New motion state: {}".format(self._motion))
 
         # Update the bay position dict.
         self._bay_position = dict(
