@@ -45,7 +45,7 @@ class Network:
                 except:
                     pass
                 else:
-                    self._logger.info("Assining Client ID {} from interface {}".format(self._client_id,interface))
+                    self._logger.info("Assigning Client ID {} from interface {}".format(self._client_id,interface))
                     break
 
         self._system_name = config['global']['system_name']
@@ -274,23 +274,22 @@ class Network:
             self._topics[topic]['previous_state'] = message
             # Convert the message
             if isinstance(message,dict):
-                outbound_message = json_dumps(self._dict_unit_convert(message, flatten=True))
+                outbound_message = json_dumps(message, default=str)
             else:
                 outbound_message = message
-            print("Trying to publish to {}: {}".format(self._topics[topic]['topic'],outbound_message))
             self._mqtt_client.publish(self._topics[topic]['topic'], outbound_message)
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
     def poll(self, outbound_messages=None):
-        # Publish messages outbound
+        # Send all the messages outbound.
         for message in outbound_messages:
-            print("Processing outbound message to {} with payload {}".format(message['topic'],message['message']))
-            self._pub_message(message['topic'], message['message'])
-
+            # Default repeat in cases where it's not included.
+            if 'repeat' not in message:
+                message['repeat'] = False
+            self._pub_message(message['topic'], message['message'], message['repeat'])
         # Check for any incoming commands.
         self._mqtt_client.loop()
-
         # Yank any commands to send upward and clear it for the next run.
         upward_data = {
             # 'signal_strength': self._signal_strength(),
@@ -379,19 +378,6 @@ class Network:
                     self._ha_create_multisensor(item)
                 else:
                     self._ha_create(item)
-
-    # Utility method to go through an convert all quantities in nested dicts to a common unit. Optionally, flatten
-    # quantities to a string.
-    def _dict_unit_convert(self, the_dict, flatten=False):
-        new_dict = {}
-        for key in the_dict:
-            if isinstance(key,Quantity):
-                new_dict[key] = the_dict[key].to(self.dist_uom)
-                if flatten:
-                    new_dict[key] = str(the_dict[key])
-            if isinstance(key,dict):
-                new_dict[key] = self._dict_unit_convert(self,the_dict[key],flatten)
-        return new_dict
 
     # Special method for creating multiple sensors for a list. Should probably merge this with the main _ha_create
     # at some point.
