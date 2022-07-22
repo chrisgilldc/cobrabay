@@ -2,6 +2,7 @@
 # CobraBay - Command line invoker
 ####
 
+import sys
 import logging
 from logging.handlers import SysLogHandler
 import lib.cobrabay as cobrabay
