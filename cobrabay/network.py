@@ -4,12 +4,15 @@
 # Connects to the network to report bay status and take various commands.
 ####
 from time import sleep
+
+from pint import Quantity
+
 from .version import __version__
 from json import loads as json_loads
 from json import dumps as json_dumps
-import paho.mqtt.client as mqtt
+from paho.mqtt.client import Client
 from math import floor
-import netifaces
+from getmac import get_mac_address
 import logging
 import pint
 
@@ -18,8 +21,10 @@ class Network:
         # Save the config
         self._config = config
         # Create the logger.
-        self._logger = logging.getLogger("cobrabay").getChild("network")
+        self._logger = logging.getLogger("CobraBay").getChild("Network")
+        self._logger.setLevel(logging.DEBUG)
         self._logger.info('Network: Initializing...')
+        print("Network start")
 
         try:
             from secrets import secrets
@@ -31,12 +36,15 @@ class Network:
         # Find a MAC to use as client_id. Wireless is preferred, but if we don't have a wireless interface, fall back on
         # the ethernet interface.
         self._client_id = None
-        for interface in ['wlan0','eth0']:
+        for interface in ['eth0','wlan0']:
             while self._client_id is None:
                 try:
-                    netifaces.ifaddresses(interface)
+                    self._client_id = get_mac_address(interface=interface).replace(':','').upper()
                 except:
                     pass
+                else:
+                    self._logger.info("Assining Client ID {} from interface {}".format(self._client_id,interface))
+                    break
 
         self._system_name = config['global']['system_name']
 
@@ -54,23 +62,34 @@ class Network:
         # Bay initial state.
         self._bay_state = 'unknown'
 
-        # List for commands to send upward.
+        # List for commands received and to be passed upward.
         self._upward_commands = []
 
         # Create the MQTT Client.
-        mqtt_client = mqtt.Client(
+        self._mqtt_client = Client(
             client_id=""
         )
-        mqtt_client.username_pw_set(
-            self.secrets['mqtt']['username'],
+        self._mqtt_client.username_pw_set(
+            username=self.secrets['mqtt']['username'],
             password=self.secrets['mqtt']['password']
         )
+        # MQTT host to connect to.
+        self._mqtt_host = self.secrets['mqtt']['broker']
+        # If port is set, us that.
+        try:
+            self._mqtt_port = self.secrets['mqtt']['port']
+        except:
+            self._mqtt_port = 1883
 
-        mqtt_client.on_connect = self._on_connect
-        mqtt_client.on_message = self._on_message
+        # Set TLS options.
+        if 'tls' in self.secrets['mqtt']:
+            pass
+
+        self._mqtt_client.on_connect = self._on_connect
+        self._mqtt_client.on_message = self._on_message
 
         # Unit of Measure to use for distances, based on the global setting.
-        dist_uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
+        self.dist_uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
 
         # Define topic reference.
         self._topics = {
@@ -142,7 +161,7 @@ class Network:
                     'aliases': config['sensors'],  # Dict with list alias names.
                     'icon': 'mdi:ruler',
                     # Conveniently, we use the same string identifier for units as Home Assistant!
-                    'unit_of_measurement': dist_uom
+                    'unit_of_measurement': self.dist_uom
                 }
             },
             'bay_command': {
@@ -155,15 +174,16 @@ class Network:
         }
         self._logger.info('Network: Initialization complete.')
 
-    def _on_connect(self):
+    def _on_connect(self, userdata, flags, rc, properties=None):
+        self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
+        # Create last will, goes to the device topic.
+        self._logger.info("Network: Creating last will.")
+        self._mqtt_client.will_set(self._topics['device_connectivity']['topic'], payload='offline')
         # For every topic that has a callback, add it.
         for item in self._topics:
             if 'callback' in self._topics[item]:
                 self._logger.debug("Network: Creating callback for {}".format(item))
-                self._mqtt.add_topic_callback(self._topics[item]['topic'], self._topics[item]['callback'])
-        # Create last will, goes to the device topic.
-        self._logger.info("Network: Setting up last will.")
-        self._mqtt.will_set(self._topics['device_connectivity']['topic'], 'offline')
+                self._mqtt_client.message_callback_add(self._topics[item]['topic'], self._topics[item]['callback'])
 
     def _on_message(self):
         pass
@@ -171,7 +191,13 @@ class Network:
     # Topic Callbacks
 
     # Device Command callback
-    def _cb_device_command(self, client, topic, raw_message):
+    def _cb_device_command(self, client, userdata, message):
+        rcv_topic = message.topic
+        payload = message.payload
+        qos = message.qos
+        retain = message.retain
+        print("Got message:\n\tTopic: {}\n\tPayload: {}\n\tQOS: {}\n\tRetail: {}".format(rcv_topic,payload,qos,retain))
+        return
         # Try to decode the JSON.
         try:
             message = json_loads(raw_message)
@@ -203,13 +229,13 @@ class Network:
             self._logger.info("Network: Received unknown MQTT device command '{}'".format(message['cmd']))
 
     # Bay Command callback
-    def _cb_bay_command(self, client, topic, raw_message):
+    def _cb_bay_command(self, client, userdata, message):
         # Try to decode the JSON.
         try:
-            message = json_loads(raw_message)
+            message = json_loads(message.payload)
         except:
             self._logger.error("Network: Could not decode JSON from MQTT message '{}' on topic '{}'"
-                               .format(topic, raw_message))
+                               .format(message.topic, message.payload))
             # Ignore the message and return, as if we never got int.
             return
         # Proceed on valid commands.
@@ -248,75 +274,43 @@ class Network:
                     send = True
                 else:
                     return
-        # The 'repeat' option can be used in cases when a caller wants to send no matter the changed state.
-        # Using this too much can make things super chatty.
         elif repeat is True:
             send = True
+        # The 'repeat' option can be used in cases when a caller wants to send no matter the changed state.
+        # Using this too much can make things super chatty.
         if send:
-            attempts = 0
+            # New message becomes the previous message.
             self._topics[topic]['previous_state'] = message
-            if isinstance(message, dict):
-                message = json_dumps(message)
-            while True:
-                try:
-                    self._mqtt.publish(self._topics[topic]['topic'], message)
-                except RuntimeError:
-                    #  Have we run up
-                    if attempts >= 3:
-                        self._logger.error("MQTT Publish caught ESP32 Runtime Error. Resetting...")
-                        mc_reset()
-                    else: # Nope, not enough tries, wait and try again.
-                        sleep(0.1)
-                        attempts += 1
-                else:  # If we succeeded, break.
-                    break
-
+            # Convert the message
+            if isinstance(message,dict):
+                outbound_message = json_dumps(self._dict_unit_convert(message, flatten=True))
+            else:
+                outbound_message = message
+            self._mqtt_client.publish(self._topics[topic]['topic'], outbound_message)
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
     def poll(self, outbound_messages=None):
         # Publish messages outbound
         for message in outbound_messages:
-            if 'repeat' in message:
-                repeat = True
-            else:
-                repeat = False
-            self._pub_message(message['topic'], message['message'], repeat)
+            self._pub_message(message['topic'], message['message'])
 
         # Check for any incoming commands.
-        self._mqtt.loop()
+        self._mqtt_client.loop()
 
         # Yank any commands to send upward and clear it for the next run.
         upward_data = {
-            'signal_strength': self._signal_strength(),
-            'mqtt_status': self._mqtt.is_connected(),
+            # 'signal_strength': self._signal_strength(),
+            'signal_strength': 5,
+            'mqtt_status': self._mqtt_client.is_connected(),
             'commands': self._upward_commands
         }
         self._upward_commands = []
         return upward_data
 
-    def _connect_wifi(self):
-        if self._esp.is_connected:
-            raise UserWarning("Already connected. Recommended to explicitly disconnect first.")
-        connect_attempts = 0
-        while not self._esp.is_connected:
-            try:
-                self._esp.connect_AP(self.secrets["ssid"], self.secrets["password"])
-            except RuntimeError as e:
-                    connect_attempts += 1
-                    sleep_time = 30 * connect_attempts
-                    self._logger.error('Network: Could not connect to AP. Made {} attempts. Sleeping for {}s'.
-                                       format(connect_attempts,sleep_time))
-                    sleep(sleep_time)
-                    continue
-
-        self._logger.info("Network: Connected to {} (RSSI: {})".format(str(self._esp.ssid, "utf-8"), self._esp.rssi))
-        self._logger.info("Network: Have IP: {}".format(self._esp.pretty_ip(self._esp.ip_address)))
-        return True
-
     def _connect_mqtt(self):
         try:
-            self._mqtt.connect()
+            self._mqtt_client.connect(host=self._mqtt_host,port=self._mqtt_port)
         except Exception as e:
             self._logger.error('Network: Could not connect to MQTT broker.')
             self._logger.debug('Network: ' + str(e))
@@ -326,28 +320,20 @@ class Network:
         for item in self._topics:
             if 'callback' in self._topics[item]:
                 try:
-                    self._mqtt.subscribe(self._topics[item]['topic'])
+                    self._mqtt_client.subscribe(self._topics[item]['topic'])
                 except RuntimeError as e:
-                    self._logger.error("Caught error while subscribing: {}".format(e))
-                    # Reset everything!
-                    self._logger.error("Resetting entire system.")
-                    mc_reset()
+                    self._logger.error("Caught error while subscribing to topic {}".format(item))
+                    self._logger.error(e,exc_info=True)
 
         # Send a discovery message and an online notification.
         self._logger.info('Network: Sending online message')
-        print("Triggering Home Assistant Discovery...")
-        if self._homeassistant:
-            self._ha_discovery()
-        self._mqtt.publish(self._topics['device_connectivity']['topic'], 'online')
-
+        # if self._homeassistant:
+        #     self._ha_discovery()
+        self._mqtt_client.publish(self._topics['device_connectivity']['topic'], payload='online')
         return True
 
     # Convenience method to start everything network related at once.
     def connect(self):
-        try:
-            self._connect_wifi()
-        except Exception as e:
-            raise
         try:
             self._connect_mqtt()
         except Exception as e:
@@ -355,34 +341,17 @@ class Network:
 
         return None
 
-    # Reconnect function to call from the main event loop to reconnect if need be.
-    def reconnect(self):
-        # If Wifi is down, we'll need to reconnect both Wifi and MQTT.
-        if not self._esp.is_connected:
-            self._logger.info('Network: Found network not connected. Reconnecting.')
-            self.connect()
-        # If only MQTT is down, retry that.
-        try:
-            mqtt_status = self._mqtt.is_connected
-        except:
-            self._logger.info('Network: Found MQTT not connected. Reconnecting.')
-            self._connect_mqtt()
-        return True
-
     def disconnect(self, message=None):
         self._logger.info('Network: Planned disconnect with message "' + str(message) + '"')
         # If we have a disconnect message, send it to the device topic.
-        # if message is not None:
-        #     self._mqtt.publish(self._topics['device_state']['topic'], message)
-        # else:
+        if message is not None:
+             self._mqtt_client.publish(self._topics['device_state']['topic'], message)
         # When disconnecting, mark the device and the bay as unavailable.
-        self._mqtt.publish(self._topics['device_connectivity']['topic'], 'offline')
-        self._mqtt.publish(self._topics['bay_state']['topic'], 'offline')
-        self._mqtt.publish(self._topics['bay_state']['topic'], 'offline')
+        self._mqtt_client.publish(self._topics['device_connectivity']['topic'], 'offline')
+        self._mqtt_client.publish(self._topics['bay_state']['topic'], 'offline')
+        self._mqtt_client.publish(self._topics['bay_state']['topic'], 'offline')
         # Disconnect from broker
-        self._mqtt.disconnect()
-        # Disconnect from Wifi.
-        self._esp.disconnect()
+        self._mqtt_client.disconnect()
 
     # Get a 'signal strength' out of RSSI. Based on the Android algorithm. Probably has issues, but hey, it's something.
     def _signal_strength(self):
@@ -417,6 +386,19 @@ class Network:
                     self._ha_create_multisensor(item)
                 else:
                     self._ha_create(item)
+
+    # Utility method to go through an convert all quantities in nested dicts to a common unit. Optionally, flatten
+    # quantities to a string.
+    def _dict_unit_convert(self, the_dict, flatten=False):
+        new_dict = {}
+        for key in the_dict:
+            if isinstance(key,Quantity):
+                new_dict[key] = the_dict[key].to(self.dist_uom)
+                if flatten:
+                    new_dict[key] = str(the_dict[key])
+            if isinstance(key,dict):
+                new_dict[key] = self._dict_unit_convert(self,the_dict[key],flatten)
+        return new_dict
 
     # Special method for creating multiple sensors for a list. Should probably merge this with the main _ha_create
     # at some point.

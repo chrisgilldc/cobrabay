@@ -1,8 +1,15 @@
+Adafruit-Blinka
 adafruit-circuitpython-aw9523
 adafruit-circuitpython-bitmap-font
 adafruit-circuitpython-display-shapes
 adafruit-circuitpython-display-text
+adafruit-circuitpython-esp32spi
+adafruit-circuitpython-framebuf
 adafruit-circuitpython-hcsr04
 adafruit-circuitpython-register
 adafruit-circuitpython-vl53l1x
-Adafruit-Blinka
+paho-mqtt~=1.6.1
+rpi-rgb-led-matrix
+Pint~=0.19.2
+rgbmatrix~=0.0.1
+netifaces~=0.11.0
