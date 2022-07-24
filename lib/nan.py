@@ -7,3 +7,9 @@ class NaN:
     @property
     def reason(self):
         return self._reason
+
+    def __str__(self):
+        if self._reason:
+            return self._reason
+        else:
+            return "unknown"
