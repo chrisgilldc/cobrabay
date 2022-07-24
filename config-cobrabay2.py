@@ -32,19 +32,19 @@ config = {
         # Lateral alignment zones to check if the vehicle is too far left or right.
         # Will be sorted by intercept range on start-up.
         'lateral': [
-            { 'intercept_range': 100, # Distance at which an approaching vehicle should trigger this sensor.
-               'dist_ideal': 10, # Ideal lateral distance of the vehicle from this sensor.
-               'ok_spread': 1, # Within this distance of the ideal, still report it as good.
-               'warn_spread': 3, # More than this distance off the ideal will throw a warning.
-               'red_spread': 5, # More than this distance off the ideal will be critical
+            { 'intercept_range': "100 in", # Distance at which an approaching vehicle should trigger this sensor.
+               'dist_ideal': "10 in", # Ideal lateral distance of the vehicle from this sensor.
+               'ok_spread': "1 in", # Within this distance of the ideal, still report it as good.
+               'warn_spread': "3 in", # More than this distance off the ideal will throw a warning.
+               'red_spread': "5 in", # More than this distance off the ideal will be critical
                'sensor': 'lat_front', # Assigned sensor
                'side': 'L' # Side of the bay the sensor is mounted on, 'L' or 'R'. This is relative to the range sensor.
             },
-            { 'intercept_range': 50, # Distance at which an approaching vehicle should trigger this sensor.
-              'dist_ideal': 10, # Ideal lateral distance of the vehicle from this sensor.
-              'ok_spread': 1, # Within this distance of the ideal, still report it as good.
-              'warn_spread': 3, # More than this distance off the ideal will throw a warning.
-              'red_spread': 5, # More than this distance off the ideal will be critical
+            { 'intercept_range': "50 in", # Distance at which an approaching vehicle should trigger this sensor.
+              'dist_ideal': "10 in", # Ideal lateral distance of the vehicle from this sensor.
+              'ok_spread': "1 in", # Within this distance of the ideal, still report it as good.
+              'warn_spread': "3 in", # More than this distance off the ideal will throw a warning.
+              'red_spread': "5 in", # More than this distance off the ideal will be critical
               'sensor': 'lat_rear', # Assigned sensor
               'side': 'L' # Side of the bay the sensor is mounted on, 'L' or 'R'. This is relative to the range sensor.
               }
