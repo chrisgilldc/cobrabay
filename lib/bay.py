@@ -139,13 +139,17 @@ class Bay:
     def _adjusted_range(self, range = None):
         # We never really should get this, but if we do, turn around and return None back, beacuse, WTF?
         if range is None or isinstance(range,NaN):
-            return NaN("Sensor was none, this is likely a bug.")
-        # If detected distance is beyond the reliable detection distance, return 'BR'
+            return NaN("No sensor reading")
+        # If detected distance is beyond the reliable detection distance, return a "Beyond Range message.
         if range > self._config['range']['dist_max']:
             return NaN("Beyond range")
         else:
             adjusted_range = range - self._config['range']['dist_stop']
-            return adjusted_range
+            if adjusted_range <= 0:
+                # This means you've hit the sensor!
+                return NaN("CRASH!")
+            else:
+                return adjusted_range
 
     # Get range and range percentage out of the sensor values.
     def _range_values(self, sensor_values):
@@ -160,9 +164,12 @@ class Bay:
             # When adjusted range can't get a reasonable value, it will return a NaN object. So if it's *not* a NaN,
             # we can calculate a percentage properly.
             if not isinstance(range,NaN):
+                # Calculate a percentage, rounded to two decimal places. This force converts to centimeters, since all
+                # sensors return centimeters, and the float conversion ensures this returns as a float, not as an
+                # undimensioned quantity.
                 range_pct = round(float(range / self._config['range']['dist_max'].to("cm")) * 100,2)
             else:
-                range_pct = NaN("Range did not return usable value")
+                range_pct = NaN("No range.")
         return range, range_pct
 
     @property
