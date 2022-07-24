@@ -4,7 +4,7 @@
 
 import logging
 from logging.handlers import SysLogHandler
-from digitalio import DigitalInOut, Direction
+# from digitalio import DigitalInOut, Direction
 import sys
 from time import monotonic, sleep
 
@@ -101,7 +101,7 @@ class CobraBay:
                               format(config['global']['syslog']['host'],
                                      config['global']['syslog']['facility'],
                                      config['global']['syslog']['protocol']))
-            from syslog_handler import SysLogHandler
+            from logging.handlers import SysLogHandler
             try:
                 self.syslog = SysLogHandler(
                     address=config['global']['syslog']['host'],
