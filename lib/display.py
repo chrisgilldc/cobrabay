@@ -66,8 +66,8 @@ class Display:
             'green': graphics.Color(0, 255, 0),
             'red': graphics.Color(255, 0, 0),
             'darkblue': graphics.Color(0, 0, 139),
-            'orange': graphics.Color(255,153,51),
-            'yellow': graphics.Color(255,255,0)
+            'orange': graphics.Color(255,153, 51),
+            'yellow': graphics.Color(255,255, 0)
         }
 
         self._staging_canvas = self.matrix.CreateFrameCanvas()
@@ -99,6 +99,7 @@ class Display:
         return canvas
 
     def _distance_display(self, canvas, range, range_pct):
+        print("Range value: {}".format(range))
         # If Range isn't a number, there's two options.
         if isinstance(range, NaN):
             # If the NaN reason is "Beyond range", throw up the "Approach" text
@@ -109,42 +110,43 @@ class Display:
             else:
                 text = "ERROR"
                 text_color = self._colors['red']
-        elif range < Quantity("0 inch") and abs(range) > Quantity("2 inches"):
-                text = "BACK-UP"
-                text_color = 0xFF0000
         elif range <= Quantity("1 inch"):
                 text = "STOP!"
                 text_color = self._colors['red']
+        elif range < Quantity("-1 inch"):
+                text = "BACK-UP"
+                text_color = 0xFF0000
         else:
             # Determine what to use for range output.
-            if True:
-            # if self.config['global']['units'] == 'imperial':
+            if self.config['global']['units'] == 'imperial':
                 # For Imperial (ie: US) users, output as prime-notation Feet and Inches.
                 text = self._ft_in(range)
-            # else:
-            #     # For Metric (ie: Reasonable countries) users, output as decimal meters
-            #     text = str(range.to("meters"))
-            # If under 20% of total distance, color the text differently.
+            else:
+                # For Metric (ie: Reasonable countries) users, output as decimal meters
+                text = str(range.to("meters"))
             # Within 10% of range, orange
             if range_pct <= 0.10:
+                print("Should be text color orange")
                 text_color = self._colors['orange']
             # Within 20 % of range, yellow.
             elif range_pct <= 0.20:
+                print("Should be text color yellow.")
                 text_color = self._colors['yellow']
             else:
+                print("Should be text color white")
                 text_color = self._colors['white']
-
+        print("Text color variable: {}".format(text_color))
         # Scale the font based on the available space and size.
         # text = "TESTING!"
         # text_color = self._colors['darkblue']
         selected_font = self._fit_string(text,self.matrix.width-8)
         # Alignment variables to determine the proper lower-left corner of the string.
         # Align vertically, based on canvas height with space removed for the lower strobe bar.
-        #x_start = 4 + ((canvas.width - 8)  / 2) - (self._string_width(text, selected_font) / 2)
-        #y_start = canvas.height - 4 - ((canvas.height-4)/2) + (selected_font.height/2)
-        x_start = 10
-        y_start = 15
-        # Add the string to the canvas, then return it.
+        x_start = 4 + ((canvas.width - 8)  / 2) - (self._string_width(text, selected_font) / 2)
+        y_start = canvas.height - 4 - ((canvas.height-4)/2) + (selected_font.height/2)
+        # x_start = 10
+        # y_start = 15
+        # # Add the string to the canvas, then return it.
         # print("Canvas size X:{}, Y:{}".format(canvas.width,canvas.height))
         # print("Using X:{}, Y:{}".format(x_start,y_start))
         graphics.DrawText(canvas,
@@ -316,7 +318,30 @@ class Display:
                 i += 1
         return canvas
 
+    # Draw the ethernet icon, for wired connections.
+    # Origin is the upper left. Icon takes 5x5 of space.
+    def _eth_icon(self,canvas,online,origin):
+        if online:
+            box_color = self._colors['green']
+        else:
+            box_color = self._colors['red']
+        # Base 'network' line.
+        graphics.DrawLine(canvas,origin[0],origin[1]+4,origin[0]+4,origin[1]+4,self._colors['white'])
+        # Stem
+        graphics.DrawLine(canvas,origin[0]+2,origin[1]+3,origin[0]+2,origin[1]+3,self._colors['white'])
+        # The System Box
+        # Top
+        graphics.DrawLine(canvas, origin[0] + 1, origin[1], origin[0] + 3,origin[1], box_color)
+        # Right
+        graphics.DrawLine(canvas, origin[0] + 3, origin[1], origin[0] + 3, origin[1] + 2, box_color)
+        # Left
+        graphics.DrawLine(canvas, origin[0] + 1, origin[1], origin[0] + 1, origin[1] + 2, box_color)
+        # Bottom
+        graphics.DrawLine(canvas, origin[0] + 1, origin[1] + 2, origin[0] + 3, origin[1] + 2, box_color)
+        return canvas
+
     # Show the MQTT connection status icon.
+    # Origin is the upper left.
     def _mqtt_icon(self, canvas, mqtt_status, origin):
         if mqtt_status:
             color_fg = self._colors['darkblue']
@@ -345,12 +370,10 @@ class Display:
                               self._colors['white'],
                               sensor
                               )
-        self._signal_bars(canvas,system_state['signal_strength'], (59, 27))
+        #self._signal_bars(canvas,system_state['signal_strength'], (59, 27))
+        self._eth_icon(canvas,True,(59,27))
         self._mqtt_icon(canvas,system_state['mqtt_status'], (0, 27))
         self.matrix.SwapOnVSync(canvas)
-
-
-
 
     # Update the display from the provided bay state.
     def display_dock(self, bay_state):
