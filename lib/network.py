@@ -23,10 +23,7 @@ class Network:
         # Create the logger.
         self._logger = logging.getLogger("CobraBay").getChild("Network")
         self._logger.setLevel(logging.DEBUG)
-
-        self._logger.info('Network: Initializing...')
-        print("Network start")
-        print("Network logger propogate: {}".format(self._logger.propagate))
+        self._logger.info('Initializing...')
 
         try:
             from secrets import secrets
@@ -194,6 +191,7 @@ class Network:
 
     # Device Command callback
     def _cb_device_command(self, client, userdata, message):
+        self._logger.debug("Received device command message: {}".format(message.payload))
         # Try to decode the JSON.
         try:
             message = json_loads(message.payload)
@@ -221,6 +219,7 @@ class Network:
 
     # Bay Command callback
     def _cb_bay_command(self, client, userdata, message):
+        self._logger.debug("Received bay command message: {}".format(message.payload))
         # Try to decode the JSON.
         try:
             message = json_loads(message.payload)
@@ -231,7 +230,7 @@ class Network:
             return
         # Proceed on valid commands.
         if 'cmd' not in message:
-            self._logger.error("Network: MQTT message for topic {} does not contain a cmd directive".format(topic))
+            self._logger.error("Network: MQTT message for topic {} does not contain a cmd directive".format(message.topic))
         elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify', 'reset'):
             # If it's a valid bay command, pass it upward.
             self._upward_commands.append({'cmd': message['cmd']})
