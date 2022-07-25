@@ -3,9 +3,8 @@
 ####
 
 import logging
-import time
+from logging.config import dictConfig as logging_dictConfig
 from logging.handlers import SysLogHandler
-# from digitalio import DigitalInOut, Direction
 import sys
 from time import monotonic, sleep
 
@@ -18,18 +17,51 @@ from pint import UnitRegistry, Quantity
 
 class CobraBay:
     def __init__(self, config):
+
+
         # Set up Logging.
-        self._logger = logging.Logger('CobraBay')
-        self._logger.setLevel(logging.DEBUG)
-        print("CobraBay master logger propogate: {}".format(self._logger.propagate))
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        # syslog_handler = logging.handlers.SysLogHandler()
-        # syslog_handler.setFormatter(formatter)
+        logging_config_dict = {
+            'version': 1,
+            'disable_existing_loggers': False,
+            'handlers': {
+                'debug_console_handler': {
+                    'level': 'DEBUG',
+                    'formatter': 'info',
+                    'class': 'logging.StreamHandler',
+                    'stream': 'ext://sys.stdout'
+                }
+            },
+            'formatters': {
+                'info': {
+                    'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    'datefmt': '%Y-%m-%d %H:%M:%S'
+                }
+            },
+            'loggers': {
+                '': {
+                    'level': 'DEBUG',
+                    'handlers': ['debug_console_handler']
+                }
+            }
+        }
+        self._core_logger = logging_dictConfig(logging_config_dict)
+
+        # Master logger takes all log levels and runs them through the same formatter and
+        self._core_logger = logging.Logger('master')
+        self._core_logger.setLevel(logging.DEBUG)
+        # Create a formatter
+        formatter = logging.Formatter()
+        # Create a basic console handler.
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(formatter)
+        # syslog_handler = logging.handlers.SysLogHandler()
+        # syslog_handler.setFormatter(formatter)
         # self._logger.addHandler(syslog_handler)
-        self._logger.addHandler(console_handler)
-
+        self._core_logger.addHandler(console_handler)
+        self._core_logger.info("Core logger message test.")
+        # Create a logger for this module.
+        self._logger = logging.Logger('master').getChild(__name__)
+        self._logger.setLevel(logging.DEBUG)
 
         self._logger.info('CobraBay: CobraBay Initializing...')
         # check for all basic options.
@@ -117,8 +149,10 @@ class CobraBay:
 
     # Command processor.
     def _process_commands(self,command_stack):
+        self._logger.debug("Evaluating {} commands.".format(len(command_stack)))
         # Might have more than one command in the stack, process each of them.
         for command in command_stack:
+            self._logger.debug("Considering command: {}".format(command))
             if self._bay.state not in ('docking', 'undocking'):
                 if 'rescan_sensors' in command['cmd']:
                     self._sensors.rescan()
@@ -193,7 +227,6 @@ class CobraBay:
         # This loop runs while the system is idle. Process commands, increment various timers.
         system_state = {'signal_strength': 0, 'mqtt_status': False}
         while True:
-            print("Main Loop.")
             # Send out the bay state. This makes sure we're ready to update this whenever we return to the operating loop.
             self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=False))
             # Do a network poll, this method handles all the default outbound messages and any incoming commands.
@@ -220,7 +253,6 @@ class CobraBay:
         self._logger.info('CobraBay: Beginning dock.')
         # Force vacant, for testing.
         self._bay.occupied = 'vacant'
-        print("Bay State: {}\tBay Motion: {}\tBay Occupancy: {}".format(self._bay.state,self._bay.motion,self._bay.occupied))
         # Change the bay's state to docking.
         try:
             self._bay.state = 'docking'
@@ -233,7 +265,6 @@ class CobraBay:
         done = False
         i = 1
         while done is False:
-            print("Docking loop.")
             # Sweep the sensors. At some future point this may allow a subset of sensors. Right now it does all of them.
             sensor_data = self._sensors.sweep()
             # Send the collected data to the bay object to interpret
@@ -267,8 +298,6 @@ class CobraBay:
                 self._sensors.vl53('stop')
                 # Break and be done.
                 break
-
-            print("Bay State: {}\tBay Motion: {}\tBay Occupancy: {}".format(self._bay.state,self._bay.motion,self._bay.occupied))
 
             # Update based on bay state.
             # If bay registers a crash, oh crap!
@@ -313,7 +342,6 @@ class CobraBay:
     def _hold_message(self,message,hold_time=120,message_color='white'):
         mark = time.monotonic()
         while time.monotonic() - mark < hold_time:
-            print("Message hold loop.")
             # Display completed for two minutes.
             system_state = {}
             system_state['signal_strength'] = 5
