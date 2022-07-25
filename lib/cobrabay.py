@@ -3,6 +3,7 @@
 ####
 
 import logging
+import time
 from logging.handlers import SysLogHandler
 # from digitalio import DigitalInOut, Direction
 import sys
@@ -22,11 +23,11 @@ class CobraBay:
         self._logger.setLevel(logging.DEBUG)
         print("CobraBay master logger propogate: {}".format(self._logger.propagate))
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        #syslog_handler = logging.handlers.SysLogHandler()
-        #syslog_handler.setFormatter(formatter)
+        # syslog_handler = logging.handlers.SysLogHandler()
+        # syslog_handler.setFormatter(formatter)
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(formatter)
-        #self._logger.addHandler(syslog_handler)
+        # self._logger.addHandler(syslog_handler)
         self._logger.addHandler(console_handler)
 
 
@@ -105,8 +106,8 @@ class CobraBay:
             try:
                 self.syslog = SysLogHandler(
                     address=config['global']['syslog']['host'],
-                    facility=config['global']['syslog']['facility'],
-                    protocol=config['global']['syslog']['protocol'])
+                    facility=config['global']['syslog']['facility'])
+                    # protocol=config['global']['syslog']['protocol'])
             except Exception as e:
                 self._logger.error("Could not set up Syslog logging: {}".format(e))
             else:
@@ -114,7 +115,7 @@ class CobraBay:
 
         self._logger.info('CobraBay: Initialization complete.')
 
-    # Command processor. This is a method because it can get called from multiple loops.
+    # Command processor.
     def _process_commands(self,command_stack):
         # Might have more than one command in the stack, process each of them.
         for command in command_stack:
@@ -126,8 +127,12 @@ class CobraBay:
                 if 'undock' in command['cmd']:
                     self.undock()
                 # Don't allow a verify when we're actually doing a motion.
-                if 'verify' in command['cmd'] and self._bay.state not in ('moving', 'docking', 'undocking'):
+                if 'verify' in command['cmd']:
                     self.verify()
+                if 'reset' in command['cmd']:
+                    self._logger.info("Resetting bay per command.")
+                    self._bay.reset()
+                    print("Bay state after reset: {}".format(self._bay.state))
                 # Don't allow a display sensor request to override an active motion
                 if 'display_sensor' in command['cmd']:
                     if 'options' in command:
@@ -188,6 +193,9 @@ class CobraBay:
         # This loop runs while the system is idle. Process commands, increment various timers.
         system_state = {'signal_strength': 0, 'mqtt_status': False}
         while True:
+            print("Main Loop.")
+            # Send out the bay state. This makes sure we're ready to update this whenever we return to the operating loop.
+            self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=False))
             # Do a network poll, this method handles all the default outbound messages and any incoming commands.
             network_data = self._network_handler()
             # Update the network components of the system state.
@@ -210,55 +218,107 @@ class CobraBay:
     # Start sensors and display to guide parking.
     def dock(self):
         self._logger.info('CobraBay: Beginning dock.')
+        # Force vacant, for testing.
+        self._bay.occupied = 'vacant'
+        print("Bay State: {}\tBay Motion: {}\tBay Occupancy: {}".format(self._bay.state,self._bay.motion,self._bay.occupied))
         # Change the bay's state to docking.
+        try:
+            self._bay.state = 'docking'
+        except Exception as e:
+            self._logger.info("Could not start docking: {}".format(str(e)))
+            return
         self._outbound_messages.append({'topic': 'bay_state', 'message': 'docking'})
         # Start the VL53 sensors ranging
         self._sensors.vl53('start')
         done = False
-        aborted = False
         i = 1
         while done is False:
+            print("Docking loop.")
+            # Sweep the sensors. At some future point this may allow a subset of sensors. Right now it does all of them.
             sensor_data = self._sensors.sweep()
-            # print("Sensor data during sweep ---")
-            # print(sensor_data)
             # Send the collected data to the bay object to interpret
             self._bay.update(sensor_data)
-            # print("Bay position ---")
-            # print(self._bay.position)
-            # Display the current state of the bay.
-            #try:
+            # Display bay positioning.
             self._display.display_dock(self._bay.position)
-            # except Exception as e:
-            #     self._logger.error("Got display error during docking: {}".format(e))
 
-            # Prep status messages to go out to the network.
-            self._outbound_messages.append(dict(topic='bay_sensors', message=sensor_data, repeat=True))
-            self._outbound_messages.append(dict(topic='bay_position', message=self._bay.position, repeat=True))
-            self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=False))
+            # Prepare messages out to the network.
+            # Current state of the bay. Probably still 'Docking'
             self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=False))
+            # Is the bay occupied?
+            self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=False))
+            # Bay positioning
+            self._outbound_messages.append(dict(topic='bay_position', message=self._bay.position, repeat=True))
+            # Bay sensor readings (raw)
+            self._outbound_messages.append(dict(topic='bay_sensors', message=sensor_data, repeat=True))
 
-            # Check the network for additional commands, and push out messages.
+            # Call the network handler. This will send all messages in self._outbound_messages, and return any commands
+            # that need handling.
             network_data = self._network_handler()
             # Check for a complete or abort command.
             if 'command' in network_data:
                 if network_data['command'] == 'complete':
-                    done = True
+                    self._logger.info("Received completion network command. Setting bay to complete.")
+                    self._bay.complete()
                 if network_data['command'] == 'abort':
-                    done = True
-                    aborted = True
+                    self._logger.info("Recelved 'abort' network command. Resetting bay and halting.")
+                    # Reset the bay.
+                    self._bay.reset()
+                # Stop ranging on VL53s.
+                self._sensors.vl53('stop')
+                # Break and be done.
+                break
 
-            # If the bay now considers itself occupied (ie: complete), then we complete.
-            if self._bay.state == 'occupied':
-                self._logger.info("Received 'completion' message during docking. Finishing.")
-                done = True
-            i += 1
-        # If an abort was called, do a verify.
-        if aborted:
-            self._logger.info("Docking aborted. Running verify to determine bay state.")
-            self.verify()
+            print("Bay State: {}\tBay Motion: {}\tBay Occupancy: {}".format(self._bay.state,self._bay.motion,self._bay.occupied))
+
+            # Update based on bay state.
+            # If bay registers a crash, oh crap!
+            if self._bay.state == 'crashed':
+                self._logger.error("Bay reports crash!")
+                # Display crash for two minutes.
+                self._hold_message('CRASHED!',120,'red')
+                return
+
+            # Bay thinks it's done.
+            elif self._bay.motion == 'still' and self._bay.occupied == 'occupied':
+                self._logger.info("No motion and bay occupied, calling this complete.")
+                # Complete the bay.
+                self._bay.complete()
+                break
+
+            # if self._bay.state == 'docking':
+            #     # Still docking, pass and do nothing.
+            #     pass
+            # elif self._bay.state == 'occupied':
+            #     # Bay considers itself occupied.
+            # elif self._bay.state == 'crash':
+            #     # Range has hit absolute 0, which indicates an *actual* crash (we hope not!) or a sensor reading error.
+            #     # Either way, we're done here.
+            #     done = True
+            #
+            # # If the bay now considers itself occupied (ie: complete), then we complete.
+            # if self._bay.state == 'occupied':
+            #     self._logger.info("Received 'completion' message during docking. Finishing.")
+            #     done = True
+            # i += 1
+        # # If an abort was called, do a verify.
+        # if aborted:
+        #     self._logger.info("Docking aborted. Running verify to determine bay state.")
+        #     self.verify()
 
     def undock(self):
         self._logger.info('CobraBay: Undock not yet implemented.')
+        return
+
+    # Display a message for a given amount of time.
+    def _hold_message(self,message,hold_time=120,message_color='white'):
+        mark = time.monotonic()
+        while time.monotonic() - mark < hold_time:
+            print("Message hold loop.")
+            # Display completed for two minutes.
+            system_state = {}
+            system_state['signal_strength'] = 5
+            system_state['mqtt_status'] = 'online'
+            self._display.display_generic(system_state, message=message, message_color=message_color)
         return
 
     def verify(self):
