@@ -232,7 +232,7 @@ class Network:
         # Proceed on valid commands.
         if 'cmd' not in message:
             self._logger.error("Network: MQTT message for topic {} does not contain a cmd directive".format(topic))
-        elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify'):
+        elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify', 'reset'):
             # If it's a valid bay command, pass it upward.
             self._upward_commands.append({'cmd': message['cmd']})
         else:
