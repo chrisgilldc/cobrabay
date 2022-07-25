@@ -15,8 +15,8 @@
 #       'size' - How far off the vehicle is from the ideal lateral position.
 #       'direction' - Direction of the position deviance. 'L' or 'R', relative to the range sensor.
 #       'status' - Which status this zone is in, as defined by the distances in the config, 'red','yellow','green'
-# 'lateral_num' - Number of lateral zones. This is the true expected number, while errors in sensors *may* give a different
-#   numbers of entries in the lateral list.
+#       'lateral_num' - Number of lateral zones. This is the expected number, while errors in sensors *may*
+#       give a different numbers of entries in the lateral list.
 #
 ####
 import logging
@@ -24,27 +24,19 @@ from time import monotonic
 from pint import Unit
 from .nan import NaN
 
+
 class Bay:
     # Initialization. Takes in the Bay component from the overall config.
-    def __init__(self,bay_config,sensor_status):
+    def __init__(self, bay_config, sensor_status):
         # Get the Bay logger.
         self._logger = logging.getLogger("cobrabay").getChild("bay")
         self._logger.info('Bay: Initializing...')
         
         # Store the configuration for future reference.
         self._config = bay_config
- 
-        # Bay State
-        self._bay_state = 'init'
         self._name = bay_config['name']
-        # Initial previous range.
-        self._previous_range = 1000000
-        self._motion = 'still'
-        self._bay_position = {}
 
         # Make sure the lateral zones are sorted by distance.
-        # for lat in self._config['lateral']:
-        #     print(dir(lat['intercept_range']))
         self._config['lateral'] = sorted(self._config['lateral'], key=lambda x: x['intercept_range'])
 
         # Make a list of used sensors
@@ -53,11 +45,25 @@ class Bay:
             self._used_sensors.append(lateral['sensor'])
 
         if not self._haveallsensors(sensor_status):
-            self._bay_state = 'unavailable'
+            self.state = 'unavailable'
         else:
-            self._bay_state = 'ready'
+            self.state = 'ready'
             
         self._logger.info('Bay: Initialization complete.')
+
+        # Reset to initialize variables.
+        self.reset()
+
+    # Reset method, also used for initialization.
+    def reset(self):
+        # Initialize variables that should have starting values.
+        self._previous_range = 1000000
+        self.motion = 'still'
+        self.position = {}
+        # Set occupancy to unknown, since we don't have sensor data to know.
+        self.occupied = 'unknown'
+        # Presume we're ready. We're not rechecking sensor status.
+        self.state = 'ready'
 
     def _haveallsensors(self, sensor_status):
         for sensor in self._used_sensors:
@@ -81,7 +87,8 @@ class Bay:
         return_dict = {}
 
         # Find out difference between ideal distance and reported distance.
-        position_deviance = sensors[self._config['lateral'][area]['sensor']] - self._config['lateral'][area]['dist_ideal']
+        position_deviance = sensors[self._config['lateral'][area]['sensor']] - \
+            self._config['lateral'][area]['dist_ideal']
 
         # Report the absolute deviation from ideal.
         return_dict['size'] = abs(position_deviance)
@@ -107,7 +114,8 @@ class Bay:
         if abs(position_deviance) <= self._config['lateral'][area]['ok_spread']:
             return_dict['status'] = 0
         # Between the dead zone and the warning zone, we show white, an indicator but nothing serious.
-        elif self._config['lateral'][area]['ok_spread'] < abs(position_deviance) < self._config['lateral'][area]['warn_spread']:
+        elif self._config['lateral'][area]['ok_spread'] < abs(position_deviance) < \
+                self._config['lateral'][area]['warn_spread']:
             return_dict['status'] = 1
         # Way off, huge warning.
         elif abs(position_deviance) >= self._config['lateral'][area]['red_spread']:
@@ -136,24 +144,24 @@ class Bay:
         return return_list
         
     # Create an adjusted range
-    def _adjusted_range(self, range = None):
+    def _adjusted_range(self, sensor_range=None):
         # We never really should get this, but if we do, turn around and return None back, beacuse, WTF?
-        if range is None or isinstance(range,NaN):
+        if sensor_range is None or isinstance(sensor_range, NaN):
             return NaN("No sensor reading")
         # If detected distance is beyond the reliable detection distance, return a "Beyond Range message.
-        if range > self._config['range']['dist_max']:
+        if sensor_range > self._config['range']['dist_max']:
             return NaN("Beyond range")
         else:
-            adjusted_range = range - self._config['range']['dist_stop']
+            adjusted_range = sensor_range - self._config['range']['dist_stop']
             if adjusted_range <= 0:
                 # This means you've hit the sensor!
+                self.state = "crashed"
                 return NaN("CRASH!")
             else:
                 return adjusted_range
 
     # Get range and range percentage out of the sensor values.
     def _range_values(self, sensor_values):
-        range_sensor_name = self._config['range']['sensor']
         # Find out if the range sensor exists in the sensor values dict
         if self._config['range']['sensor'] not in sensor_values:
             range = None
@@ -163,14 +171,109 @@ class Bay:
             range = self._adjusted_range(sensor_values[self._config['range']['sensor']])
             # When adjusted range can't get a reasonable value, it will return a NaN object. So if it's *not* a NaN,
             # we can calculate a percentage properly.
-            if not isinstance(range,NaN):
+            if not isinstance(range, NaN):
                 # Calculate a percentage, rounded to two decimal places. This force converts to centimeters, since all
                 # sensors return centimeters, and the float conversion ensures this returns as a float, not as an
                 # undimensioned quantity.
-                range_pct = round(float(range / self._config['range']['dist_max'].to("cm")) * 100,2)
+                range_pct = round(float(range / self._config['range']['dist_max'].to("cm")) * 100, 2)
             else:
                 range_pct = NaN("No range.")
         return range, range_pct
+
+    # Method called when docking is complete.
+    def complete(self):
+        # Set bay state to ready, since the bay can be ready to *undock*
+        self.state = 'ready'
+        # Bay is occupied, by definition, since docking is complete.
+        self.occupied = 'occupied'
+        # Likewise, motion has to be stopped, you shouldn't be driving in a completed bay.
+        self.motion = 'still'
+
+    # Called when there are new sensor values to be interpreted against the bay's parameters.
+    def update(self, sensor_values):
+        if self.state == 'unavailable':
+            raise OSError("Bay is not available")
+
+        if self.state != 'docking':
+            raise RuntimeError("Cannot update when not docking. Must set to docking first.")
+
+        # Get range and range percentage. This will return a Unit if it's actually valid, and a
+        # NaN object if it's something else
+        range, range_pct = self._range_values(sensor_values)
+        # Update the bay motion state if values are being returned.
+        if isinstance(range, Unit) and isinstance(range_pct, float):
+            # Evaluate for vehicle movement. We allow for a little wobble.
+            try:
+                position_change = self.position['range'] - range
+            except TypeError:
+                pass
+            else:
+                if position_change > 1:
+                    self._last_move_time = monotonic()
+                    if self.position['range'] > range:
+                        self.motion = 'approaching'
+                    if self.position['range'] < range:
+                        self.motion = 'receding'
+                else:
+                    try:
+                        time_diff = monotonic() - self._last_move_time
+                    except AttributeError:
+                        time_diff = 0
+                    if self._config['park_time'].to("s") <= time_diff:
+                        self.motion = 'still'
+
+        # Update the bay position dict.
+        self.position = dict(
+            range=range,
+            range_pct=range_pct,
+            lateral=self._lateral(sensor_values),
+            lateral_num=len(self._config['lateral']))
+
+    # Special version of update that processes one sensor sweep to determine bay occupancy.
+    def verify(self, sensor_values):
+        if self.state == 'unavailable':
+            raise OSError("Bay is not available")
+
+        range, range_pct = self._range_values(sensor_values)
+
+        if isinstance(range, NaN):
+            # Since the reliable range should cover most of the parking space, if we go beyond range, this means we're
+            # not occupied.
+            self.occupied = 'vacant'
+        elif range >= self._config['range']['dist_stop'] * 3:
+            # If detected range over three times stopping distance is hitting *something*, but probably not a vehicle.
+            self.occupied = 'vacant'
+        else:
+            # Something is close enough to the range sensor, likely a vehicle! Should also add some extra logic here
+            # with the lateral sensors.
+            self.occupied = 'occupied'
+
+        # Get the lateral sensors, even if we're not evaluating them (yet).
+        lateral = self._lateral(sensor_values)
+
+        # Update the bay position dict.
+        self.position = {
+            'range': range,
+            'range_pct': range_pct,
+            'lateral': lateral,
+            'lateral_num': len(self._config['lateral'])
+            }
+
+    @property
+    def occupied(self):
+        '''
+        Occupancy of the bay.
+
+        Can be one of three states: 'occupied', 'vacant' or 'unknown'.
+
+        :returns: bay occupancy state
+        :rtype: String
+        '''
+        return self._occupied
+
+    @occupied.setter
+    def occupied(self, value):
+        self._occupied = value
 
     @property
     def sensor_list(self):
@@ -182,82 +285,34 @@ class Bay:
 
     @property
     def state(self):
-        return self._bay_state
+        return self._state
 
-    @property
-    def occupied(self):
-        return self._bay_occupied
+    @state.setter
+    def state(self, value):
+        if value not in ("docking","ready","unavailable","crashed"):
+            raise ValueError("Requested state '{}' is not a valid bay state.".format(value))
+        if value == 'docking' and self.occupied == 'occupied':
+            raise RuntimeError('Cannot dock while already occupied!')
+        self._state = value
 
     @property
     def position(self):
-        return self._bay_position
+        return self._position
+
+    @position.setter
+    def position(self, value):
+        self._position = value
 
     @property
     def motion(self):
+        '''
+        Is motion detected by the set of sensors?
+
+        :return: Motion detect by sensors?
+        :rtype: String
+        '''
         return self._motion
 
-    # Called when there are new sensor values to be interpreted against the bay's parameters.
-    def update(self, sensor_values):
-        if self._bay_state == 'unavailable':
-            raise OSError("Bay is not available")
-
-        # Get range and range percentage. This will return a Unit if it's actually valid, and a NaN object if it's something else
-        range, range_pct = self._range_values(sensor_values)
-        # Update the bay motion state if values are being returned.
-        if isinstance(range,Unit) and isinstance(range_pct,float):
-            # Evaluate for vehicle movement. We allow for a little wobble.
-            try:
-                position_change = self._bay_position['range'] - range
-            except TypeError:
-                pass
-            else:
-                if position_change > 1:
-                    self._last_move_time = monotonic()
-                    if self._bay_position['range'] > range:
-                        self._motion = 'approaching'
-                    if self._bay_position['range'] < range:
-                        self._motion = 'receding'
-                else:
-                    try:
-                        time_diff = monotonic() - self._last_move_time
-                    except AttributeError:
-                        time_diff = 0
-                    if self._config['park_time'] <= time_diff:
-                        self._motion = 'still'
-
-        # Update the bay position dict.
-        self._bay_position = dict(
-            range=range,
-            range_pct=range_pct,
-            lateral=self._lateral(sensor_values),
-            lateral_num=len(self._config['lateral']))
-
-    # Special version of update that processes one sensor sweep to determine bay occupancy.
-    def verify(self, sensor_values):
-        if self._bay_state == 'unavailable':
-            raise OSError("Bay is not available")
-
-        range, range_pct = self._range_values(sensor_values)
-
-        if isinstance(range,NaN):
-            # Since the reliable range should cover most of the parking space, if we go beyond range, this means we're
-            # not occupied.
-            self._bay_occupied = 'vacant'
-        elif range >= self._config['range']['dist_stop'] * 3:
-            # If detected range over three times stopping distance is hitting *something*, but probably not a vehicle.
-            self._bay_occupied = 'vacant'
-        else:
-            # Something is close enough to the range sensor, likely a vehicle! Should also add some extra logic here
-            # with the lateral sensors.
-            self._bay_occupied = 'occupied'
-
-        # Get the lateral sensors, even if we're not evaluating them (yet).
-        lateral = self._lateral(sensor_values)
-
-        # Update the bay position dict.
-        self._bay_position = {
-            'range': range,
-            'range_pct': range_pct,
-            'lateral': lateral,
-            'lateral_num': len(self._config['lateral'])
-            }
+    @motion.setter
+    def motion(self, value):
+        self._motion = value
