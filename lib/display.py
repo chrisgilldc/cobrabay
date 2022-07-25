@@ -99,13 +99,15 @@ class Display:
         return canvas
 
     def _distance_display(self, canvas, range, range_pct):
-        print("Range value: {}".format(range))
         # If Range isn't a number, there's two options.
         if isinstance(range, NaN):
             # If the NaN reason is "Beyond range", throw up the "Approach" text
             if range.reason == 'Beyond range':
                 text = "APPROACH"
                 text_color = self._colors['darkblue']
+            if range.reason == 'CRASH!':
+                text = range.reason
+                text_color = self._colors['red']
             # Any other NaN indicates an error.
             else:
                 text = "ERROR"
@@ -126,16 +128,12 @@ class Display:
                 text = str(range.to("meters"))
             # Within 10% of range, orange
             if range_pct <= 0.10:
-                print("Should be text color orange")
                 text_color = self._colors['orange']
             # Within 20 % of range, yellow.
             elif range_pct <= 0.20:
-                print("Should be text color yellow.")
                 text_color = self._colors['yellow']
             else:
-                print("Should be text color white")
                 text_color = self._colors['white']
-        print("Text color variable: {}".format(text_color))
         # Scale the font based on the available space and size.
         # text = "TESTING!"
         # text_color = self._colors['darkblue']
@@ -360,9 +358,15 @@ class Display:
         return canvas
 
     # Display state icons, and optionally a single sensor.
-    def display_generic(self, system_state, sensor=None):
+    def display_generic(self, system_state, message_color = 'white', message = None, sensor=None):
         canvas = self.matrix.CreateFrameCanvas()
-        if sensor is not None:
+        if message:
+            font = self._fit_string(message)
+            height = ( ( canvas.height - 5 ) / 2 ) + ( font.height / 2 )
+            graphics.DrawText(canvas,
+                              font,
+                              5, height, self._colors[message_color],message)
+        elif sensor is not None:
             graphics.DrawText(canvas,
                               self.base_font,
                               5,
