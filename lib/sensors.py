@@ -212,7 +212,8 @@ class Sensors:
             else:
                 return NaN('No sensor response')
         elif self._sensors[sensor]['type'] == 'vl53':
-            measured_distance = Quantity(self._sensors[sensor]['obj'].get_distance(),self._ureg.centimeter)
+            # The VL53L1X library returns millimeters. Convert it to cm.
+            measured_distance = Quantity(self._sensors[sensor]['obj'].get_distance(),self._ureg.millimeters).to('cm')
             return measured_distance
         elif self._sensors[sensor]['type'] == 'synth':
             distance = self._sensors[sensor]['obj'].distance
