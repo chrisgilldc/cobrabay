@@ -127,7 +127,7 @@ class Bay:
         
     # Process the lateral detection areas. These are in order, closest to furthest.
     def _lateral(self, sensor_values):
-        # self._logger.debug('Bay: Checking lateral areas.')
+        self._logger.debug("Bay evaluating lateral sesnor values: {}".format(sensor_values))
         return_list = []
         for area in range(len(self._config['lateral'])):
             # Check if the sensor actually has a value.
