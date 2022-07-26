@@ -12,9 +12,9 @@ config = {
         },
     # Define sensors to be used in the Bay definition.
     'sensors': {
-        #'center': {'type': 'vl53', 'address': 0x29, 'distance_mode': 'long', 'timing_budget': 50 },
-        #'lat_front': {'type': 'hcsr04', 'board': 0x58, 'trigger': 1, 'echo': 2, 'timeout': 0.5, 'avg': 5 },
-        #'lat_rear': {'type': 'hcsr04', 'board': 0x58, 'trigger': 3, 'echo': 4, 'timeout': 0.5, 'avg': 5 },
+        'center': {'type': 'vl53', 'address': 0x29, 'distance_mode': 'medium', 'timing_budget': 50 },
+        'lat_front': {'type': 'hcsr04', 'board': 0x58, 'trigger': 1, 'echo': 2, 'timeout': 0.5, 'avg': 5 },
+        'lat_rear': {'type': 'hcsr04', 'board': 0x58, 'trigger': 3, 'echo': 4, 'timeout': 0.5, 'avg': 5 },
         },
     'bay': {  # Bay definition. ONLY ONE IS SUPPORTED NOW!
         'active': True,  # Is the bay active?
@@ -22,14 +22,13 @@ config = {
         'park_time': "2 min",  # How long until a stationary vehicle is counted as parked.
         # How to range-find the vehicle
         'range': {
-            # 'dist_max': "276 in", # Maximum range to report at
-            'dist_max': "40 in", # Maximum range to report at
-            # 'dist_stop': "10 in", # Distance from the range sensor where the vehicle should stop.
-            'dist_stop': "5 in", # Distance from the range sensor where the vehicle should stop.
+            'dist_max': "276 in", # Maximum range to report at
+            'dist_stop': "10 in", # Distance from the range sensor where the vehicle should stop.
             'sensor': 'center' # Assigned sensor for range finding
             },
         # Lateral alignment zones to check if the vehicle is too far left or right.
         # Will be sorted by intercept range on start-up.
+        # If there aren't lateral sensors, this key still needs to exist, but it can be empty.
         'lateral': [
             { 'intercept_range': "100 in", # Distance at which an approaching vehicle should trigger this sensor.
                'dist_ideal': "10 in", # Ideal lateral distance of the vehicle from this sensor.
