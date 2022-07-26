@@ -31,6 +31,7 @@ library.
 
 import time
 from digitalio import DigitalInOut, Direction
+import adafruit_aw9523
 
 _USE_PULSEIO = False
 try:
@@ -81,7 +82,8 @@ class HCSR04:
             set to less than 0.05 seconds!
         """
         self._timeout = timeout
-        if isinstance(trigger_pin,DigitalInOut):
+        print("Got trigger pin type: {}".format(type(trigger_pin)))
+        if isinstance(trigger_pin, adafruit_aw9523.DigitalInOut):
             self._trig = trigger_pin
         else:
             self._trig = DigitalInOut(trigger_pin)
@@ -92,7 +94,7 @@ class HCSR04:
             self._echo.pause()
             self._echo.clear()
         else:
-            if isinstance(echo_pin,DigitalInOut):
+            if isinstance(echo_pin, adafruit_aw9523.DigitalInOut):
                 self._echo = echo_pin
             else:
                 self._echo = DigitalInOut(echo_pin)
