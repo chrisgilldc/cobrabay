@@ -34,12 +34,11 @@ from digitalio import DigitalInOut, Direction
 import adafruit_aw9523
 
 _USE_PULSEIO = False
-try:
-    from pulseio import PulseIn
-
-    _USE_PULSEIO = True
-except ImportError:
-    pass  # This is OK, we'll try to bitbang it!
+# try:
+#     from pulseio import PulseIn
+#     _USE_PULSEIO = True
+# except ImportError:
+#     pass  # This is OK, we'll try to bitbang it!
 
 __version__ = "0.0.0-auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_HCSR04.git"
