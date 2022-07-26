@@ -5,12 +5,15 @@
 ####
 
 import logging
+
+import adafruit_aw9523
 import smbus
 import VL53L1X
 from time import sleep
-from adafruit_hcsr04 import HCSR04
+import board
+import busio
 from adafruit_aw9523 import AW9523
-# from adafruit_vl53l1x import VL53L1X
+from .adafruit_hcsr04 import HCSR04
 from .synthsensor import SynthSensor
 from pint import UnitRegistry, Quantity
 
@@ -28,6 +31,12 @@ class Sensors:
             'sensor_pacing': 0.5,
             'sensors': config['sensors']
         }
+
+        # I2C bus.
+        self._i2c = busio.I2C(board.SCL, board.SDA)
+
+        # Dict to hold GPIO board objects.
+        self.gpio_boards = dict()
 
         # Try to pull over values from the config array.
         # If present, they'll overwrite the default. If not, the default stands.
@@ -118,16 +127,19 @@ class Sensors:
             # then any missing board must be an AW9523.
             if options['board'] not in self.gpio_boards:
                 try:
-                    self.gpio_boards[options['board']] = AW9523(board.I2C(), address=options['board'])
+                    self.gpio_boards[options['board']] = AW9523(self._i2c, address=options['board'])
                 except Exception as e:
                     raise OSError("AW9523 not available at address '" + str(options['board']) + "'. Skipping.")
 
             # Create HCSR04 object with the correct pin syntax.
             # Pins on the AW9523
             if options['board'] in (0x58, 0x59, 0x5A, 0x5B):
+                tp = self.gpio_boards[options['board']].get_pin(options['trigger'])
+                ep = self.gpio_boards[options['board']].get_pin(options['echo'])
+                self._logger.debug("Trying to create HCSR04 with trigger pin '{}' and echo pin '{}'".format(tp,ep))
                 new_sensor = HCSR04(
-                    trigger_pin=self.gpio_boards[options['board']].get_pin(options['trigger']),
-                    echo_pin=self.gpio_boards[options['board']].get_pin(options['echo']),
+                    trigger_pin=tp,
+                    echo_pin=ep,
                     timeout=timeout)
             # No errors to this point, return the sensor.
             return new_sensor
