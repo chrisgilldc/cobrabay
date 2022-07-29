@@ -239,7 +239,12 @@ class CobraBay:
             # Send out the bay state. This makes sure we're ready to update this whenever we return to the operating loop.
             self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=False))
             # Send the hardware state out
-            self._outbound_messages.append(dict(topic='hw_state', message=self._pistatus.status(), repeat=True))
+            self._outbound_messages.append(
+                {'topic': 'cpu_pct', 'message': self._pistatus.status('cpu_pct'), 'repeat': False})
+            self._outbound_messages.append(
+                {'topic': 'cpu_temp', 'message': self._pistatus.status('cpu_temp'), 'repeat': False})
+            self._outbound_messages.append(
+                {'topic': 'mem_info', 'message': self._pistatus.status('mem_info'), 'repeat': False})
             # Do a network poll, this method handles all the default outbound messages and any incoming commands.
             network_data = self._network_handler()
             # Update the network components of the system state.
