@@ -89,8 +89,6 @@ class Network:
         self._mqtt_client.on_connect = self._on_connect
         self._mqtt_client.on_message = self._on_message
 
-        # Unit of Measure to use for distances, based on the global setting.
-        self.dist_uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
 
         # Define topic reference.
         self._topics = {
@@ -106,9 +104,43 @@ class Network:
                     'payload_off': 'offline'
                 }
             },
-            'hw_state': {
-                'topic': 'cobrabay/' + self._client_id + '/hwstatus',
-                'previous_state': {}
+            'cpu_pct': {
+                'topic': 'cobrabay/' + self._client_id + '/cpu_pct',
+                'previous_state': {},
+                'ha_discovery': {
+                    'name': '{} Connectivity'.format(self._system_name),
+                    'type': 'sensor',
+                    'entity': 'connectivity',
+                    'device_class': 'connectivity',
+                    'payload_on': 'online',
+                    'payload_off': 'offline',
+                    'unit_of_measurement': '%'
+                }
+            },
+            'cpu_temp': {
+                'topic': 'cobrabay/' + self._client_id + '/cpu_pct',
+                'previous_state': {},
+                'ha_discovery': {
+                    'name': '{} Connectivity'.format(self._system_name),
+                    'type': 'binary_sensor',
+                    'entity': 'connectivity',
+                    'device_class': 'connectivity',
+                    'payload_on': 'online',
+                    'payload_off': 'offline',
+                    'unit_of_measurement': self._uom('temp')
+                }
+            },
+            'mem_info': {
+                'topic': 'cobrabay/' + self._client_id + '/mem_info',
+                'previous_state': {},
+                'ha_discovery': {
+                    'name': '{} Memory'.format(self._system_name),
+                    'type': 'binary_sensor',
+                    'entity': 'connectivity',
+                    'device_class': 'connectivity',
+                    'payload_on': 'online',
+                    'payload_off': 'offline'
+                }
             },
             'device_command': {
                 'topic': 'cobrabay/' + self._client_id + '/cmd',
@@ -283,6 +315,8 @@ class Network:
             # Default repeat in cases where it's not included.
             if 'repeat' not in message:
                 message['repeat'] = False
+            print("Trying to publish to topic {} message: {}".format(message['topic'],message['message']))
+            print("Has type: {}".format(type(message['message'])))
             self._pub_message(message['topic'], message['message'], message['repeat'])
         # Check for any incoming commands.
         self._mqtt_client.loop()
@@ -447,3 +481,22 @@ class Network:
         # icon: mdi:test - tube
         # templates:
         # rgb_color: "if (state === 'on') return [251, 210, 41]; else return [54, 95, 140];"
+
+    def _uom(self,unit_type):
+        system = self._config['global']['units']
+        if unit_type == 'dist':
+            if system == 'imperial':
+                uom = "in"
+            else:
+                uom = "cm"
+        elif unit_type == 'temp':
+            if system == 'imperial':
+                uom = "°F"
+            else:
+                uom = "°C"
+        else:
+            raise ValueError("{} isn't a valid unit type".format(unit_type))
+
+        # Unit of Measure to use for distances, based on the global setting.
+        self.dist_uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
+        return uom
