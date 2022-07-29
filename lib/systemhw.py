@@ -17,23 +17,22 @@ class PiStatus:
         self._ureg.define('percent = 1 / 100 = %')
         self._Q = self._ureg.Quantity
 
-    def status(self):
-        return_dict = {}
-        # Get the CPU use
-        return_dict['cpu_pct'] = self._cpu_info()
-        # Get the cpu temp
-        return_dict['cpu_temp'] = self._cpu_temp()
-        # Get the memory
-        return_dict = return_dict | self._mem_info()
-
-        return return_dict
+    def status(self,metric):
+        if metric == 'cpu_pct':
+            # CPU UseGet the CPU use
+            return self._cpu_info()
+        elif metric == 'cpu_temp':
+            return self._cpu_temp()
+        elif metric == 'mem_info':
+            return self._mem_info()
+        else:
+            raise ValueError('Not a valid metric')
 
     def _cpu_info(self):
-        cpu_pct = self._Q(psutil.cpu_percent(), self._ureg.percent)
-        return cpu_pct
+        return psutil.cpu_percent()
 
     def _cpu_temp(self):
-        return self._Q(CPUTemperature(), self._ureg.degC)
+        return self._Q(CPUTemperature().temperature, self._ureg.degC)
 
     def _mem_info(self):
         memory = psutil.virtual_memory()
