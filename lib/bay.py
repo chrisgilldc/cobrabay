@@ -316,3 +316,11 @@ class Bay:
     @motion.setter
     def motion(self, value):
         self._motion = value
+
+    # Property to make it easier to test for lateral config. This is used downstream in display and network
+    @property
+    def lateral(self):
+        if len(self._config['lateral']) > 0:
+            return True
+        else:
+            return False
