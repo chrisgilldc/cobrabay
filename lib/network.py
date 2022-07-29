@@ -48,9 +48,12 @@ class Network:
         self._system_name = config['global']['system_name']
 
         # Set homeassistant integration state.
+        self._logger.debug("Config file HA setting: {}".format(config['global']['homeassistant']))
         try:
+            self._logger.debug("Setting Home Assistant true.")
             self._homeassistant = config['global']['homeassistant']
         except:
+            self._logger.debug("Setting Home Assistant false.")
             self._homeassistant = False
 
         # Save the bay object.
@@ -104,15 +107,9 @@ class Network:
                     'payload_off': 'offline'
                 }
             },
-            'device_mem': {
-                'topic': 'cobrabay/' + self._client_id + '/mem',
-                'previous_state': {},
-                'ha_discovery': {
-                    'type': 'sensor',
-                    'name': 'Available Memory',
-                    'entity': 'memory_free',
-                    'unit_of_measurement': 'kB'
-                }
+            'hw_state': {
+                'topic': 'cobrabay/' + self._client_id + '/hwstatus',
+                'previous_state': {}
             },
             'device_command': {
                 'topic': 'cobrabay/' + self._client_id + '/cmd',
@@ -318,8 +315,10 @@ class Network:
 
         # Send a discovery message and an online notification.
         self._logger.info('Network: Sending online message')
-        # if self._homeassistant:
-        #     self._ha_discovery()
+        self._logger.debug("HA status: {}".format(self._homeassistant))
+        if self._homeassistant:
+            self._logger.debug("Running HA Discovery...")
+            self._ha_discovery()
         self._mqtt_client.publish(self._topics['device_connectivity']['topic'], payload='online')
         return True
 
@@ -416,7 +415,7 @@ class Network:
             # Send the discovery!
             print("Target topic: {}".format(config_topic))
             print("Payload q: {}".format(json_dumps(config_dict)))
-            self._mqtt.publish(config_topic, json_dumps(config_dict))
+            self._mqtt_client.publish(config_topic, json_dumps(config_dict))
 
     def _ha_create(self, mqtt_item):
         # Go get the details from the main topics dict.
@@ -440,7 +439,8 @@ class Network:
         config_dict['availability_topic'] = self._topics['device_connectivity']['topic']
 
         # Send it!
-        self._mqtt.publish(config_topic,json_dumps(config_dict))
+        self._logger.debug("Publishing HA discovery to topic {}\n\t{}".format(config_topic,config_dict))
+        self._mqtt_client.publish(config_topic,json_dumps(config_dict))
 
         # sensor.tester_state:
         # icon: mdi:test - tube
