@@ -3,18 +3,17 @@
 #
 # Connects to the network to report bay status and take various commands.
 ####
-from time import sleep
 
-from pint import Quantity
+import logging
+from json import dumps as json_dumps
+from json import loads as json_loads
+from math import floor
+
+from getmac import get_mac_address
+from paho.mqtt.client import Client
 
 from .version import __version__
-from json import loads as json_loads
-from json import dumps as json_dumps
-from paho.mqtt.client import Client
-from math import floor
-from getmac import get_mac_address
-import logging
-import pint
+
 
 class Network:
     def __init__(self, config, bay):
@@ -35,14 +34,14 @@ class Network:
         # Find a MAC to use as client_id. Wireless is preferred, but if we don't have a wireless interface, fall back on
         # the ethernet interface.
         self._client_id = None
-        for interface in ['eth0','wlan0']:
+        for interface in ['eth0', 'wlan0']:
             while self._client_id is None:
                 try:
-                    self._client_id = get_mac_address(interface=interface).replace(':','').upper()
+                    self._client_id = get_mac_address(interface=interface).replace(':', '').upper()
                 except:
                     pass
                 else:
-                    self._logger.info("Assigning Client ID {} from interface {}".format(self._client_id,interface))
+                    self._logger.info("Assigning Client ID {} from interface {}".format(self._client_id, interface))
                     break
 
         self._system_name = config['global']['system_name']
@@ -227,7 +226,8 @@ class Network:
             return
         # Proceed on valid commands.
         if 'cmd' not in message:
-            self._logger.error("Network: MQTT message for topic {} does not contain a cmd directive".format(message.topic))
+            self._logger.error(
+                "Network: MQTT message for topic {} does not contain a cmd directive".format(message.topic))
         elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify', 'reset'):
             # If it's a valid bay command, pass it upward.
             self._upward_commands.append({'cmd': message['cmd']})
@@ -269,7 +269,7 @@ class Network:
             # New message becomes the previous message.
             self._topics[topic]['previous_state'] = message
             # Convert the message
-            if isinstance(message,dict):
+            if isinstance(message, dict):
                 outbound_message = json_dumps(message, default=str)
             else:
                 outbound_message = message
@@ -298,7 +298,7 @@ class Network:
 
     def _connect_mqtt(self):
         try:
-            self._mqtt_client.connect(host=self._mqtt_host,port=self._mqtt_port)
+            self._mqtt_client.connect(host=self._mqtt_host, port=self._mqtt_port)
         except Exception as e:
             self._logger.error('Network: Could not connect to MQTT broker.')
             self._logger.debug('Network: ' + str(e))
@@ -311,7 +311,7 @@ class Network:
                     self._mqtt_client.subscribe(self._topics[item]['topic'])
                 except RuntimeError as e:
                     self._logger.error("Caught error while subscribing to topic {}".format(item))
-                    self._logger.error(e,exc_info=True)
+                    self._logger.error(e, exc_info=True)
 
         # Send a discovery message and an online notification.
         self._logger.info('Network: Sending online message')
@@ -335,7 +335,7 @@ class Network:
         self._logger.info('Network: Planned disconnect with message "' + str(message) + '"')
         # If we have a disconnect message, send it to the device topic.
         if message is not None:
-             self._mqtt_client.publish(self._topics['device_state']['topic'], message)
+            self._mqtt_client.publish(self._topics['device_state']['topic'], message)
         # When disconnecting, mark the device and the bay as unavailable.
         self._mqtt_client.publish(self._topics['device_connectivity']['topic'], 'offline')
         self._mqtt_client.publish(self._topics['bay_state']['topic'], 'offline')
@@ -420,16 +420,17 @@ class Network:
     def _ha_create(self, mqtt_item):
         # Go get the details from the main topics dict.
         ha_config = self._topics[mqtt_item]['ha_discovery']
-        config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'],self._client_id,ha_config['entity'])
+        config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'], self._client_id,
+                                                                       ha_config['entity'])
         config_dict = {
             'name': ha_config['name'],
-            'object_id': self._system_name.replace(" ","").lower() + "_" + mqtt_item,
+            'object_id': self._system_name.replace(" ", "").lower() + "_" + mqtt_item,
             'device': self._device_info,
             'state_topic': self._topics[mqtt_item]['topic'],
             'unique_id': self._client_id + '.' + ha_config['entity'],
         }
         # Optional parameters
-        for par in ('device_class', 'icon','unit_of_measurement', 'payload_on','payload_off'):
+        for par in ('device_class', 'icon', 'unit_of_measurement', 'payload_on', 'payload_off'):
             try:
                 config_dict[par] = ha_config[par]
             except KeyError:
@@ -439,11 +440,10 @@ class Network:
         config_dict['availability_topic'] = self._topics['device_connectivity']['topic']
 
         # Send it!
-        self._logger.debug("Publishing HA discovery to topic {}\n\t{}".format(config_topic,config_dict))
-        self._mqtt_client.publish(config_topic,json_dumps(config_dict))
+        self._logger.debug("Publishing HA discovery to topic {}\n\t{}".format(config_topic, config_dict))
+        self._mqtt_client.publish(config_topic, json_dumps(config_dict))
 
         # sensor.tester_state:
         # icon: mdi:test - tube
         # templates:
         # rgb_color: "if (state === 'on') return [251, 210, 41]; else return [54, 95, 140];"
-
