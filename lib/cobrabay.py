@@ -7,17 +7,23 @@ from logging.config import dictConfig as logging_dictConfig
 from logging.handlers import SysLogHandler
 import sys
 from time import monotonic, sleep
+import atexit
 
 # Import the other CobraBay classes
 from .bay import Bay
 from .display import Display
 from .network import Network
 from .sensors import Sensors
+from .systemhw import PiStatus
 from pint import UnitRegistry, Quantity
 
 class CobraBay:
     def __init__(self, config):
+        # Register the exit handler.
+        atexit.register(self.system_exit)
 
+        # Create the object for checking hardware status.
+        self._pistatus = PiStatus()
 
         # Set up Logging.
         logging_config_dict = {
@@ -101,6 +107,15 @@ class CobraBay:
         self._device_state = 'on'
         # Queue for outbound messages.
         self._outbound_messages = []
+        # Queue the startup message.
+        self._outbound_messages.append(
+            {
+                'topic': 'device_connectivity',
+                'message':
+                    { 'state': self._device_state,
+                      'reason': 'startup' }
+            }
+        )
         # Information to display a sensor on the idle screen.
         self._display_sensor = { 'sensor': None }
 
@@ -207,13 +222,7 @@ class CobraBay:
                     return 'abort'
 
     def _network_handler(self):
-        # Always add a device state update and a memory message to the outbound message queue
-        # Queue up outbound messages for processing. By default, the Network class will not
-        # send data that hasn't changed, so we can queue it up here without care.
-        self._outbound_messages.append(dict(topic='device_connectivity', message=self._device_state))
-        # self._outbound_messages.append(dict(topic='device_mem', message=(mem_free() / 1024)))
-        self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state))
-        # Poll the network, send any outbound messages there for MQTT publication.
+        # Send the outbound message queue to the network module to handle. After, we empty the message queue.
         network_data = self._network.poll(self._outbound_messages)
         self._outbound_messages = []
         # Check the network command queue. If there are commands, run them.
@@ -229,6 +238,8 @@ class CobraBay:
         while True:
             # Send out the bay state. This makes sure we're ready to update this whenever we return to the operating loop.
             self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=False))
+            # Send the hardware state out
+            self._outbound_messages.append(dict(topic='hw_state', message=self._pistatus.status(), repeat=True))
             # Do a network poll, this method handles all the default outbound messages and any incoming commands.
             network_data = self._network_handler()
             # Update the network components of the system state.
@@ -377,3 +388,12 @@ class CobraBay:
     #     self._sensors.vl53('stop')
     #     # Release the display to allow proper reinitialization later.
     #     displayio.release_displays()
+
+    def system_exit(self):
+        # Wipe any previous messages. They don't matter now, we're going away!
+        self._outbound_messages = []
+        # Queue up outbound messages for shutdown.
+        self._outbound_messages.append(dict(topic='device_connectivity', message={'state': 'off', 'reason': 'shutdown'}, repeat=True))
+        self._outbound_messages.append(dict(topic='bay_state', message={'state': 'unknown', 'reason': 'shutdown'}, repeat=True))
+        # Call the network once. We'll ignore any commands we get.
+        self._network_handler()
