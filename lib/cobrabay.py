@@ -4,7 +4,7 @@
 
 import logging
 from logging.config import dictConfig as logging_dictConfig
-from logging.handlers import SysLogHandler
+# from logging.handlers import SysLogHandler
 import sys
 from time import monotonic, sleep
 import atexit
@@ -15,7 +15,8 @@ from .display import Display
 from .network import Network
 from .sensors import Sensors
 from .systemhw import PiStatus
-from pint import UnitRegistry, Quantity
+from pint import Quantity
+
 
 class CobraBay:
     def __init__(self, config):
@@ -26,31 +27,31 @@ class CobraBay:
         self._pistatus = PiStatus()
 
         # Set up Logging.
-        logging_config_dict = {
-            'version': 1,
-            'disable_existing_loggers': False,
-            'handlers': {
-                'debug_console_handler': {
-                    'level': 'DEBUG',
-                    'formatter': 'info',
-                    'class': 'logging.StreamHandler',
-                    'stream': 'ext://sys.stdout'
-                }
-            },
-            'formatters': {
-                'info': {
-                    'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    'datefmt': '%Y-%m-%d %H:%M:%S'
-                }
-            },
-            'loggers': {
-                '': {
-                    'level': 'DEBUG',
-                    'handlers': ['debug_console_handler']
-                }
-            }
-        }
-        self._core_logger = logging_dictConfig(logging_config_dict)
+        # logging_config_dict = {
+        #     'version': 1,
+        #     'disable_existing_loggers': False,
+        #     'handlers': {
+        #         'debug_console_handler': {
+        #             'level': 'DEBUG',
+        #             'formatter': 'info',
+        #             'class': 'logging.StreamHandler',
+        #             'stream': 'ext://sys.stdout'
+        #         }
+        #     },
+        #     'formatters': {
+        #         'info': {
+        #             'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        #             'datefmt': '%Y-%m-%d %H:%M:%S'
+        #         }
+        #     },
+        #     'loggers': {
+        #         '': {
+        #             'level': 'DEBUG',
+        #             'handlers': ['debug_console_handler']
+        #         }
+        #     }
+        # }
+        # self._core_logger = logging_dictConfig(logging_config_dict)
 
         # Master logger takes all log levels and runs them through the same formatter and
         self._core_logger = logging.Logger('master')
@@ -108,16 +109,9 @@ class CobraBay:
         # Queue for outbound messages.
         self._outbound_messages = []
         # Queue the startup message.
-        self._outbound_messages.append(
-            {
-                'topic': 'device_connectivity',
-                'message':
-                    { 'state': self._device_state,
-                      'reason': 'startup' }
-            }
-        )
+        self._outbound_messages.append({'topic': 'device_connectivity', 'message': 'online'})
         # Information to display a sensor on the idle screen.
-        self._display_sensor = { 'sensor': None }
+        self._display_sensor = {'sensor': None}
 
         self._logger.info('CobraBay: Creating sensors...')
         # Create master sensor object to hold all necessary sensor sub-objects.
@@ -135,8 +129,11 @@ class CobraBay:
         self._logger.info('CobraBay: Connecting to network...')
         # Create Network object.
         self._network = Network(
-            config = config,  # Network object needs the whole config, since parts (esp. HA discovery) needs to reference multiple parts of the config.
-            bay = (self._bay),  # Pass a ref to the bay object. Multiple bays may be supported later.
+            # Network object needs the whole config, since parts
+            # (esp. HA discovery) needs to reference multiple parts of the config.
+            config=config,
+            # Pass a ref to the bay object. Multiple bays may be supported later.
+            bay=self._bay
         )
 
         # Connect to the network.
@@ -163,7 +160,7 @@ class CobraBay:
         self._logger.info('CobraBay: Initialization complete.')
 
     # Command processor.
-    def _process_commands(self,command_stack):
+    def _process_commands(self, command_stack):
         self._logger.debug("Evaluating {} commands.".format(len(command_stack)))
         # Might have more than one command in the stack, process each of them.
         for command in command_stack:
@@ -236,8 +233,9 @@ class CobraBay:
         # This loop runs while the system is idle. Process commands, increment various timers.
         system_state = {'signal_strength': 0, 'mqtt_status': False}
         while True:
-            # Send out the bay state. This makes sure we're ready to update this whenever we return to the operating loop.
-            self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=False))
+            # Send out the bay state. This makes sure we're ready to update this whenever we
+            # return to the operating loop.
+            self._outbound_messages.append({'topic': 'bay_state', 'message': self._bay.state, 'repeat': False})
             # Send the hardware state out
             self._outbound_messages.append(
                 {'topic': 'cpu_pct', 'message': self._pistatus.status('cpu_pct'), 'repeat': False})
@@ -252,15 +250,15 @@ class CobraBay:
             system_state['mqtt_status'] = network_data['mqtt_status']
             # Should we display a given sensor during the generic display phase?
             if self._display_sensor['sensor'] is not None:
-                sensor_value=self._sensors.get_sensor(self._display_sensor['sensor'])
+                sensor_value = self._sensors.get_sensor(self._display_sensor['sensor'])
                 # If timeout has expired, blank it.
-                if ( monotonic() - self._display_sensor['start'] ) > self._display_sensor['timeout']:
-                    self._display_sensor = { 'sensor': None }
+                if (monotonic() - self._display_sensor['start']) > self._display_sensor['timeout']:
+                    self._display_sensor = {'sensor': None}
                     self._logger.info("Ending sensor display mode.")
             else:
-                sensor_value=None
+                sensor_value = None
             try:
-                self._display.display_generic(system_state,sensor_value)
+                self._display.display_generic(system_state, sensor_value)
             except:
                 pass
 
@@ -279,7 +277,6 @@ class CobraBay:
         # Start the VL53 sensors ranging
         self._sensors.vl53('start')
         done = False
-        i = 1
         while done is False:
             # Sweep the sensors. At some future point this may allow a subset of sensors. Right now it does all of them.
             sensor_data = self._sensors.sweep()
@@ -320,7 +317,7 @@ class CobraBay:
             if self._bay.state == 'crashed':
                 self._logger.error("Bay reports crash!")
                 # Display crash for two minutes.
-                self._hold_message('CRASHED!',120,'red')
+                self._hold_message('CRASHED!', 120, 'red')
                 return
 
             # Bay thinks it's done.
@@ -355,13 +352,11 @@ class CobraBay:
         return
 
     # Display a message for a given amount of time.
-    def _hold_message(self,message,hold_time=120,message_color='white'):
+    def _hold_message(self, message, hold_time=120, message_color='white'):
         mark = time.monotonic()
         while time.monotonic() - mark < hold_time:
             # Display completed for two minutes.
-            system_state = {}
-            system_state['signal_strength'] = 5
-            system_state['mqtt_status'] = 'online'
+            system_state = {'signal_strength': 5, 'mqtt_status': 'online'}
             self._display.display_generic(system_state, message=message, message_color=message_color)
         return
 
@@ -398,7 +393,26 @@ class CobraBay:
         # Wipe any previous messages. They don't matter now, we're going away!
         self._outbound_messages = []
         # Queue up outbound messages for shutdown.
-        self._outbound_messages.append(dict(topic='device_connectivity', message={'state': 'off', 'reason': 'shutdown'}, repeat=True))
-        self._outbound_messages.append(dict(topic='bay_state', message={'state': 'unknown', 'reason': 'shutdown'}, repeat=True))
+        self._outbound_messages.append(
+            dict(
+                topic='device_connectivity',
+                message='offline',
+                repeat=True
+            )
+        )
+        # self._outbound_messages.append(
+        #     dict(
+        #         topic='bay_state',
+        #         message='unavailable',
+        #         repeat=True
+        #     )
+        # )
+        # self._outbound_messages.append(
+        #     dict(
+        #         topic='bay_occupied',
+        #         message='unavailable',
+        #         repeat=True
+        #     )
+        # )
         # Call the network once. We'll ignore any commands we get.
         self._network_handler()
