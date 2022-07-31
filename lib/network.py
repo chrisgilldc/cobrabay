@@ -7,7 +7,8 @@
 import logging
 from json import dumps as json_dumps
 from json import loads as json_loads
-from math import floor
+# from math import floor
+from pint import Quantity
 
 from getmac import get_mac_address
 from paho.mqtt.client import Client
@@ -30,6 +31,11 @@ class Network:
         except ImportError:
             self._logger.error('Network: No secrets.py file, cannot get connection details.')
             raise
+
+        if self._config['global']['units'].lower() == "imperial":
+            self._unit_system = "imperial"
+        else:
+            self._unit_system = "metric"
 
         # Find a MAC to use as client_id. Wireless is preferred, but if we don't have a wireless interface, fall back on
         # the ethernet interface.
@@ -108,38 +114,36 @@ class Network:
                 'topic': 'cobrabay/' + self._client_id + '/cpu_pct',
                 'previous_state': {},
                 'ha_discovery': {
-                    'name': '{} Connectivity'.format(self._system_name),
+                    'name': '{} CPU Use'.format(self._system_name),
                     'type': 'sensor',
-                    'entity': 'connectivity',
-                    'device_class': 'connectivity',
-                    'payload_on': 'online',
-                    'payload_off': 'offline',
-                    'unit_of_measurement': '%'
+                    'entity': 'cpu_pct',
+                    'unit_of_measurement': '%',
+                    'icon': 'mdi:chip'
                 }
             },
             'cpu_temp': {
-                'topic': 'cobrabay/' + self._client_id + '/cpu_pct',
+                'topic': 'cobrabay/' + self._client_id + '/cpu_temp',
                 'previous_state': {},
                 'ha_discovery': {
-                    'name': '{} Connectivity'.format(self._system_name),
-                    'type': 'binary_sensor',
-                    'entity': 'connectivity',
-                    'device_class': 'connectivity',
-                    'payload_on': 'online',
-                    'payload_off': 'offline',
+                    'name': '{} CPU Temperature'.format(self._system_name),
+                    'type': 'sensor',
+                    'entity': 'cpu_temp',
+                    'device_class': 'temperature',
                     'unit_of_measurement': self._uom('temp')
                 }
             },
             'mem_info': {
                 'topic': 'cobrabay/' + self._client_id + '/mem_info',
                 'previous_state': {},
+                'enabled': True,
                 'ha_discovery': {
-                    'name': '{} Memory'.format(self._system_name),
-                    'type': 'binary_sensor',
-                    'entity': 'connectivity',
-                    'device_class': 'connectivity',
-                    'payload_on': 'online',
-                    'payload_off': 'offline'
+                    'name': '{} Memory Use'.format(self._system_name),
+                    'type': 'sensor',
+                    'entity': 'mem_info',
+                    'value_template': "{{ value_json.mem_pct }}",
+                    'unit_of_measurement': '%',
+                    'icon': 'mdi:memory',
+                    'json_attributes_topic': 'cobrabay/' + self._client_id + '/mem_info'
                 }
             },
             'device_command': {
@@ -168,7 +172,8 @@ class Network:
                 'ha_discovery': {
                     'type': 'sensor',
                     'name': 'Bay State',
-                    'entity': 'state'
+                    'entity': 'state',
+                    'value_template': '{{ value_json.state }}'
                 }
             },
             'bay_position': {
@@ -271,6 +276,9 @@ class Network:
         previous_state = self._topics[topic]['previous_state']
         # Send flag.
         send = False
+        # Put the message through conversion. This converts Quantities to proper units and then flattens to floats
+        # that can be sent through MQTT and understood by Home Assistant
+        message = self._convertomatic(message)
         # By default, check to see if the data changed before sending it.
         if repeat is False:
             # Both strings, compare, process if different
@@ -287,20 +295,23 @@ class Network:
                     if message[item] != previous_state[item]:
                         send = True
                         break
-                return
             else:
+                # If type has changed (and it shouldn't, usually), send it.
                 if type(message) != type(previous_state):
                     send = True
-                else:
-                    return
         elif repeat is True:
             send = True
         # The 'repeat' option can be used in cases when a caller wants to send no matter the changed state.
         # Using this too much can make things super chatty.
         if send:
+            # If the enabled option is in the dict, it might be disabled for now, so check.
+            if 'enabled' in self._topics[topic]:
+                if not self._topics[topic]['enabled']:
+                    return
+
             # New message becomes the previous message.
             self._topics[topic]['previous_state'] = message
-            # Convert the message
+            # Convert the message to JSON if it's a dict, otherwise just send it.
             if isinstance(message, dict):
                 outbound_message = json_dumps(message, default=str)
             else:
@@ -315,8 +326,6 @@ class Network:
             # Default repeat in cases where it's not included.
             if 'repeat' not in message:
                 message['repeat'] = False
-            print("Trying to publish to topic {} message: {}".format(message['topic'],message['message']))
-            print("Has type: {}".format(type(message['message'])))
             self._pub_message(message['topic'], message['message'], message['repeat'])
         # Check for any incoming commands.
         self._mqtt_client.loop()
@@ -379,17 +388,18 @@ class Network:
 
     # Get a 'signal strength' out of RSSI. Based on the Android algorithm. Probably has issues, but hey, it's something.
     def _signal_strength(self):
-        min_rssi = -100
-        max_rssi = -55
-        levels = 4
-        if self._esp.rssi <= min_rssi:
-            return 0
-        elif self._esp.rssi >= max_rssi:
-            return levels - 1
-        else:
-            input_range = -1 * (min_rssi - max_rssi)
-            output_range = levels - 1
-            return floor((self._esp.rssi - min_rssi) * (output_range / input_range))
+        pass
+        # min_rssi = -100
+        # max_rssi = -55
+        # levels = 4
+        # if self._esp.rssi <= min_rssi:
+        #     return 0
+        # elif self._esp.rssi >= max_rssi:
+        #     return levels - 1
+        # else:
+        #     input_range = -1 * (min_rssi - max_rssi)
+        #     output_range = levels - 1
+        #     return floor((self._esp.rssi - min_rssi) * (output_range / input_range))
 
     def _ha_discovery(self):
         # Build the device JSON to include in other updates.
@@ -397,6 +407,8 @@ class Network:
             name=self._system_name,
             identifiers=[self._client_id],
             suggested_area='Garage',
+            manufacturer='ConHugeCo',
+            model='CobraBay Parking System',
             sw_version=str(__version__)
         )
 
@@ -456,22 +468,40 @@ class Network:
         ha_config = self._topics[mqtt_item]['ha_discovery']
         config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'], self._client_id,
                                                                        ha_config['entity'])
-        config_dict = {
-            'name': ha_config['name'],
-            'object_id': self._system_name.replace(" ", "").lower() + "_" + mqtt_item,
-            'device': self._device_info,
-            'state_topic': self._topics[mqtt_item]['topic'],
-            'unique_id': self._client_id + '.' + ha_config['entity'],
-        }
+        # Base, required parameters.
+        try:
+            config_dict = {
+                'name': ha_config['name'],
+                'object_id': self._system_name.replace(" ", "").lower() + "_" + mqtt_item,
+                'device': self._device_info,
+                'state_topic': self._topics[mqtt_item]['topic'],
+                'unique_id': self._client_id + '.' + ha_config['entity'],
+            }
+        except:
+            raise
+
+        optional_params = (
+            'device_class',
+            'icon',
+            'json_attributes_topic',
+            'unit_of_measurement',
+            'payload_on',
+            'payload_off',
+            'value_template')
+
+
         # Optional parameters
-        for par in ('device_class', 'icon', 'unit_of_measurement', 'payload_on', 'payload_off'):
+        for par in optional_params:
             try:
                 config_dict[par] = ha_config[par]
             except KeyError:
                 pass
 
         # If this isn't device connectivity itself, make the entity depend on device connectivity
-        config_dict['availability_topic'] = self._topics['device_connectivity']['topic']
+        if config_topic is not 'device_connectivity':
+            config_dict['availability_topic'] = self._topics['device_connectivity']['topic']
+            config_dict['payload_available'] = self._topics['device_connectivity']['ha_discovery']['payload_on']
+            config_dict['payload_not_available'] = self._topics['device_connectivity']['ha_discovery']['payload_off']
 
         # Send it!
         self._logger.debug("Publishing HA discovery to topic {}\n\t{}".format(config_topic, config_dict))
@@ -482,7 +512,7 @@ class Network:
         # templates:
         # rgb_color: "if (state === 'on') return [251, 210, 41]; else return [54, 95, 140];"
 
-    def _uom(self,unit_type):
+    def _uom(self, unit_type):
         system = self._config['global']['units']
         if unit_type == 'dist':
             if system == 'imperial':
@@ -500,3 +530,43 @@ class Network:
         # Unit of Measure to use for distances, based on the global setting.
         self.dist_uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
         return uom
+
+    def _convertomatic(self, input):
+        if isinstance(input, Quantity):
+            # self._logger.debug("Converting Quantity...")
+            # Check for various dimensionalities and convert as appropriate.
+            if input.check('[length]'):
+                # self._logger.debug("Quantity is a length.")
+                if self._unit_system == "imperial":
+                    output = input.to("in")
+                else:
+                    output = input.to("cm")
+            if input.check('[temperature]'):
+                if self._unit_system == "imperial":
+                    output = input.to("degF")
+                else:
+                    output = input.to("degC")
+            # Doesn't have a dimensionality to check, so we check for the unit name itself.
+            if str(input.units) == 'byte':
+                output = input.to("Mbyte")
+            # Percents need no conversion.
+            if str(input.units) == 'percent':
+                output = input
+            output = round(output.magnitude, 2)
+            return output
+        if isinstance(input, dict):
+            new_dict = {}
+            for key in input:
+                new_dict[key] = self._convertomatic(input[key])
+            return new_dict
+        if isinstance(input, list):
+            new_list = []
+            for item in input:
+                new_list.append(self._convertomatic(item))
+            return new_list
+        else:
+            try:
+                # If this can be rounded, round it, otherwise, pass it through.
+                return round(float(input), 2)
+            except:
+                return input
