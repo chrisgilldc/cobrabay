@@ -95,12 +95,12 @@ class Network:
         self._mqtt_client.on_connect = self._on_connect
         self._mqtt_client.on_message = self._on_message
 
-
         # Define topic reference.
         self._topics = {
             'device_connectivity': {
                 'topic': 'cobrabay/' + self._client_id + '/connectivity',
                 'previous_state': {},
+                'enabled': True,
                 'ha_discovery': {
                     'name': '{} Connectivity'.format(self._system_name),
                     'type': 'binary_sensor',
@@ -113,6 +113,7 @@ class Network:
             'cpu_pct': {
                 'topic': 'cobrabay/' + self._client_id + '/cpu_pct',
                 'previous_state': {},
+                'enabled': True,
                 'ha_discovery': {
                     'name': '{} CPU Use'.format(self._system_name),
                     'type': 'sensor',
@@ -124,6 +125,7 @@ class Network:
             'cpu_temp': {
                 'topic': 'cobrabay/' + self._client_id + '/cpu_temp',
                 'previous_state': {},
+                'enabled': True,
                 'ha_discovery': {
                     'name': '{} CPU Temperature'.format(self._system_name),
                     'type': 'sensor',
@@ -148,6 +150,7 @@ class Network:
             },
             'device_command': {
                 'topic': 'cobrabay/' + self._client_id + '/cmd',
+                'enabled': False,
                 'callback': self._cb_device_command
                 # 'ha_discovery': {
                 #     'type': 'select'
@@ -156,6 +159,7 @@ class Network:
             'bay_occupied': {
                 'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/occupied',
                 'previous_state': None,
+                'enabled': True,
                 'ha_discovery': {
                     'type': 'binary_sensor',
                     'availability_topic': 'bay_state',
@@ -169,6 +173,7 @@ class Network:
             'bay_state': {
                 'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/state',
                 'previous_state': None,
+                'enabled': True,
                 'ha_discovery': {
                     'type': 'sensor',
                     'name': 'Bay State',
@@ -178,22 +183,24 @@ class Network:
             },
             'bay_position': {
                 'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/position',
+                'enabled': True,
                 'ha_type': 'sensor',
                 'previous_state': {
-                    'type': 'multisensor',
+                    'type': 'sensor_group',
                     'list': bay.position,
                 }
             },
             'bay_sensors': {
                 'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/sensors',
                 'previous_state': {},
+                'enabled': True,
                 'ha_discovery': {
-                    'type': 'multisensor',
+                    'type': 'sensor_group',
                     'list': bay.sensor_list,  # Dict from which separate sensors will be created.
                     'aliases': config['sensors'],  # Dict with list alias names.
                     'icon': 'mdi:ruler',
                     # Conveniently, we use the same string identifier for units as Home Assistant!
-                    'unit_of_measurement': self.dist_uom
+                    'unit_of_measurement': self._uom('length')
                 }
             },
             'bay_command': {
@@ -414,35 +421,31 @@ class Network:
 
         # Process the topics.
         for item in self._topics:
-            # Only create items that have HA Discovery defined!
-            if 'ha_discovery' in self._topics[item]:
-                # Multisensor isn't a pure Home Assistant type, but a special type here that will build multiple sensors
-                # out of a list.
-                if self._topics[item]['ha_discovery']['type'] == 'multisensor':
-                    self._ha_create_multisensor(item)
+            # Create items that have HA Discovery, and are enabled. Enabled/disabled is really 100% for development.
+            if 'ha_discovery' in self._topics[item] and self._topics[item]['enabled']:
+                # A sensor_group allows us to create multiple
+                if self._topics[item]['ha_discovery']['type'] == 'sensor_group':
+                    self._ha_create_sensor_group(item)
                 else:
                     self._ha_create(item)
 
     # Special method for creating multiple sensors for a list. Should probably merge this with the main _ha_create
     # at some point.
-    def _ha_create_multisensor(self, mqtt_item):
-        # Pull over some variables to shortem them for convenience.
-        # HA discovery config.
-        ha_config = self._topics[mqtt_item]['ha_discovery']
-        print(ha_config)
+    def _ha_create_sensor_group(self, mqtt_item):
+        # Pull over some variables to shorten them for convenience.
         # Iterate the provided list, create a sensor for each one.
-        for item in ha_config['list']:
-            print("Multisensor now processing: {}".format(item))
-            config_topic = "homeassistant/sensor/cobrabay-{}/{}/config".format(self._client_id, item)
+        for item in self._topics[mqtt_item]['ha_discovery']['list']:
+            self._logger.debug("Multisensor now processing: {}".format(item))
+
+            # Set up a config dict we can pass to the Sensor creator.
             config_dict = {
-                'object_id': self._system_name.replace(" ", "").lower() + "_" + mqtt_item,
-                # Use the master device info.
-                'device': self._device_info,
-                'unique_id': self._client_id + '.' + item,
-                # Each sensor gets the same state topic.
-                'state_topic': self._topics[mqtt_item]['topic'],
-                'value_template': '{{{{ value_json.{} }}}}'.format(item)
+                'type': 'sensor',
+                'entity': item,
+                # Sensors in a group all use the same topic so we pull it out of the template.
+                'value_template': '{{{{ value_json.{} }}}}'.format(item),
+                'unit_of_measurement': self._uom('length')
             }
+
             try:
                 # Use the item name a key to get an alias from the alias dict.
                 config_dict['name'] = ha_config['aliases'][item]['alias']
@@ -450,29 +453,25 @@ class Network:
                 # Otherwise just default it.
                 config_dict['name'] = item
 
-            # Optional parameters for sensors. All sensors in the group need to be the same, which really,
-            # they should be.
-            for par in ('device_class', 'icon', 'unit_of_measurement'):
-                try:
-                    config_dict[par] = ha_config[par]
-                except KeyError:
-                    pass
+            self._logger.debug("Created config for sensor {}: {}".format(item, config_dict))
+            self._logger.debug("Sending to main creation routine.")
+            self._ha_create(mqtt_item, ha_config=config_dict, sub_item=item)
 
-            # Send the discovery!
-            print("Target topic: {}".format(config_topic))
-            print("Payload q: {}".format(json_dumps(config_dict)))
-            self._mqtt_client.publish(config_topic, json_dumps(config_dict))
+    def _ha_create(self, mqtt_item, ha_config=None, sub_item=None):
+        # If ha_config dict wasn't specified, use one defined on the object.
+        if ha_config is None:
+            ha_config = self._topics[mqtt_item]['ha_discovery']
+        if sub_item is None:
+            sub_item = mqtt_item
 
-    def _ha_create(self, mqtt_item):
-        # Go get the details from the main topics dict.
-        ha_config = self._topics[mqtt_item]['ha_discovery']
+        # Build a config topic.
         config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'], self._client_id,
                                                                        ha_config['entity'])
         # Base, required parameters.
         try:
             config_dict = {
                 'name': ha_config['name'],
-                'object_id': self._system_name.replace(" ", "").lower() + "_" + mqtt_item,
+                'object_id': self._system_name.replace(" ", "").lower() + "_" + sub_item,
                 'device': self._device_info,
                 'state_topic': self._topics[mqtt_item]['topic'],
                 'unique_id': self._client_id + '.' + ha_config['entity'],
@@ -489,7 +488,6 @@ class Network:
             'payload_off',
             'value_template')
 
-
         # Optional parameters
         for par in optional_params:
             try:
@@ -498,7 +496,7 @@ class Network:
                 pass
 
         # If this isn't device connectivity itself, make the entity depend on device connectivity
-        if config_topic is not 'device_connectivity':
+        if config_topic != 'device_connectivity':
             config_dict['availability_topic'] = self._topics['device_connectivity']['topic']
             config_dict['payload_available'] = self._topics['device_connectivity']['ha_discovery']['payload_on']
             config_dict['payload_not_available'] = self._topics['device_connectivity']['ha_discovery']['payload_off']
@@ -514,7 +512,7 @@ class Network:
 
     def _uom(self, unit_type):
         system = self._config['global']['units']
-        if unit_type == 'dist':
+        if unit_type == 'length':
             if system == 'imperial':
                 uom = "in"
             else:
@@ -528,7 +526,7 @@ class Network:
             raise ValueError("{} isn't a valid unit type".format(unit_type))
 
         # Unit of Measure to use for distances, based on the global setting.
-        self.dist_uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
+        uom = 'in' if self._config['global']['units'] == 'imperial' else 'cm'
         return uom
 
     def _convertomatic(self, input):
