@@ -27,31 +27,31 @@ class CobraBay:
         self._pistatus = PiStatus()
 
         # Set up Logging.
-        # logging_config_dict = {
-        #     'version': 1,
-        #     'disable_existing_loggers': False,
-        #     'handlers': {
-        #         'debug_console_handler': {
-        #             'level': 'DEBUG',
-        #             'formatter': 'info',
-        #             'class': 'logging.StreamHandler',
-        #             'stream': 'ext://sys.stdout'
-        #         }
-        #     },
-        #     'formatters': {
-        #         'info': {
-        #             'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        #             'datefmt': '%Y-%m-%d %H:%M:%S'
-        #         }
-        #     },
-        #     'loggers': {
-        #         '': {
-        #             'level': 'DEBUG',
-        #             'handlers': ['debug_console_handler']
-        #         }
-        #     }
-        # }
-        # self._core_logger = logging_dictConfig(logging_config_dict)
+        logging_config_dict = {
+            'version': 1,
+            'disable_existing_loggers': False,
+            'handlers': {
+                'debug_console_handler': {
+                    'level': 'DEBUG',
+                    'formatter': 'info',
+                    'class': 'logging.StreamHandler',
+                    'stream': 'ext://sys.stdout'
+                }
+            },
+            'formatters': {
+                'info': {
+                    'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    'datefmt': '%Y-%m-%d %H:%M:%S'
+                }
+            },
+            'loggers': {
+                '': {
+                    'level': 'DEBUG',
+                    'handlers': ['debug_console_handler']
+                }
+            }
+        }
+        self._core_logger = logging_dictConfig(logging_config_dict)
 
         # Master logger takes all log levels and runs them through the same formatter and
         self._core_logger = logging.Logger('master')
@@ -65,7 +65,6 @@ class CobraBay:
         # syslog_handler.setFormatter(formatter)
         # self._logger.addHandler(syslog_handler)
         self._core_logger.addHandler(console_handler)
-        self._core_logger.info("Core logger message test.")
         # Create a logger for this module.
         self._logger = logging.Logger('master').getChild(__name__)
         self._logger.setLevel(logging.DEBUG)
@@ -392,6 +391,9 @@ class CobraBay:
     def system_exit(self):
         # Wipe any previous messages. They don't matter now, we're going away!
         self._outbound_messages = []
+        # Call close on the VL53L1X sensors we may have.
+        # This closes the I2C bus to make sure we can restart properly.
+        self._sensors.vl53('close')
         # Queue up outbound messages for shutdown.
         self._outbound_messages.append(
             dict(

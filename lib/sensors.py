@@ -286,6 +286,8 @@ class Sensors:
                     self._sensors[sensor]['obj'].start_ranging()
                 if action == 'stop':
                     self._sensors[sensor]['obj'].stop_ranging()
+                if action == 'close':
+                    self._sensors[sensor]['obj'].close()
 
     # Utility function to just list all the sensors found.
     def sensor_state(self, sensor=None):
