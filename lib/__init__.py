@@ -11,7 +11,6 @@ from .version import __version__
 #     with io.open("/lib/cobrabay/version.py") as f:
 #         return f.read()
 
-print(__version__)
 __repo__ = "https://github.com/chrisgilldc/cobraba.git"
 __all__ = [
     "CobraBay",
