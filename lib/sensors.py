@@ -6,16 +6,17 @@
 
 import logging
 
-import adafruit_aw9523
 import smbus
-import VL53L1X
+from VL53L1X import VL53L1X
 from time import sleep
 import board
 import busio
+from digitalio import DigitalInOut
 from adafruit_aw9523 import AW9523
-from .adafruit_hcsr04 import HCSR04
-from .synthsensor import SynthSensor
 from pint import UnitRegistry, Quantity
+from .nan import NaN
+from .synthsensor import SynthSensor
+
 
 class Sensors:
     def __init__(self, config):
@@ -26,184 +27,129 @@ class Sensors:
         # Pint unit registry
         self._ureg = UnitRegistry()
 
-        # General config.
-        self.config = {
-            'sensor_pacing': 0.5,
-            'sensors': config['sensors']
-        }
-
         # I2C bus.
         self._i2c = busio.I2C(board.SCL, board.SDA)
 
         # Dict to hold GPIO board objects.
-        self.gpio_boards = dict()
+        self._gpio_boards = dict()
 
-        # Try to pull over values from the config array.
-        # If present, they'll overwrite the default. If not, the default stands.
-        for config_value in ('sensor_pacing'):
-            try:
-                self.config[config_value] = config[config_value]
-            except:
-                pass
+        # Dict to hold initalized sensors.
+        self._sensors = dict()
 
         # Keep the status of sensors. If a given sensor is unavailable, we don't want to bomb the whole system out.
         self._sensor_state = {}
 
         # Initialize all the sensors.
-        howmany = self._init_sensors(config['sensors'])
-        self._logger.info('Sensors: Processed ' + str(howmany) + ' sensors.')
-        self._logger.info('Sensors: Initialization complete.')
+        self._init_vl53l1x(config['sensors'])
 
-    # To initialize multiple sensors in a go. Takes a dict of sensor definitions.
-    def _init_sensors(self, sensors):
-        i = 0
-        self._sensors = {}
-        for sensor in sensors:
-            self._logger.info('Sensors: Trying setup for ' + sensor)
-            try:
-                sensor_obj = self._create_sensor(sensor, sensors[sensor])
-            except Exception as e:
-                self._logger.error('Sensors: Could not initialize ' + sensor + ', marking unavailable')
-                self._logger.error(e,exc_info=True)
-                self._sensor_state[sensor] = 'unavailable'
+    # Initialize all VL53L1X sensors. If required, set sensor addresses.
+    def _init_vl53l1x(self, sensors):
+
+        for sensor_name in sensors:
+            self._logger.debug("Sensor dict for {}:\n\t{}".format(sensor_name,sensors[sensor_name]))
+            # Set the basic values for the this sensor.
+            self._sensors[sensor_name] = {
+                'type': 'vl53l1x',
+                'bus_id': sensors[sensor_name]['bus_id'],
+                'addr': sensors[sensor_name]['addr'],
+                'shut_board': sensors[sensor_name]['shut_board'],
+                'shut_pin': sensors[sensor_name]['shut_pin']
+            }
+
+            # Create a shutoff pin object.
+            if sensors[sensor_name]['shut_board'] != 'pi':
+                # Get the board
+                try:
+                    gpio_board = self._gpio_boards[sensors[sensor_name]['shut_board']]
+                except KeyError:
+                    # Couldn't find it, so create the board object, then use it.
+                    gpio_board = AW9523(self._i2c, address=sensors[sensor_name]['shut_board'])
+                    self._gpio_boards[sensors[sensor_name]['shut_board']] = gpio_board
+                # Alright, have the board, can create a pin.
+                shutoff_pin = gpio_board.get_pin(sensors[sensor_name]['shut_pin'])
             else:
-                # if sensor_obj is not None:
-                self._sensors[sensor] = {
-                    'type': sensors[sensor]['type'],
-                    'obj': sensor_obj}
-                # For VL53L1X sensors, add the ranging mode. This is needed when ranging is started.
-                if self._sensors[sensor]['type'] == 'vl53':
-                    self._sensors[sensor]['ranging'] = sensors[sensor]['distance_mode']
-                # For ultrasound sensors, add in the averaging rate and initialize buffer.
-                if self._sensors[sensor]['type'] == 'hcsr04':
-                    self._sensors[sensor]['avg'] = sensors[sensor]['avg']
-                    self._sensors[sensor]['queue'] = []
-
-                # Test the sensor and make sure we can get a result. 
-                # Value doesn't matter, just get *something*
-
-                try:
-                    result = self._read_sensor(sensor)
-                except Exception as e:
-                    self._logger.error('Sensors: Read test of sensor ' + sensor + ' failed, marking unavailable')
-                    self._logger.error(e, exc_info=True)
-                    self._sensor_state[sensor] = 'unavailable'
-                else:
-                    self._logger.debug('Sensors: Read test of sensor ' + sensor + ' got: ' + str(result))
-                    # Finally, set the sensor as available.
-                    if result is not None:
-                        self._sensor_state[sensor] = 'available'
-                    else:
-                        self._sensor_state[sensor] = 'unavailable'
-            i += 1
-        return i
-
-    def _create_sensor(self, sensor_name, options):
-        # VL53L1X sensor.
-        if options['type'] == 'vl53':
-            # Create the sensor
+                # Shutdown pin must be directly on the board.
+                pin_num = eval("board.D{}".format(sensors[sensor_name]['shut_pin']))
+                shutoff_pin = DigitalInOut(pin_num)
+            shutoff_pin.switch_to_output(value=False)
+            self._sensors[sensor_name]['shutoff'] = shutoff_pin
+        # Create the actual sensor object at the correct address.
+        for sensor_name in sensors:
+            print("For sensor {} will use address {} and board {}.".format(sensor_name,
+                                                                           hex(sensors[sensor_name]['addr']),
+                                                                           hex(sensors[sensor_name]['shut_board'])))
             try:
-                new_sensor = self._create_vl53l1x(sensor_name, options)
-            except:
-                raise
-            # It exists, now try to range it.
-            return new_sensor
+                sensor_obj = VL53L1X(
+                    i2c_bus=sensors[sensor_name]['bus_id'],
+                    i2c_address=sensors[sensor_name]['addr'])
+            except RuntimeError:
+                self._logger.warning("Could not initialize VL53L1X on Bus {}, Address {}. Trying to change address.".
+                                     format(sensors[sensor_name]['bus_id'], sensors[sensor_name]['addr']))
+                # We get a runtime error when the sensor doesn't exist at the requested address.
+                # Shut off all other sensors on the bus.
+                self._vl53l1x_shut('all-but',
+                                   bus_id=sensors[sensor_name]['bus_id'],
+                                   addr=sensors[sensor_name]['shut_board'])
+                # Create an object for the default address, 0x29
+                sensor_obj = VL53L1X(i2c_bus=sensors[sensor_name]['bus_id'], i2c_address=0x29)
+                sensor_obj.open()
+                sensor_obj.change_address(sensors[sensor_name]['addr'])
+                sensor_obj.close()
+            # At this point, we should have a sensor object, one way or the other, so we can return it.
+            sensor_obj.set_distance_mode(self._distance_mode(sensors[sensor_name]['distance_mode']))
+            self._sensors[sensor_name] = {
+                'type': sensors[sensor_name]['type'],
+                'obj': sensor_obj,
+                'ranging': sensors[sensor_name]['distance_mode']
+                }
 
-        # The HC-SR04 sensor, or US-100 in HC-SR04 compatibility mode
-        elif options['type'] == 'hcsr04':
-            # Confirm trigger, echo and board are set. These are *required*.
-            for parameter in ('board', 'trigger', 'echo'):
-                if parameter not in options:
-                    raise ValueError("Parameter " + parameter + " not defined for HC-SR04 sensor.")
-                # Set a custom timeout if necessary
-                if 'timeout' not in options:
-                    timeout = 0.1
-                else:
-                    timeout = options['timeout']
-
-            # Make sure the GPIO board has been initialized.
-            # This is already seeded with 'local', so that *always* works.
-            # Since we only support AW9523 expansion boards(currently), 
-            # then any missing board must be an AW9523.
-            if options['board'] not in self.gpio_boards:
-                try:
-                    self.gpio_boards[options['board']] = AW9523(self._i2c, address=options['board'])
-                except Exception as e:
-                    raise OSError("AW9523 not available at address '" + str(options['board']) + "'. Skipping.")
-
-            # Create HCSR04 object with the correct pin syntax.
-            # Pins on the AW9523
-            if options['board'] in (0x58, 0x59, 0x5A, 0x5B):
-                tp = self.gpio_boards[options['board']].get_pin(options['trigger'])
-                ep = self.gpio_boards[options['board']].get_pin(options['echo'])
-                self._logger.debug("Trying to create HCSR04 with trigger pin '{}' and echo pin '{}'".format(tp,ep))
-                new_sensor = HCSR04(
-                    trigger_pin=tp,
-                    echo_pin=ep,
-                    timeout=timeout)
-            # No errors to this point, return the sensor.
-            return new_sensor
-
-        # Synthetic sensors, IE: fake numbers to allow for testing.
-        elif options['type'] == 'synth':
-            return SynthSensor(options)
+    # Method to control the shutoff pins of VL53L1X sensors.
+    def _vl53l1x_shut(self,command,bus_id=None,addr=None):
+        if command == 'enable':
+            # Enabling sets pins high.
+            pin_value = True
+        elif command in ('disable', 'all-but'):
+            # Disabling sets pins low. We also set low for 'all-but', and then set to True just for the matching pin.
+            pin_value = False
         else:
-            raise ValueError("Not a valid sensor type")
+            raise ValueError("{} not a valid command.".format(command))
 
-    # Method to create a VL53L1X sensor.
-    def _create_vl53l1x(self,sensor_name,options):
-        defaults = {
-            'bus_id': 1,
-            'timing_budget': 50
-        }
-        # Assign the defaults, if need be.
-        for key in defaults:
-            if key not in options:
-                options[key] = defaults[key]
-        try:
-            new_sensor = VL53L1X.VL53L1X(i2c_bus=options['bus_id'],i2c_address=options['address'])
-        except RuntimeError as e:
-            self._logger.error("VL53L1X not found on I2C bus {} address {}".format(options['bus_id'],options['address']))
-            raise
-        else:
-            # Set the distance mode. Default to Medium distance if unsuccessful.
-            try:
-                new_sensor.distance_mode = self._range_mode(options['distance_mode'])
-            except Exception as e:
-                self._logger.error("Could not assign custom sensor mode to sensor {}. Using default of Medium (2).".format(sensor_name))
-                self._logger.error(e,exc_info=True)
-                new_sensor.distance_mode = 2
-            # Set the timing budget. Defaults to 50ms if unsuccessful.
-            try:
-                new_sensor.timing_budget = options['timing_budget']
-            except Exception as e:
-                self._logger.error("Could not assign timing budget to sensor {}. Using default of 50ms".format(sensor_name))
-                self._logger.error(e,exc_info=True)
-                new_sensor.timing_budget = 50
-            new_sensor.open()
-            return new_sensor
+        for sensor_name in self._sensors:
+            # Is it actually a VL53L1X?
+            if self._sensors[sensor_name]['type'] == 'vl53l1x':
+                print(self._sensors[sensor_name])
+                if bus_id is not None and addr is not None:
+                    # If given a specific bus_id and address, make sure it matches.
+                    if self._sensors[sensor_name]['bus_id'] == bus_id and self._sensors[sensor_name]['addr'] == addr:
+                        if command == 'all-but':
+                            self._sensors[sensor_name]['shutoff'].value = True
+                        else:
+                            self._sensors[sensor_name]['shutoff'].value = pin_value
+                else:
+                    # If we weren't given a bus id and address, turn on everything.
+                    self._sensors[sensor_name]['shutoff'].value = pin_value
 
     # Converts range mode back and forth between int and string.
     @staticmethod
-    def _range_mode(rng_mode):
-        if isinstance(rng_mode,int):
-            if rng_mode == 1:
+    def _distance_mode(distance_mode):
+        if isinstance(distance_mode,int):
+            if distance_mode == 1:
                 return 'short'
-            elif rng_mode == 2:
+            elif distance_mode == 2:
                 return 'medium'
-            elif rng_mode == 3:
+            elif distance_mode == 3:
                 return 'long'
             else:
-                raise ValueError("Integer range mode '{}' not understood.".format(rng_mode))
-        elif isinstance(rng_mode,str):
-            if rng_mode.lower() == 'short':
+                raise ValueError("Integer range mode '{}' not understood.".format(distance_mode))
+        elif isinstance(distance_mode,str):
+            if distance_mode.lower() == 'short':
                 return 1
-            elif rng_mode.lower() == 'medium':
+            elif distance_mode.lower() == 'medium':
                 return 2
-            elif rng_mode.lower() == 'long':
+            elif distance_mode.lower() == 'long':
                 return 3
             else:
-                raise ValueError("'{}' is not a valid range mode.".format(str))
+                raise ValueError("'{}' is not a valid range mode.".format(distance_mode))
         else:
             raise TypeError("Can only convert ints and strings")
 
@@ -223,7 +169,7 @@ class Sensors:
                 return Quantity(distance,self._ureg.centimeter)
             else:
                 return NaN('No sensor response')
-        elif self._sensors[sensor]['type'] == 'vl53':
+        elif self._sensors[sensor]['type'] == 'vl53l1x':
             # The VL53L1X library returns millimeters. Convert it to cm.
             measured_distance = Quantity(self._sensors[sensor]['obj'].get_distance(),self._ureg.millimeters).to('cm')
             return measured_distance
@@ -256,21 +202,22 @@ class Sensors:
                 if self._sensors[sensor]['type'] == 'hcsr04':
                     # Reject times when the sensor returns none or zero, because that's almost certainly a glitch. 
                     # You should never really be right up against the sensor!
-                    if reading != 0 and reading is not None:
+                    if reading != 0 and reading is not NaN:
                         # If queue is full, remove the oldest element.
-                        if len(self._sensors[sensor]['queue']) >= self._sensors[sensor]['avg']:
+                        if  len(self._sensors[sensor]['queue']) >= self._sensors[sensor]['avg']:
                             del self._sensors[sensor]['queue'][0]
                         # Now add the new value and average.
-                        self._sensors[sensor]['queue'].append(value)
-                        # Calculate the average. These *must* be in the same unit, but we know HCSR04s are always in
-                        # "cm"
-                        avg_value = sum(
-                            [i._value for i in self._sensors[sensor]['queue']]
-                            / self._sensors[sensor]['avg']
-                        )
-                        # avg_value = sum(self._sensors[sensor]['queue']) / self._sensors[sensor]['avg']
-                        # Send the average back.
-                        sensor_data[sensor] = Unit(avg_value,"cm")
+                        self._sensors[sensor]['queue'].append(reading)
+                        # Calculate the average.
+                        # Add the magnitudes from all the quantities. These *should* already be in centimeters,
+                        # but convert anyway to be certain.
+                        sensor_magnitude_sum = sum([i.to("cm").magnitude for i in self._sensors[sensor]['queue']])
+                        # Get the length of the queue.
+                        sensor_queue_length = len(self._sensors[sensor]['queue'])
+                        # Calculate the average.
+                        avg_magnitude = sensor_magnitude_sum / sensor_queue_length
+                        # Send the average back as a quantity in centimeters.
+                        sensor_data[sensor] = Quantity(avg_magnitude,"cm")
                     # Now ensure wait before the next check to prevent ultrasound interference.
                     sleep(self.config['sensor_pacing'])
                 else:
@@ -278,8 +225,8 @@ class Sensors:
                     sensor_data[sensor] = reading
         return sensor_data
 
-    # Method to turn on or off all VL53L1X sensors.
-    def vl53(self,action):
+    # Method to start and stop sensors. This
+    def sensor_cmd(self, action):
         for sensor in self._sensors:
             if self._sensors[sensor]['type'] == 'vl53':
                 if action == 'start':
@@ -288,6 +235,11 @@ class Sensors:
                     self._sensors[sensor]['obj'].stop_ranging()
                 if action == 'close':
                     self._sensors[sensor]['obj'].close()
+            if self._sensors[sensor]['type'] == 'hcsr04':
+                if action == 'start':
+                    # When starting an HCSR04, dump the queue, since values here are probably old.
+                    # Arguably we should do aging on individual values and this is a quick hack. So, maybe fix later.
+                    self._sensors[sensor]['queue'] = []
 
     # Utility function to just list all the sensors found.
     def sensor_state(self, sensor=None):
