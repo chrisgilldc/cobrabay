@@ -58,8 +58,10 @@ class Bay:
     def reset(self):
         # Initialize variables that should have starting values.
         self._previous_range = 1000000
-        self.motion = 'still'
-        self.position = {}
+        # Current motion state.
+        self.motion = 'No Movement'
+        # Dict to store processed sensors.
+        self._sensors = {}
         # Set occupancy to unknown, since we don't have sensor data to know.
         self.occupied = 'unknown'
         # Presume we're ready. We're not rechecking sensor status.
@@ -81,66 +83,22 @@ class Bay:
         # IF we've gotten here without returning, then we must have all sensors.
         return True
 
-    def _lateralarea(self, area, sensors):
-        # self._logger.debug('Bay: Checking lateral area ' + str(area))
-        # Create a dictionary for the return values
-        return_dict = {}
 
-        # Find out difference between ideal distance and reported distance.
-        position_deviance = sensors[self._config['lateral'][area]['sensor']] - \
-            self._config['lateral'][area]['dist_ideal']
-
-        # Report the absolute deviation from ideal.
-        return_dict['size'] = abs(position_deviance)
-        
-        # Report the direction of any deviation
-        if position_deviance == 0:
-            return_dict['direction'] = None
-        # Deviance away from the sensor.
-        elif position_deviance > 0:
-            if self._config['lateral'][area]['side'] == 'L':
-                return_dict['direction'] = 'R'
-            else:
-                return_dict['direction'] = 'L'
-        # Deviance towards the sensor.
-        elif position_deviance < 0:
-            if self._config['lateral'][area]['side'] == 'L':
-                return_dict['direction'] = 'L'
-            else:
-                return_dict['direction'] = 'R'
-                
-        # Classify the status based on the configured warning zones.
-        # Within the 'dead zone', no report is given, it's treated as being spot on.
-        if abs(position_deviance) <= self._config['lateral'][area]['ok_spread']:
-            return_dict['status'] = 0
-        # Between the dead zone and the warning zone, we show white, an indicator but nothing serious.
-        elif self._config['lateral'][area]['ok_spread'] < abs(position_deviance) < \
-                self._config['lateral'][area]['warn_spread']:
-            return_dict['status'] = 1
-        # Way off, huge warning.
-        elif abs(position_deviance) >= self._config['lateral'][area]['red_spread']:
-            return_dict['status'] = 3
-        # Notably off, warn yellow.
-        elif abs(position_deviance) >= self._config['lateral'][area]['warn_spread']:
-            return_dict['status'] = 2
-        return return_dict
         
     # Process the lateral detection areas. These are in order, closest to furthest.
     def _lateral(self, sensor_values):
-        self._logger.debug("Bay evaluating lateral sesnor values: {}".format(sensor_values))
         return_list = []
         for area in range(len(self._config['lateral'])):
             # Check if the sensor actually has a value.
             if sensor_values[self._config['lateral'][area]['sensor']] is None:
                 return_list.append('NP')
-            # Check if the vehicle is close enough to trigger this lateral sensor. If so, evaluate the
-            # lateral position, otherwise, ignore.
+            # Check if the vehicle is close enough to trigger this lateral sensor. If so, evaluate the lateral position.
             elif sensor_values[self._config['range']['sensor']] <= self._config['lateral'][area]['intercept_range']:
                 # Pass the area ID and required sensor for evaluation.
                 return_list.append(self._lateralarea(area, sensor_values))
             else:
                 # Put a Beyond Range marker and move on.
-                return_list.append('BR')
+                return_list.append('Beyond Range')
         return return_list
         
     # Create an adjusted range
@@ -190,74 +148,118 @@ class Bay:
         self.motion = 'still'
 
     # Called when there are new sensor values to be interpreted against the bay's parameters.
-    def update(self, sensor_values):
+    def update(self, sensor_values, verify=False):
+        # Catch bad states. This *shouldn't* be needed, but make sure.
         if self.state == 'unavailable':
-            raise OSError("Bay is not available")
-
-        if self.state != 'docking':
-            raise RuntimeError("Cannot update when not docking. Must set to docking first.")
+            # Don't allow sensors to be updated when the bay itself is unavailable.
+            self._logger.error("Bay is not available")
+            return
+        elif self.state not in ('docking', 'undocking'):
+            # Bay has to be set to docking or undocking before it can take a sensor update.
+            self._logger.error("Cannot update when not docking. Must set to docking first.")
+            return
 
         # Get range and range percentage. This will return a Unit if it's actually valid, and a
         # NaN object if it's something else
         range, range_pct = self._range_values(sensor_values)
-        # Update the bay motion state if values are being returned.
-        if isinstance(range, Unit) and isinstance(range_pct, float):
-            # Evaluate for vehicle movement. We allow for a little wobble.
-            try:
-                position_change = self.position['range'] - range
-            except TypeError:
-                pass
-            else:
-                if position_change > 1:
-                    self._last_move_time = monotonic()
-                    if self.position['range'] > range:
-                        self.motion = 'approaching'
-                    if self.position['range'] < range:
-                        self.motion = 'receding'
+        # The "verify" flag is used to run on a single sensor sweep. When that happens we can't calculate motion.
+        # So if verify isn't set, figure out motion and update that.
+        if not verify:
+
+            # Update the bay motion state if values are being returned.
+            if isinstance(range, Unit) and isinstance(range_pct, float):
+                # Evaluate for vehicle movement. We allow for a little wobble.
+                try:
+                    range_change = self._position['range'] - range
+                except TypeError:
+                    pass
                 else:
-                    try:
-                        time_diff = monotonic() - self._last_move_time
-                    except AttributeError:
-                        time_diff = 0
-                    if self._config['park_time'].to("s") <= time_diff:
-                        self.motion = 'still'
+                    if range_change > 1:
+                        self._last_move_time = monotonic()
+                        if self._position['range'] > range:
+                            self.motion = 'Approaching'
+                        if self._position['range'] < range:
+                            self.motion = 'Receding'
+                    else:
+                        try:
+                            time_diff = monotonic() - self._last_move_time
+                        except AttributeError:
+                            time_diff = 0
+                        if self._config['park_time'].to("s") <= time_diff:
+                            self.motion = 'No Movement'
 
         # Update the bay position dict.
-        self.position = dict(
+        self._sensors = dict(
             range=range,
             range_pct=range_pct,
             lateral=self._lateral(sensor_values),
             lateral_num=len(self._config['lateral']))
 
-    # Special version of update that processes one sensor sweep to determine bay occupancy.
-    def verify(self, sensor_values):
+    # Get alignment quality indicators based on the current sensor status.
+    def alignment(self):
+        # Catch bad states. This *shouldn't* be needed, but make sure.
         if self.state == 'unavailable':
-            raise OSError("Bay is not available")
+            # Don't allow sensors to be updated when the bay itself is unavailable.
+            self._logger.error("Bay is not available")
+            return
+        elif self.state not in ('docking', 'undocking'):
+            # Bay has to be set to docking or undocking before it can take a sensor update.
+            self._logger.error("Cannot update when not docking. Must set to docking first.")
+            return
+        elif len(self._sensors) == 0:
+            self._logger.error("Cannot rate alignment when no sensor data. Call update first.")
+            return
 
-        range, range_pct = self._range_values(sensor_values)
+        def _lateralarea(self, area, sensors):
+            # self._logger.debug('Bay: Checking lateral area ' + str(area))
+            # Create a dictionary for the return values
+            return_dict = {}
 
-        if isinstance(range, NaN):
-            # Since the reliable range should cover most of the parking space, if we go beyond range, this means we're
-            # not occupied.
-            self.occupied = 'vacant'
-        elif range >= self._config['range']['dist_stop'] * 3:
-            # If detected range over three times stopping distance is hitting *something*, but probably not a vehicle.
-            self.occupied = 'vacant'
-        else:
-            # Something is close enough to the range sensor, likely a vehicle! Should also add some extra logic here
-            # with the lateral sensors.
-            self.occupied = 'occupied'
+            # Find out difference between ideal distance and reported distance.
+            position_deviance = sensors[self._config['lateral'][area]['sensor']] - \
+                                self._config['lateral'][area]['dist_ideal']
 
-        # Get the lateral sensors, even if we're not evaluating them (yet).
-        lateral = self._lateral(sensor_values)
+            # Report the absolute deviation from ideal.
+            return_dict['size'] = abs(position_deviance)
 
-        # Update the bay position dict.
-        self.position = {
-            'range': range,
-            'range_pct': range_pct,
-            'lateral': lateral,
-            'lateral_num': len(self._config['lateral'])
-            }
+            # Report the direction of any deviation
+            if position_deviance == 0:
+                return_dict['direction'] = None
+            # Deviance away from the sensor.
+            elif position_deviance > 0:
+                if self._config['lateral'][area]['side'] == 'L':
+                    return_dict['direction'] = 'R'
+                else:
+                    return_dict['direction'] = 'L'
+            # Deviance towards the sensor.
+            elif position_deviance < 0:
+                if self._config['lateral'][area]['side'] == 'L':
+                    return_dict['direction'] = 'L'
+                else:
+                    return_dict['direction'] = 'R'
+
+            # Classify the status based on the configured warning zones.
+            # Within the 'dead zone', no report is given, it's treated as being spot on.
+            if abs(position_deviance) <= self._config['lateral'][area]['ok_spread']:
+                return_dict['status'] = 0
+            # Between the dead zone and the warning zone, we show white, an indicator but nothing serious.
+            elif self._config['lateral'][area]['ok_spread'] < abs(position_deviance) < \
+                    self._config['lateral'][area]['warn_spread']:
+                return_dict['status'] = 1
+            # Way off, huge warning.
+            elif abs(position_deviance) >= self._config['lateral'][area]['red_spread']:
+                return_dict['status'] = 3
+            # Notably off, warn yellow.
+            elif abs(position_deviance) >= self._config['lateral'][area]['warn_spread']:
+                return_dict['status'] = 2
+            return return_dict
+
+        alignment = {}
+
+        return
+
+    def _alignment_grade(self):
+        pass
 
     @property
     def occupied(self):
