@@ -181,17 +181,21 @@ class Network:
                     'value_template': '{{ value_json.state }}'
                 }
             },
+            # Adjusted readings from the sensors.
             'bay_position': {
                 'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/position',
                 'enabled': True,
                 'ha_type': 'sensor',
-                'previous_state': {
+                'previous_state': None,
+                'ha_discovery': {
                     'type': 'sensor_group',
                     'list': bay.position,
+
                 }
             },
-            'bay_sensors': {
-                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/sensors',
+            # Raw readings from the sensors.
+            'bay_raw_sensors': {
+                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/raw_sensors',
                 'previous_state': {},
                 'enabled': True,
                 'ha_discovery': {
@@ -201,6 +205,17 @@ class Network:
                     'icon': 'mdi:ruler',
                     # Conveniently, we use the same string identifier for units as Home Assistant!
                     'unit_of_measurement': self._uom('length')
+                }
+            },
+            # How good the parking job is.
+            'bay_alignment': {
+                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/bay_alignment',
+                'previous_state': {},
+                'enabled': True,
+                'ha_discovery': {
+                    'type': 'sensor_group',
+                    'list': 'bay_position',
+                    'icon': 'mdi:traffic-light'
                 }
             },
             'bay_command': {
@@ -510,6 +525,25 @@ class Network:
         # templates:
         # rgb_color: "if (state === 'on') return [251, 210, 41]; else return [54, 95, 140];"
 
+
+
+    # Create a traffic-light style sensor. This is used for the parking position sensors.
+    def _ha_create_trafficlight(self):
+        # icon_template = \
+        #     "{% if is_state('sensor.{}','Good') %}
+        #         mdi:check-circle
+        #     {% elif is_state('sensor.{}','OK') %}
+        #         mdi:alert-circle
+        #     {% elif is_state('sensor.{}','Bad') %}
+        #         mdi:close-circle
+        #     {% else %}
+        #         mdi:eye-circle
+        #     {% endif %}".format(entity_id)
+
+        pass
+
+    # Helper method to determine the correct unit of measure to use. When we have reported sensor units, we use
+    # this method to ensure the correct unit is being put in.
     def _uom(self, unit_type):
         system = self._config['global']['units']
         if unit_type == 'length':
