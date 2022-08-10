@@ -115,6 +115,7 @@ class CobraBay:
         self._logger.info('CobraBay: Creating sensors...')
         # Create master sensor object to hold all necessary sensor sub-objects.
         self._sensors = Sensors(self.config)
+        sys.exit(0)
 
         # Create master bay object for defined docking bay
         self._bay = Bay(self.config['bay'], self._sensors.sensor_state())
@@ -274,7 +275,7 @@ class CobraBay:
             return
         self._outbound_messages.append({'topic': 'bay_state', 'message': 'docking'})
         # Start the VL53 sensors ranging
-        self._sensors.vl53('start')
+        self._sensors.sensor_cmd('start')
         done = False
         while done is False:
             # Sweep the sensors. At some future point this may allow a subset of sensors. Right now it does all of them.
@@ -292,7 +293,7 @@ class CobraBay:
             # Bay positioning
             self._outbound_messages.append(dict(topic='bay_position', message=self._bay.position, repeat=True))
             # Bay sensor readings (raw)
-            self._outbound_messages.append(dict(topic='bay_sensors', message=sensor_data, repeat=True))
+            self._outbound_messages.append(dict(topic='bay_raw_sensors', message=sensor_data, repeat=True))
 
             # Call the network handler. This will send all messages in self._outbound_messages, and return any commands
             # that need handling.
@@ -307,7 +308,7 @@ class CobraBay:
                     # Reset the bay.
                     self._bay.reset()
                 # Stop ranging on VL53s.
-                self._sensors.vl53('stop')
+                self._sensors.sensor_cmd('stop')
                 # Break and be done.
                 break
 
@@ -370,8 +371,10 @@ class CobraBay:
             return
 
         # Append the bay state to the outbound message queue.
-        self._outbound_messages.append(dict(topic='bay_sensors', message=sensor_data, repeat=True))
-        self._outbound_messages.append(dict(topic='bay_position', message=self._bay.position, repeat=True))
+        self._outbound_messages.append(dict(topic='bay_raw_sensors', message=sensor_data, repeat=True))
+        self._outbound_messages.append(dict(topic='bay_sensors', message=self._bay.sensors, repeat=True))
+        self._outbound_messages.append(dict(topic='bay_motion', message=self._bay.motion, repeat=True))
+        self._outbound_messages.append(dict(topic='bay_alignment', message=self._bay.alignment, repeat=True))
         self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=True))
         self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=True))
 
@@ -393,7 +396,7 @@ class CobraBay:
         self._outbound_messages = []
         # Call close on the VL53L1X sensors we may have.
         # This closes the I2C bus to make sure we can restart properly.
-        self._sensors.vl53('close')
+        self._sensors.sensor_cmd('close')
         # Queue up outbound messages for shutdown.
         self._outbound_messages.append(
             dict(
