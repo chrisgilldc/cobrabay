@@ -102,10 +102,11 @@ class Sensors:
                 # Create an object for the default address, 0x29
                 self._logger.debug("Creating sensor object on bus {}, default address 0x29".format(bus))
                 sensor_obj = VL53L1X(i2c_bus=bus, i2c_address=0x29)
-                sensor_obj.open()
                 self._logger.debug("Calling address change to {}".format(hex(sensor_addr)))
                 sensor_obj.change_address(sensor_addr)
-                sensor_obj.close()
+                # Delete and recreate the sensor object.
+                del(sensor_obj)
+                sensor_obj = VL53L1X(i2c_bus=bus, i2c_address=sensor_addr)
             else:
                 self._logger.debug("Found sensor at address {}".format(hex(sensor_addr)))
             # At this point, we should have a sensor object, one way or the other, so we can return it.
