@@ -45,6 +45,7 @@ class Sensors:
     # Initialize all VL53L1X sensors. If required, set sensor addresses.
     def _init_vl53l1x(self, sensors):
 
+        # Traverse all the sensors and create shutoff pins for them.
         for sensor_name in sensors:
             self._logger.debug("Sensor dict for {}:\n\t{}".format(sensor_name,sensors[sensor_name]))
             # Set the basic values for the this sensor.
@@ -86,7 +87,13 @@ class Sensors:
                 board_addr = 'pi'
             else:
                 board_addr = sensors[sensor_name]['shut_board']
-            self._logger.debug("For sensor {} will use address {} and board {}.".format(sensor_name,sensor_addr,board_addr if board_addr == 'pi' else hex(board_addr)))
+            self._logger.debug("For sensor {} will use address {} and board {}.".
+                               format(
+                                    sensor_name,
+                                    hex(sensor_addr),
+                                    board_addr if board_addr == 'pi' else hex(board_addr)
+                               )
+            )
             try:
                 sensor_obj = VL53L1X(
                     i2c_bus=bus,

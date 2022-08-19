@@ -14,7 +14,7 @@ config = {
     'sensors': {
         'center': {'type': 'vl53', 'address': 0x29, 'distance_mode': 'medium', 'timing_budget': 50 },
         # 'lat_front': {'type': 'hcsr04', 'board': 0x58, 'trigger': 1, 'echo': 2, 'timeout': 0.5, 'avg': 5 },
-        # 'lat_rear': {'type': 'hcsr04', 'board': 0x58, 'trigger': 3, 'echo': 4, 'timeout': 0.5, 'avg': 5 },
+        'lat_rear': {'type': 'hcsr04', 'board': 0x58, 'trigger': 3, 'echo': 4, 'timeout': 0.5, 'avg': 5 },
         },
     'bay': {  # Bay definition. ONLY ONE IS SUPPORTED NOW!
         'active': True,  # Is the bay active?
