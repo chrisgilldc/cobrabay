@@ -16,7 +16,9 @@ from adafruit_aw9523 import AW9523
 from pint import UnitRegistry, Quantity
 from .nan import NaN
 from .synthsensor import SynthSensor
-
+import time
+import subprocess
+import sys
 
 class Sensors:
     def __init__(self, config):
@@ -42,9 +44,62 @@ class Sensors:
         # Initialize all the sensors.
         self._init_vl53l1x(config['sensors'])
 
+        self._logger.debug("Sensors initialization complete.")
+
     # Initialize all VL53L1X sensors. If required, set sensor addresses.
     def _init_vl53l1x(self, sensors):
+        self._logger.debug("Initial I2C State:\n{}".format(self._show_i2c()))
+        self._create_vl53l1x_controls(sensors)
+        # Shut off all the sensors. Turning off the enable pin also resets a sensor to the default 0x29 address.
+        self._vl53l1x_shut('disable')
+        self._logger.debug("After disable-all:\n{}".format(self._show_i2c()))
 
+        # Iterate each sensor, turn it on and move it to the correct address.
+        for sensor_name in sensors:
+            # Localize variables to make error statements more readable.
+            bus = sensors[sensor_name]['bus_id']
+            sensor_addr = sensors[sensor_name]['addr']
+            if sensors[sensor_name]['shut_board'] == 'pi':
+                board_addr = 'pi'
+            else:
+                board_addr = sensors[sensor_name]['shut_board']
+            self._logger.debug("For sensor {} will use address {} and board {}.".
+                               format(
+                                    sensor_name,
+                                    hex(sensor_addr),
+                                    board_addr if board_addr == 'pi' else hex(board_addr)
+                               )
+            )
+            # Enable this sensor only.
+            self._vl53l1x_shut("enable", bus_id=bus, addr=sensor_addr)
+            self._logger.debug("{} should be enabled at address {}.\n{}".format(sensor_name,board_addr,self._show_i2c()))
+            # Create an object.
+            try:
+                sensor_obj = VL53L1X(
+                    i2c_bus=bus,
+                    i2c_address=0x29)
+            except RuntimeError:
+                raise
+            else:
+                self._logger.debug("Sensor object created, changing address.")
+                sensor_obj.open()
+                self._logger.debug("Calling address change to {}".format(hex(sensor_addr)))
+                sensor_obj.change_address(sensor_addr)
+                self._logger.debug("I2C bus status after address change.\n{}".format(self._show_i2c()))
+            # At this point, we should have a sensor object, one way or the other, so we can return it.
+            self._logger.debug("Setting distance mode.")
+            sensor_obj.set_distance_mode(self._distance_mode(sensors[sensor_name]['distance_mode']))
+            self._logger.debug("Adding to sensors dict.")
+            self._sensors[sensor_name] = {
+                'type': sensors[sensor_name]['type'],
+                'obj': sensor_obj,
+                'ranging': sensors[sensor_name]['distance_mode']
+                }
+
+    # Method to create the VL53L1X controls.
+    def _create_vl53l1x_controls(self,sensors):
+        if not isinstance(sensors,dict):
+            raise ValueError("Can only create sensor controls ")
         # Traverse all the sensors and create shutoff pins for them.
         for sensor_name in sensors:
             self._logger.debug("Sensor dict for {}:\n\t{}".format(sensor_name,sensors[sensor_name]))
@@ -78,55 +133,13 @@ class Sensors:
                 shutoff_pin = DigitalInOut(pin_num)
             shutoff_pin.switch_to_output(value=False)
             self._sensors[sensor_name]['shutoff'] = shutoff_pin
-        # Create the actual sensor object at the correct address.
-        for sensor_name in sensors:
-            # Localize variables to make error statments more readable.
-            bus = sensors[sensor_name]['bus_id']
-            sensor_addr = sensors[sensor_name]['addr']
-            if sensors[sensor_name]['shut_board'] == 'pi':
-                board_addr = 'pi'
-            else:
-                board_addr = sensors[sensor_name]['shut_board']
-            self._logger.debug("For sensor {} will use address {} and board {}.".
-                               format(
-                                    sensor_name,
-                                    hex(sensor_addr),
-                                    board_addr if board_addr == 'pi' else hex(board_addr)
-                               )
-            )
-            try:
-                sensor_obj = VL53L1X(
-                    i2c_bus=bus,
-                    i2c_address=sensor_addr)
-            except RuntimeError:
-                self._logger.warning("Could not initialize VL53L1X on Bus {}, Address {}. Trying to change address.".
-                                     format(bus, hex(sensor_addr)))
-                # We get a runtime error when the sensor doesn't exist at the requested address.
-                # Shut off all other sensors on the bus.
-                self._vl53l1x_shut('only',
-                                   bus_id=bus,
-                                   addr=sensor_addr)
-                # Create an object for the default address, 0x29
-                self._logger.debug("Creating sensor object on bus {}, default address 0x29".format(bus))
-                sensor_obj = VL53L1X(i2c_bus=bus, i2c_address=0x29)
-                self._logger.debug("Calling address change to {}".format(hex(sensor_addr)))
-                sensor_obj.change_address(sensor_addr)
-                # Delete and recreate the sensor object.
-                del(sensor_obj)
-                sensor_obj = VL53L1X(i2c_bus=bus, i2c_address=sensor_addr)
-            else:
-                self._logger.debug("Found sensor at address {}".format(hex(sensor_addr)))
-            # At this point, we should have a sensor object, one way or the other, so we can return it.
-            sensor_obj.set_distance_mode(self._distance_mode(sensors[sensor_name]['distance_mode']))
-            self._sensors[sensor_name] = {
-                'type': sensors[sensor_name]['type'],
-                'obj': sensor_obj,
-                'ranging': sensors[sensor_name]['distance_mode']
-                }
 
     # Method to control the shutoff pins of VL53L1X sensors.
     def _vl53l1x_shut(self,command,bus_id=None,addr=None):
-        self._logger.debug("VL53L1X Shutoff, Command {}, Bus ID {}, Address {}".format(command, bus_id,addr))
+        if bus_id is None or addr is None:
+           self._logger.debug("VL53L1X Command {}, will apply to all sensors.")
+        else:
+            self._logger.debug("VL53L1X Command {}, applying to Bus ID {}, Address {}".format(command, bus_id,hex(addr)))
         if command == 'enable':
             # Enabling sets pins high.
             pin_value = True
@@ -137,7 +150,6 @@ class Sensors:
             raise ValueError("{} not a valid command.".format(command))
 
         for sensor_name in self._sensors:
-            self._logger.debug("Processing {}".format(sensor_name))
             # Is it actually a VL53L1X?
             if self._sensors[sensor_name]['type'] == 'vl53l1x':
                 if bus_id is not None and addr is not None:
@@ -289,3 +301,9 @@ class Sensors:
             value = self._read_sensor(sensor_name)
             self._sensors[sensor_name]['obj'].stop_ranging()
             return value
+
+    # For debugging, a static method to roll in i2c scan results.
+    @staticmethod
+    def _show_i2c():
+        result = subprocess.run(["/usr/sbin/i2cdetect", "-y", "1"], stdout=subprocess.PIPE)
+        return result.stdout.decode('utf-8')
