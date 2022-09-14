@@ -60,15 +60,6 @@ class Display:
         self.font.LoadFont('fonts/Interval-Book-12.bdf')
 
         # Convenient dict for colors.
-        self._colors = {
-            'black': graphics.Color(0, 0, 0),
-            'white': graphics.Color(255, 255, 255),
-            'green': graphics.Color(0, 255, 0),
-            'red': graphics.Color(255, 0, 0),
-            'darkblue': graphics.Color(0, 0, 139),
-            'orange': graphics.Color(255,153, 51),
-            'yellow': graphics.Color(255,255, 0)
-        }
 
         self._staging_canvas = self.matrix.CreateFrameCanvas()
 
@@ -86,8 +77,6 @@ class Display:
         # Approach strobe box
         self._draw_box(canvas, 0, canvas.height - 3, canvas.width - 1, canvas.height - 1, self._colors['white'])
         return canvas
-
-
 
     def _distance_display(self, canvas, range, range_pct):
         # If Range isn't a number, there's two options.
