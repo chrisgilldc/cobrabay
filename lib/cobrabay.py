@@ -12,11 +12,10 @@ import atexit
 # Import the other CobraBay classes
 from .bay import Bay
 from .display import Display
+from .detector import Range
 from .network import Network
-from .sensors import Sensors
 from .systemhw import PiStatus
 from pint import Quantity
-
 
 class CobraBay:
     def __init__(self, config):
@@ -71,37 +70,14 @@ class CobraBay:
 
         self._logger.info('CobraBay: CobraBay Initializing...')
         # check for all basic options.
-        for option in ('global', 'sensors', 'bay'):
+        for option in ('global', 'detectors', 'bay'):
             if option not in config:
                 self._logger.error('CobraBay: Configuration does not include required section: "' + option + '"')
                 sys.exit(1)
-        # Make sure at least one sensor exists.
-        if len(config) == 0:
-            self._logger.info('CobraBay: No sensors configured!')
-            sys.exit(1)
-        # Make sure sensors are assigned.
-        if 'sensor' not in config['bay']['range']:
-            self._logger.error('CobraBay: No range sensor assigned.')
-        for index in range(len(config['bay']['lateral'])):
-            if 'sensor' not in config['bay']['lateral'][index]:
-                self._logger.error('CobraBay: Lateral zone ' + str(index) + ' does not have sensor assigned.')
-
-        # Default out the Home Assistant option.
-        if 'homeassistant' not in config['global']:
-            config['global']['homeassistant'] = False
 
         # Basic checks passed. Good enough! Assign it.
         self.config = config
 
-        # Convert inputs to Units.
-        self.config['bay']['park_time'] = Quantity(self.config['bay']['park_time'])
-        for option in ('dist_max', 'dist_stop'):
-            self.config['bay']['range'][option] = Quantity(self.config['bay']['range'][option])
-        # Lateral option distance options to convert
-        for index in range(len(self.config['bay']['lateral'])):
-            for option in ('intercept_range', 'dist_ideal', 'ok_spread', 'warn_spread', 'red_spread'):
-                self.config['bay']['lateral'][index][option] = \
-                    Quantity(self.config['bay']['lateral'][index][option])
 
         # Initial device state
         self._device_state = 'on'
@@ -112,11 +88,13 @@ class CobraBay:
         # Information to display a sensor on the idle screen.
         self._display_sensor = {'sensor': None}
 
-        self._logger.info('CobraBay: Creating sensors...')
-        # Create master sensor object to hold all necessary sensor sub-objects.
-        self._sensors = Sensors(self.config)
-        sys.exit(0)
+        # self._logger.info('CobraBay: Creating sensors...')
+        # # Create master sensor object to hold all necessary sensor sub-objects.
+        # self._sensors = Sensors(self.config)
+        # sys.exit(0)
 
+        # Create the detectors
+        self._detectors = self._setup_detectors()
         # Create master bay object for defined docking bay
         self._bay = Bay(self.config['bay'], self._sensors.sensor_state())
         # Run a verify to get some initial values.
@@ -421,3 +399,15 @@ class CobraBay:
         # )
         # Call the network once. We'll ignore any commands we get.
         self._network_handler()
+
+    # Method to set up the detectors based on the configuration.
+    def _setup_detectors(self):
+        return_dict = {}
+        for detector_name in self.config['detectors']:
+            print(detector_name)
+            if self.config['detectors'][detector_name]['type'] == 'Range':
+                return_dict[detector_name] = Range(
+                    offset = self.config['detectors'][detector_name]['offset'],
+                    timing = self.config['detectors'][detector_name]['timing'],
+                    board_options = self.config['detectors'][detector_name]['sensor'])
+        return return_dict
