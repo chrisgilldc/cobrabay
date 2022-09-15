@@ -15,8 +15,6 @@ class Bay:
         self._detectors['range'] = detectors['range']
         # raise ValueError("Bay detectors must include a range detector.")
 
-        # Store the detectors
-        self._detectors = stuff
         # Flag to indicate if we're tracking lateral positions.
         self._lateral = False
         # Set the Bay ID.
@@ -109,3 +107,7 @@ class Bay:
     def _lateral_markers(self):
         pass
 
+    # Method to be called when CobraBay it shutting down.
+    def shutdown(self):
+        for detector in self._detectors:
+            self._detectors[detector].shutdown()
