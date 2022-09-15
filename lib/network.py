@@ -158,75 +158,75 @@ class Network:
                 #     'type': 'select'
                 # }
             },
-            'bay_occupied': {
-                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/occupied',
-                'previous_state': None,
-                'enabled': True,
-                'ha_discovery': {
-                    'type': 'binary_sensor',
-                    'availability_topic': 'bay_state',
-                    'name': 'Bay Occupied',
-                    'entity': 'occupied',
-                    'class': 'occupancy',
-                    'payload_on': 'occupied',
-                    'payload_off': 'vacant'
-                }
-            },
-            'bay_state': {
-                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/state',
-                'previous_state': None,
-                'enabled': True,
-                'ha_discovery': {
-                    'type': 'sensor',
-                    'name': 'Bay State',
-                    'entity': 'state',
-                    'value_template': '{{ value_json.state }}'
-                }
-            },
-            # Adjusted readings from the sensors.
-            'bay_position': {
-                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/position',
-                'enabled': True,
-                'ha_type': 'sensor',
-                'previous_state': None,
-                'ha_discovery': {
-                    'type': 'sensor_group',
-                    'list': bay.position,
-
-                }
-            },
-            # Raw readings from the sensors.
-            'bay_raw_sensors': {
-                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/raw_sensors',
-                'previous_state': {},
-                'enabled': True,
-                'ha_discovery': {
-                    'type': 'sensor_group',
-                    'list': bay.sensor_list,  # Dict from which separate sensors will be created.
-                    'aliases': config['sensors'],  # Dict with list alias names.
-                    'icon': 'mdi:ruler',
-                    # Conveniently, we use the same string identifier for units as Home Assistant!
-                    'unit_of_measurement': self._uom('length')
-                }
-            },
-            # How good the parking job is.
-            'bay_alignment': {
-                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/bay_alignment',
-                'previous_state': {},
-                'enabled': True,
-                'ha_discovery': {
-                    'type': 'sensor_group',
-                    'list': 'bay_position',
-                    'icon': 'mdi:traffic-light'
-                }
-            },
-            'bay_command': {
-                'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/cmd',
-                # 'ha_discovery': {
-                #     'type': 'select'
-                # },
-                'callback': self._cb_bay_command
-            }
+            # 'bay_occupied': {
+            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/occupied',
+            #     'previous_state': None,
+            #     'enabled': True,
+            #     'ha_discovery': {
+            #         'type': 'binary_sensor',
+            #         'availability_topic': 'bay_state',
+            #         'name': 'Bay Occupied',
+            #         'entity': 'occupied',
+            #         'class': 'occupancy',
+            #         'payload_on': 'occupied',
+            #         'payload_off': 'vacant'
+            #     }
+            # },
+            # 'bay_state': {
+            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/state',
+            #     'previous_state': None,
+            #     'enabled': True,
+            #     'ha_discovery': {
+            #         'type': 'sensor',
+            #         'name': 'Bay State',
+            #         'entity': 'state',
+            #         'value_template': '{{ value_json.state }}'
+            #     }
+            # },
+            # # Adjusted readings from the sensors.
+            # 'bay_position': {
+            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/position',
+            #     'enabled': True,
+            #     'ha_type': 'sensor',
+            #     'previous_state': None,
+            #     'ha_discovery': {
+            #         'type': 'sensor_group',
+            #         'list': bay.position,
+            #
+            #     }
+            # },
+            # # Raw readings from the sensors.
+            # 'bay_raw_sensors': {
+            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/raw_sensors',
+            #     'previous_state': {},
+            #     'enabled': True,
+            #     'ha_discovery': {
+            #         'type': 'sensor_group',
+            #         'list': bay.sensor_list,  # Dict from which separate sensors will be created.
+            #         'aliases': config['sensors'],  # Dict with list alias names.
+            #         'icon': 'mdi:ruler',
+            #         # Conveniently, we use the same string identifier for units as Home Assistant!
+            #         'unit_of_measurement': self._uom('length')
+            #     }
+            # },
+            # # How good the parking job is.
+            # 'bay_alignment': {
+            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/bay_alignment',
+            #     'previous_state': {},
+            #     'enabled': True,
+            #     'ha_discovery': {
+            #         'type': 'sensor_group',
+            #         'list': 'bay_position',
+            #         'icon': 'mdi:traffic-light'
+            #     }
+            # },
+            # 'bay_command': {
+            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/cmd',
+            #     # 'ha_discovery': {
+            #     #     'type': 'select'
+            #     # },
+            #     'callback': self._cb_bay_command
+            # }
         }
         self._logger.info('Network: Initialization complete.')
 
@@ -302,7 +302,7 @@ class Network:
         send = False
         # Put the message through conversion. This converts Quantities to proper units and then flattens to floats
         # that can be sent through MQTT and understood by Home Assistant
-        message = self._convertomatic(message)
+        message = Convertomatic(message)
         # By default, check to see if the data changed before sending it.
         if repeat is False:
             # Both strings, compare, process if different
