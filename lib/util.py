@@ -7,7 +7,7 @@ from pint import Quantity
 # General purpose converter.
 class Convertomatic:
     def __init__(self,unit_system):
-        self.unit_system = unit_system
+        self._unit_system = unit_system
 
     def convert(self, input):
         if isinstance(input, Quantity):
@@ -15,12 +15,12 @@ class Convertomatic:
             # Check for various dimensionalities and convert as appropriate.
             if input.check('[length]'):
                 # self._logger.debug("Quantity is a length.")
-                if self.unit_system == "imperial":
+                if self._unit_system == "imperial":
                     output = input.to("in")
                 else:
                     output = input.to("cm")
             if input.check('[temperature]'):
-                if self.unit_system == "imperial":
+                if self._unit_system == "imperial":
                     output = input.to("degF")
                 else:
                     output = input.to("degC")
