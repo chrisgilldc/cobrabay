@@ -71,6 +71,12 @@ class VL53L1X(Sensor):
         self._previous_reading = self._sensor_obj.get_distance()
         self._previous_timestamp = monotonic()
 
+    def start_ranging(self):
+        self._sensor_obj.start_ranging()
+
+    def stop_ranging(self):
+        self._sensor_obj.stop_ranging()
+
     def enable(self):
         self.enable_pin.value = True
 
@@ -208,6 +214,12 @@ class VL53L1X(Sensor):
             self._enable_pin = aw.get_pin(enable_pin)
         # Make sure this is an 'output' type pin.
         self._enable_pin.switch_to_output()
+
+    def shutdown(self):
+        # Stop from ranging
+        self.stop_ranging()
+        # Close the object.
+        self._sensor_obj.close()
 
 # class Synth(Sensor):
 # from .synthsensor import SynthSensor
