@@ -19,6 +19,9 @@ class Detector:
     def reading(self):
         pass
 
+    def detector(self):
+        pass
+
 # Single Detectors add wrappers around a single sensor.
 class SingleDetector(Detector):
     def __init__(self, offset, timing, board_options):
@@ -47,6 +50,11 @@ class SingleDetector(Detector):
         while len(results) < num:
             results.append(self._sensor_obj.range)
         return mean(results) * results[0].units
+
+    # Method for stopping hardware when software is shutting down.
+    # This tries to clean up and not leave things in a bad state.
+    def shutdown(self):
+        self._sensor_obj.stop_ranging()
 
 # Detector that measures range progress.
 class Range(SingleDetector):
