@@ -70,6 +70,7 @@ class VL53L1X(Sensor):
         self._sensor_obj.start_ranging()
         self._previous_reading = self._sensor_obj.get_distance()
         self._previous_timestamp = monotonic()
+        self._sensor_obj.stop_ranging()
 
     def start_ranging(self):
         self._sensor_obj.start_ranging()

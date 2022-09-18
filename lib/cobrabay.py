@@ -7,6 +7,7 @@ from logging.config import dictConfig as logging_dictConfig
 # from logging.handlers import SysLogHandler
 import sys
 from time import monotonic, sleep
+import pprint
 import atexit
 
 # Import the other CobraBay classes
@@ -19,6 +20,7 @@ from pint import Quantity
 
 class CobraBay:
     def __init__(self, config):
+        self._pp = pprint.PrettyPrinter()
         # Register the exit handler.
         atexit.register(self.system_exit)
 
@@ -78,7 +80,6 @@ class CobraBay:
         # Basic checks passed. Good enough! Assign it.
         self.config = config
 
-
         # Initial device state
         self._device_state = 'on'
         # Queue for outbound messages.
@@ -88,32 +89,30 @@ class CobraBay:
         # Information to display a sensor on the idle screen.
         self._display_sensor = {'sensor': None}
 
-        # self._logger.info('CobraBay: Creating sensors...')
-        # # Create master sensor object to hold all necessary sensor sub-objects.
-        # self._sensors = Sensors(self.config)
-        # sys.exit(0)
+        self._logger.debug("Creating network object...")
+        # Create Network object.
+        self._network = Network(
+            # Network object needs the whole config, since parts
+            # (esp. HA discovery) needs to reference multiple parts of the config.
+            config=config
+        )
 
+        self._logger.debug("Creating detectors...")
         # Create the detectors
         self._detectors = self._setup_detectors()
         # Create master bay object for defined docking bay
-        self._bay = Bay(self.config['bay'], self._sensors.sensor_state())
-        # Run a verify to get some initial values.
-        self.verify()
+        # Master list to store all the bays.
+        self._bays = []
+        self._logger.debug("Creating bays...")
+        # For testing, only one bay, hard-wire it ATM.
+        self._bays.append(Bay(self.config['bay'], self._detectors))
+        self._logger.debug("Registering bays with network handler...")
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
         self._display = Display(self.config)
 
         self._logger.info('CobraBay: Connecting to network...')
-        # Create Network object.
-        self._network = Network(
-            # Network object needs the whole config, since parts
-            # (esp. HA discovery) needs to reference multiple parts of the config.
-            config=config,
-            # Pass a ref to the bay object. Multiple bays may be supported later.
-            bay=self._bay
-        )
-
         # Connect to the network.
         self._network.connect()
 
@@ -198,6 +197,8 @@ class CobraBay:
 
     def _network_handler(self):
         # Send the outbound message queue to the network module to handle. After, we empty the message queue.
+        # print("Pending outbound messages: ")
+        # self._pp.pprint(self._outbound_messages)
         network_data = self._network.poll(self._outbound_messages)
         self._outbound_messages = []
         # Check the network command queue. If there are commands, run them.
@@ -211,9 +212,10 @@ class CobraBay:
         # This loop runs while the system is idle. Process commands, increment various timers.
         system_state = {'signal_strength': 0, 'mqtt_status': False}
         while True:
-            # Send out the bay state. This makes sure we're ready to update this whenever we
-            # return to the operating loop.
-            self._outbound_messages.append({'topic': 'bay_state', 'message': self._bay.state, 'repeat': False})
+            ## Messages from the bay.
+            for bay in self._bays:
+                self._outbound_messages = self._outbound_messages + bay.mqtt_messages()
+            ## Hardware messages
             # Send the hardware state out
             self._outbound_messages.append(
                 {'topic': 'cpu_pct', 'message': self._pistatus.status('cpu_pct'), 'repeat': False})
@@ -372,9 +374,9 @@ class CobraBay:
     def system_exit(self):
         # Wipe any previous messages. They don't matter now, we're going away!
         self._outbound_messages = []
-        # Call close on the VL53L1X sensors we may have.
-        # This closes the I2C bus to make sure we can restart properly.
-        self._sensors.sensor_cmd('close')
+        # Stop the ranging and close all the open sensors.
+        for bay in self._bays:
+            bay.shutdown()
         # Queue up outbound messages for shutdown.
         self._outbound_messages.append(
             dict(

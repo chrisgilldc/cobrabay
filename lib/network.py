@@ -5,10 +5,12 @@
 ####
 
 import logging
+import pprint
 from json import dumps as json_dumps
 from json import loads as json_loads
 # from math import floor
 from pint import Quantity
+import time
 
 from getmac import get_mac_address
 from paho.mqtt.client import Client
@@ -18,7 +20,7 @@ from .version import __version__
 
 
 class Network:
-    def __init__(self, config, bay):
+    def __init__(self, config):
         # Save the config
         self._config = config
         # Create the logger.
@@ -37,7 +39,7 @@ class Network:
             self._unit_system = "imperial"
         else:
             self._unit_system = "metric"
-        self._convertomatic = Convertomatic(self._unit_system)
+        self._cv = Convertomatic(self._unit_system)
 
         # Find a MAC to use as client_id. Wireless is preferred, but if we don't have a wireless interface, fall back on
         # the ethernet interface.
@@ -63,39 +65,37 @@ class Network:
             self._logger.debug("Setting Home Assistant false.")
             self._homeassistant = False
 
-        # Save the bay object.
-        self._bay = bay
-
         # Current device state. Will get updated every time we're polled.
         self._device_state = 'unknown'
-        # Bay initial state.
-        self._bay_state = 'unknown'
 
         # List for commands received and to be passed upward.
         self._upward_commands = []
+        # Registry to keep extant bays.
+        self._bay_registry = {}
 
         # Create the MQTT Client.
         self._mqtt_client = Client(
             client_id=""
         )
         self._mqtt_client.username_pw_set(
-            username=self.secrets['mqtt']['username'],
-            password=self.secrets['mqtt']['password']
+            username=self.secrets['username'],
+            password=self.secrets['password']
         )
+        # Send MQTT logging to the network logger.
+        self._mqtt_client.enable_logger(self._logger)
         # MQTT host to connect to.
-        self._mqtt_host = self.secrets['mqtt']['broker']
+        self._mqtt_host = self.secrets['broker']
         # If port is set, us that.
         try:
-            self._mqtt_port = self.secrets['mqtt']['port']
+            self._mqtt_port = self.secrets['port']
         except:
             self._mqtt_port = 1883
 
         # Set TLS options.
-        if 'tls' in self.secrets['mqtt']:
+        if 'tls' in self.secrets:
             pass
 
         self._mqtt_client.on_connect = self._on_connect
-        self._mqtt_client.on_message = self._on_message
 
         # Define topic reference.
         self._topics = {
@@ -158,75 +158,60 @@ class Network:
                 #     'type': 'select'
                 # }
             },
-            # 'bay_occupied': {
-            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/occupied',
-            #     'previous_state': None,
-            #     'enabled': True,
-            #     'ha_discovery': {
-            #         'type': 'binary_sensor',
-            #         'availability_topic': 'bay_state',
-            #         'name': 'Bay Occupied',
-            #         'entity': 'occupied',
-            #         'class': 'occupancy',
-            #         'payload_on': 'occupied',
-            #         'payload_off': 'vacant'
-            #     }
-            # },
-            # 'bay_state': {
-            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/state',
-            #     'previous_state': None,
-            #     'enabled': True,
-            #     'ha_discovery': {
-            #         'type': 'sensor',
-            #         'name': 'Bay State',
-            #         'entity': 'state',
-            #         'value_template': '{{ value_json.state }}'
-            #     }
-            # },
-            # # Adjusted readings from the sensors.
-            # 'bay_position': {
-            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/position',
-            #     'enabled': True,
-            #     'ha_type': 'sensor',
-            #     'previous_state': None,
-            #     'ha_discovery': {
-            #         'type': 'sensor_group',
-            #         'list': bay.position,
-            #
-            #     }
-            # },
-            # # Raw readings from the sensors.
-            # 'bay_raw_sensors': {
-            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/raw_sensors',
-            #     'previous_state': {},
-            #     'enabled': True,
-            #     'ha_discovery': {
-            #         'type': 'sensor_group',
-            #         'list': bay.sensor_list,  # Dict from which separate sensors will be created.
-            #         'aliases': config['sensors'],  # Dict with list alias names.
-            #         'icon': 'mdi:ruler',
-            #         # Conveniently, we use the same string identifier for units as Home Assistant!
-            #         'unit_of_measurement': self._uom('length')
-            #     }
-            # },
-            # # How good the parking job is.
-            # 'bay_alignment': {
-            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/bay_alignment',
-            #     'previous_state': {},
-            #     'enabled': True,
-            #     'ha_discovery': {
-            #         'type': 'sensor_group',
-            #         'list': 'bay_position',
-            #         'icon': 'mdi:traffic-light'
-            #     }
-            # },
-            # 'bay_command': {
-            #     'topic': 'cobrabay/' + self._client_id + '/' + self._bay.name + '/cmd',
-            #     # 'ha_discovery': {
-            #     #     'type': 'select'
-            #     # },
-            #     'callback': self._cb_bay_command
-            # }
+            'bay_occupied': {
+                'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/occupied',
+                'previous_state': 'Unknown',
+                'enabled': True,
+                'ha_discovery': {
+                    'type': 'binary_sensor',
+                    'availability_topic': 'bay_state',
+                    'name': 'Bay Occupied',
+                    'entity': 'occupied',
+                    'class': 'occupancy',
+                    'payload_on': 'occupied',
+                    'payload_off': 'vacant'
+                }
+            },
+            'bay_state': {
+                'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/state',
+                'previous_state': None,
+                'enabled': True,
+                'ha_discovery': {
+                    'type': 'sensor',
+                    'name': 'Bay State',
+                    'entity': 'state',
+                    'value_template': '{{ value_json.state }}'
+                }
+            },
+            # Adjusted readings from the sensors.
+            'bay_position': {
+                'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/position',
+                'enabled': True,
+                'ha_type': 'sensor',
+                'previous_state': None,
+                'ha_discovery': {
+                    'type': 'sensor_group',
+                    'list': 'bay.position',
+                }
+            },
+            # How good the parking job is.
+            'bay_park_quality': {
+                'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/bay_alignment',
+                'previous_state': {},
+                'enabled': True,
+                'ha_discovery': {
+                    'type': 'sensor_group',
+                    'list': 'bay_position',
+                    'icon': 'mdi:traffic-light'
+                }
+            },
+            'bay_command': {
+                'topic': 'cobrabay/' + self._client_id + '/+/cmd',
+                'ha_discovery': {
+                    'type': 'select'
+                },
+                'callback': self._cb_bay_command
+            }
         }
         self._logger.info('Network: Initialization complete.')
 
@@ -235,16 +220,15 @@ class Network:
         # Create last will, goes to the device topic.
         self._logger.info("Network: Creating last will.")
         self._mqtt_client.will_set(self._topics['device_connectivity']['topic'], payload='offline')
-        # For every topic that has a callback, add it.
+        # Connect to the callback topics. This will only connect to the device command topic at this stage.
         for item in self._topics:
             if 'callback' in self._topics[item]:
                 self._logger.debug("Network: Creating callback for {}".format(item))
                 self._mqtt_client.message_callback_add(self._topics[item]['topic'], self._topics[item]['callback'])
-
-    def _on_message(self):
-        pass
-
-    # Topic Callbacks
+        # Reconnect the bay command callbacks
+        for bay in self._bay_registry:
+            print("Adding callback for {}".format(bay))
+            self._mqtt_client.message_callback_add(self._bay_registry[bay]['topic'], self._bay_registry[bay]['callback'])
 
     # Device Command callback
     def _cb_device_command(self, client, userdata, message):
@@ -277,6 +261,12 @@ class Network:
     # Bay Command callback
     def _cb_bay_command(self, client, userdata, message):
         self._logger.debug("Received bay command message: {}".format(message.payload))
+        self._logger.debug("Incoming topic: {}".format(message.topic))
+
+        # Pull out the bay ID.
+        bay_id = message.topic.split('/')[-2]
+        self._logger.debug("Using bay id: {}".format(bay_id))
+
         # Try to decode the JSON.
         try:
             message = json_loads(message.payload)
@@ -285,6 +275,10 @@ class Network:
                                .format(message.topic, message.payload))
             # Ignore the message and return, as if we never got int.
             return
+
+
+
+
         # Proceed on valid commands.
         if 'cmd' not in message:
             self._logger.error(
@@ -296,13 +290,25 @@ class Network:
             self._logger.info("Network: Received unknown MQTT bay command '{}'".format(message['cmd']))
 
     # Message publishing method
-    def _pub_message(self, topic, message, repeat=False):
+    def _pub_message(self, topic, message, repeat=False, topic_mappings=None):
         previous_state = self._topics[topic]['previous_state']
-        # Send flag.
+
+        # Send flag. Default to assuming we *won't* send. We'll send if either repeat is True (ie: send no matter what)
+        # or if repeat is false *and* content has been determined to have changed.
         send = False
+
+        # If the topic is templated, take the topic_mappings and insert them.
+        # This is currently onlu used to put in bay_id.
+        # No real bounds checking, and could explode in strange ways.
+        if topic_mappings is not None:
+            target_topic = self._topics[topic]['topic'].format(topic_mappings)
+        else:
+            target_topic = self._topics[topic]['topic']
+
         # Put the message through conversion. This converts Quantities to proper units and then flattens to floats
         # that can be sent through MQTT and understood by Home Assistant
-        message = Convertomatic(message)
+        message = self._cv.convert(message)
+
         # By default, check to see if the data changed before sending it.
         if repeat is False:
             # Both strings, compare, process if different
@@ -340,17 +346,14 @@ class Network:
                 outbound_message = json_dumps(message, default=str)
             else:
                 outbound_message = message
-            self._mqtt_client.publish(self._topics[topic]['topic'], outbound_message)
+            self._mqtt_client.publish(target_topic, outbound_message)
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
     def poll(self, outbound_messages=None):
         # Send all the messages outbound.
         for message in outbound_messages:
-            # Default repeat in cases where it's not included.
-            if 'repeat' not in message:
-                message['repeat'] = False
-            self._pub_message(message['topic'], message['message'], message['repeat'])
+            self._pub_message(**message)
         # Check for any incoming commands.
         self._mqtt_client.loop()
         # Yank any commands to send upward and clear it for the next run.
@@ -405,8 +408,8 @@ class Network:
             self._mqtt_client.publish(self._topics['device_state']['topic'], message)
         # When disconnecting, mark the device and the bay as unavailable.
         self._mqtt_client.publish(self._topics['device_connectivity']['topic'], 'offline')
-        self._mqtt_client.publish(self._topics['bay_state']['topic'], 'offline')
-        self._mqtt_client.publish(self._topics['bay_state']['topic'], 'offline')
+        # self._mqtt_client.publish(self._topics['bay_state']['topic'], 'offline', )
+        # self._mqtt_client.publish(self._topics['bay_state']['topic'], 'offline')
         # Disconnect from broker
         self._mqtt_client.disconnect()
 
