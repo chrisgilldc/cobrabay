@@ -26,8 +26,8 @@ class Detector:
 class SingleDetector(Detector):
     def __init__(self, offset, timing, board_options):
         super().__init__()
-        # Store the sensor object.
-        self._offset = offset
+        self.offset = offset
+        print("Offset: {}".format(self._offset))
         # Create the sense object using provided settings.
         self._sensor_obj = CB_VL53L1X(board_options)
         self._history = []
@@ -35,6 +35,22 @@ class SingleDetector(Detector):
     # Store the current reading as the offset. Useful when an object is *in* the spot where it should be.
     def tare(self):
         self._offset = self._range_avg()
+
+    @property
+    def offset(self):
+        return self._offset
+
+    @offset.setter
+    def offset(self,input):
+        if isinstance(input,Quantity):
+            # If offset is already a quantity, use that.
+            self._offset = input
+        elif isinstance(input,str):
+            # If it's a string, use the Quantity string-parser approach.
+            self._offset = Quantity(input)
+        else:
+            # Othrwise, it's *likely* numeric, so default to millimeters and hope it workse.
+            self._offset = Quantity(input,"mm")
 
     def _convert_value(self, input_value):
         # If it's already a quantity, return it right away.
@@ -51,10 +67,19 @@ class SingleDetector(Detector):
             results.append(self._sensor_obj.range)
         return mean(results) * results[0].units
 
+
+    def activate(self):
+        self._sensor_obj.start_ranging()
+
+    def deactivate(self):
+        self._sensor_obj.stop_ranging()
+
     # Method for stopping hardware when software is shutting down.
     # This tries to clean up and not leave things in a bad state.
+    # Currently this is just an alias for deactivate, but is named differently because it may grow later.
     def shutdown(self):
-        self._sensor_obj.stop_ranging()
+        self.deactivate()
+
 
 # Detector that measures range progress.
 class Range(SingleDetector):
@@ -65,7 +90,7 @@ class Range(SingleDetector):
         # Make sure the history list is always five elements, so we don't just grow this ridiculously.
         self._history = self._history[:5]
         # Return that reading, minus the offset.
-        return self._history[0][0] - self._offset
+        return self._history[0][0] - self.offset
 
 # Detector for lateral position
 class Lateral(SingleDetector):
