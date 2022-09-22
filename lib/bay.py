@@ -9,8 +9,7 @@ from PIL import Image, ImageDraw
 import logging
 
 class Bay:
-    def __init__(self,logger,detectors):
-
+    def __init__(self,config, detectors):
         # Set the Bay ID. This is static for testing, real config processing will come later.
         self.bay_id = 'bay1'
         # Create a logger.
@@ -20,6 +19,11 @@ class Bay:
         self._logger.info("Bay '{}' initializing...".format(self._bay_id))
         # Create a unit registry.
         self._ureg = UnitRegistry
+        # Set the unit system. Default to Metric. If units is in the config and is imperial, change it to imperial.
+        self._unit_system = 'metric'
+        if 'units' in config:
+            if config['units'].lower() == 'imperial':
+                self._unit_system = 'imperial'
 
         self._detectors = {}
         # Have to have a range detector
@@ -33,6 +37,25 @@ class Bay:
         self._display_som = "imperial"
         self._state = 'ready'
         self._logger.info("Bay '{}' initialization complete.".format(self._bay_id))
+
+    # Imperative commands
+    def dock(self):
+        self._logger.debug("Received dock command.")
+        if self.state in ('docking','undocking'):
+            raise ValueError("Cannot dock, already {}".format(self.state))
+        elif self.state == 'unavailable':
+            raise ValueError("Cannot dock, bay is unavailable")
+        else:
+            # Do the things to do when docking.
+            self.state = 'docking'
+
+    def undock(self):
+        pass
+
+    # Abort gets called when we want to cancel a docking.
+    def abort(self):
+        # Return the bay to a ready state.
+        self.state = 'unoccupied'
 
     # Bay properties
     @property
@@ -68,7 +91,11 @@ class Bay:
         '''
         return_dict = {}
         # Longitudinal offset.
-        return_dict['lo'] = self._detectors['range'].value
+        if self._unit_system == 'imperial':
+            return_dict['lo'] = self._detectors['range'].value.to('in')
+        else:
+            return_dict['lo'] = self._detectors['range'].value.to('m')
+
         if self._lateral:
             # Add code here later for lateral position
             pass
@@ -90,17 +117,20 @@ class Bay:
 
     @state.setter
     def state(self,input):
+        self._logger.debug("State change requested to {} from {}".format(input,self._state))
         # Trap invalid bay states.
         if input not in ('docking','undocking','occupied','unoccupied','unavailable'):
             raise ValueError("{} is not a valid bay state.".format(input))
+        else:
+            self._state = input
         if input in ('docking','undocking') and self._state not in ('docking','undocking'):
             # When entering docking or undocking state, start ranging on the sensors.
             for detector in self._detectors:
-                detector.activate()
+                self._detectors[detector].activate()
         if input not in ('docking','undocking') and self._state in ('docking', 'undocking'):
             # When leaving docking or undocking state, stop ranging on the sensors.
             for detector in self._detectors:
-                detector.deactivate()
+                self._detectors[detector].deactivate()
 
 
     # MQTT status methods. These generate payloads the core network handler can send upward.
@@ -126,13 +156,19 @@ class Bay:
     def mqtt_discovery(self):
         pass
 
-
-
     # Image making methods
 
     # Draws the image to be overlaid on the RGB Matrix
     def image(self):
-        pass
+        img = Image.new("RGB", (64,32))
+        im.rectangle()
+
+    def _frame(self,w,h):
+        img = Image.new("RGB", (w,h))
+        # Left box
+        img.rectangle((0,0),(3,h-4))
+        # Right box
+        img.rectangle((w-3,0),(3,h-4))
 
     def _approach_strobe(self):
         pass

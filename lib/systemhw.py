@@ -8,7 +8,7 @@ from typing import Dict, Union, Any
 import psutil
 from gpiozero import CPUTemperature
 from pint import UnitRegistry
-
+from math import ceil, floor
 
 
 class PiStatus:
@@ -37,8 +37,8 @@ class PiStatus:
     def _mem_info(self):
         memory = psutil.virtual_memory()
         return_dict = {
-            'mem_avail': self._Q(memory.available, self._ureg.byte),
+            'mem_avail': self._Q(floor(memory.available), self._ureg.byte),
             'mem_total': self._Q(memory.total, self._ureg.byte)
         }
-        return_dict['mem_pct'] = self._Q(return_dict['mem_avail'] / return_dict['mem_total'], self._ureg.percent)
+        return_dict['mem_pct'] = self._Q(floor(return_dict['mem_avail']) / return_dict['mem_total'], self._ureg.percent)
         return return_dict

@@ -82,7 +82,7 @@ class Network:
             password=self.secrets['password']
         )
         # Send MQTT logging to the network logger.
-        self._mqtt_client.enable_logger(self._logger)
+        # self._mqtt_client.enable_logger(self._logger)
         # MQTT host to connect to.
         self._mqtt_host = self.secrets['broker']
         # If port is set, us that.
@@ -252,9 +252,9 @@ class Network:
             # If displaying a sensor, have to pass up other parameters as well.
             # Remove the command, since we already have that, then put the rest into the options field.
             del message['cmd']
-            self._upward_commands.append({'cmd': 'display_sensor', 'options': message})
+            self._upward_commands.append({'type': 'device', 'cmd': 'display_sensor', 'options': message})
         elif message['cmd'] == 'rescan_sensors':
-            self._upward_commands.append({'cmd': 'rescan_sensors'})
+            self._upward_commands.append({'type': 'device', 'cmd': 'rescan_sensors'})
         else:
             self._logger.info("Network: Received unknown MQTT device command '{}'".format(message['cmd']))
 
@@ -276,16 +276,13 @@ class Network:
             # Ignore the message and return, as if we never got int.
             return
 
-
-
-
         # Proceed on valid commands.
         if 'cmd' not in message:
             self._logger.error(
                 "Network: MQTT message for topic {} does not contain a cmd directive".format(message.topic))
         elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify', 'reset'):
             # If it's a valid bay command, pass it upward.
-            self._upward_commands.append({'cmd': message['cmd']})
+            self._upward_commands.append({'type': 'bay', 'bay_id': bay_id, 'cmd': message['cmd']})
         else:
             self._logger.info("Network: Received unknown MQTT bay command '{}'".format(message['cmd']))
 

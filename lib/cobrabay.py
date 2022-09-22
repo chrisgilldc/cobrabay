@@ -102,10 +102,10 @@ class CobraBay:
         self._detectors = self._setup_detectors()
         # Create master bay object for defined docking bay
         # Master list to store all the bays.
-        self._bays = []
+        self._bays = {}
         self._logger.debug("Creating bays...")
         # For testing, only one bay, hard-wire it ATM.
-        self._bays.append(Bay(self.config['bay'], self._detectors))
+        self._bays[self.config['bay']['id']] = Bay(self.config['bay'], self._detectors)
         self._logger.debug("Registering bays with network handler...")
 
         self._logger.info('CobraBay: Creating display...')
@@ -142,20 +142,31 @@ class CobraBay:
         # Might have more than one command in the stack, process each of them.
         for command in command_stack:
             self._logger.debug("Considering command: {}".format(command))
-            if self._bay.state not in ('docking', 'undocking'):
-                if 'rescan_sensors' in command['cmd']:
-                    self._sensors.rescan()
-                if 'dock' in command['cmd']:
-                    self.dock()
-                if 'undock' in command['cmd']:
-                    self.undock()
-                # Don't allow a verify when we're actually doing a motion.
-                if 'verify' in command['cmd']:
-                    self.verify()
-                if 'reset' in command['cmd']:
-                    self._logger.info("Resetting bay per command.")
-                    self._bay.reset()
-                    print("Bay state after reset: {}".format(self._bay.state))
+            if command['type'] == 'bay':
+                # Some commands can only run when we're *not* actively docking or undocking.
+                if self._bays[command['bay_id']] not in ('docking', 'undocking'):
+                    # if 'rescan_sensors' in command['cmd']:
+                    #     self._sensors.rescan()
+                    if 'dock' in command['cmd']:
+                        try:
+                            self._bays[command['bay_id']].dock()
+                        except ValueError:
+                            self._logger.info("Bay command 'dock' was refused.")
+                    if 'undock' in command['cmd']:
+                        try:
+                            self._bays[command['bay_id']].state('undock')
+                        except ValueError:
+                            self._logger.info("Bay command 'undock' was refused.")
+                    # Don't allow a verify when we're actually doing a motion.
+                    if 'verify' in command['cmd']:
+                        self._bays[command['bay_id']].verify()
+                    if 'abort' in command['cmd']:
+                        self._bays[command['bay_id']].abort()
+                    # if 'reset' in command['cmd']:
+                    #     self._logger.info("Resetting bay per command.")
+                    #     self._bay.reset()
+                    #     print("Bay state after reset: {}".format(self._bay.state))
+            if command['type'] == 'device':
                 # Don't allow a display sensor request to override an active motion
                 if 'display_sensor' in command['cmd']:
                     if 'options' in command:
@@ -188,12 +199,6 @@ class CobraBay:
                             'timeout': timeout,
                             'start': monotonic()
                         }
-            else:
-                # Only allow the abort or complete commands while a motion is in action. Complete takes precedence.
-                if 'complete' in command['cmd']:
-                    return 'complete'
-                if 'abort' in command['cmd']:
-                    return 'abort'
 
     def _network_handler(self):
         # Send the outbound message queue to the network module to handle. After, we empty the message queue.
@@ -214,7 +219,7 @@ class CobraBay:
         while True:
             ## Messages from the bay.
             for bay in self._bays:
-                self._outbound_messages = self._outbound_messages + bay.mqtt_messages()
+                self._outbound_messages = self._outbound_messages + self._bays[bay].mqtt_messages()
             ## Hardware messages
             # Send the hardware state out
             self._outbound_messages.append(
@@ -376,7 +381,7 @@ class CobraBay:
         self._outbound_messages = []
         # Stop the ranging and close all the open sensors.
         for bay in self._bays:
-            bay.shutdown()
+            self._bays[bay].shutdown()
         # Queue up outbound messages for shutdown.
         self._outbound_messages.append(
             dict(

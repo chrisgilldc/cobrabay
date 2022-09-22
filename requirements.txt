@@ -8,3 +8,4 @@ smbus2
 adafruit-circuitpython-aw9523
 logging
 psutil
+pillow

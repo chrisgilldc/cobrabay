@@ -49,7 +49,7 @@ class SingleDetector(Detector):
             # If it's a string, use the Quantity string-parser approach.
             self._offset = Quantity(input)
         else:
-            # Othrwise, it's *likely* numeric, so default to millimeters and hope it workse.
+            # Otherwise, it's *likely* numeric, so default to millimeters and hope it workse.
             self._offset = Quantity(input,"mm")
 
     def _convert_value(self, input_value):
