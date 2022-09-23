@@ -28,6 +28,8 @@ class Bay:
         self._detectors = {}
         # Have to have a range detector
         self._detectors['range'] = detectors['range']
+        # Set the ranging detector to long range.
+        self._detectors['range'].distance_mode('long')
         # raise ValueError("Bay detectors must include a range detector.")
         # Flag to indicate if we're tracking lateral positions.
         self._lateral = False
