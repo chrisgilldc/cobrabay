@@ -93,7 +93,7 @@ class Range(SingleDetector):
 
     def distance_mode(self,input):
         try:
-            self._sensor_obj.distance_mode(input)
+            self._sensor_obj.distance_mode = input
         except ValueError:
             print("Could not change distance mode to {}".format(input))
 

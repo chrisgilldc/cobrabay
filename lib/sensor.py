@@ -68,6 +68,8 @@ class VL53L1X(Sensor):
             self.i2c_address = board_options['i2c_address']
         # Start ranging.
         self._sensor_obj.start_ranging()
+        self._distance_mode = 0
+        self.distance_mode = 'medium'
         self._previous_reading = self._sensor_obj.get_distance()
         self._previous_timestamp = monotonic()
         self._sensor_obj.stop_ranging()
