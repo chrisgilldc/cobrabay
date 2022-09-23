@@ -67,7 +67,6 @@ class SingleDetector(Detector):
             results.append(self._sensor_obj.range)
         return mean(results) * results[0].units
 
-
     def activate(self):
         self._sensor_obj.start_ranging()
 
@@ -91,6 +90,12 @@ class Range(SingleDetector):
         self._history = self._history[:5]
         # Return that reading, minus the offset.
         return self._history[0][0] - self.offset
+
+    def distance_mode(self,input):
+        try:
+            self._sensor_obj.distance_mode(input)
+        except ValueError:
+            print("Could not change distance mode to {}".format(input))
 
 # Detector for lateral position
 class Lateral(SingleDetector):

@@ -95,12 +95,15 @@ class VL53L1X(Sensor):
 
     @distance_mode.setter
     def distance_mode(self,dm):
+        # Pre-checking the distance mode lets us toss an error before actually setting anything.
         if dm.lower() == 'short':
             dm = 1
         elif dm.lower() == 'medium':
             dm = 2
         elif dm.lower() == 'long':
             dm = 3
+        else:
+            raise ValueError("{} is not a valid distance mode".format(dm))
         self._sensor_obj.set_distance_mode(dm)
         self._distance_mode = dm
 
