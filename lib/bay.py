@@ -3,13 +3,13 @@
 ####
 import pint.errors
 
-from .detector import Range
+from .detector import Range, Lateral
 from pint import UnitRegistry, Quantity
 from PIL import Image, ImageDraw
 import logging
 
 class Bay:
-    def __init__(self,config, detectors):
+    def __init__(self,config,detectors):
         # Set the Bay ID. This is static for testing, real config processing will come later.
         self.bay_id = 'bay1'
         # Create a logger.
@@ -25,15 +25,8 @@ class Bay:
             if config['units'].lower() == 'imperial':
                 self._unit_system = 'imperial'
 
-        self._detectors = {}
-        # Have to have a range detector
-        self._detectors['range'] = detectors['range']
-        # Set the ranging detector to long range.
-        self._detectors['range'].distance_mode('long')
-        # raise ValueError("Bay detectors must include a range detector.")
-        # Flag to indicate if we're tracking lateral positions.
+        self._setup_detectors(config,detectors)
         self._lateral = False
-
         # Set the display height. This is needed for some display calculations
         self._matrix = {'width': 64, 'height': 32 }
         self._display_som = "imperial"
@@ -98,8 +91,7 @@ class Bay:
         else:
             return_dict['lo'] = self._detectors['range'].value.to('m')
 
-        if self._lateral:
-            # Add code here later for lateral position
+        if len(self._detectors['lateral']) > 0:
             pass
         else:
             return_dict['la'] = None
@@ -193,3 +185,48 @@ class Bay:
     @bay_id.setter
     def bay_id(self,input):
         self._bay_id = input
+
+    # Method to set up the detectors for the bay. This applies bay-specific options to the individual detectors, which
+    # are initialized by the main routine.
+    def _setup_detectors(self,config,detectors):
+        self._detectors = {}
+        # Do the range setup. This behaves a little differently, so is coraled to a separate method for sanity.
+        self._setup_range(config,detectors)
+        # Lateral configuration.
+        # Make the lateral array.
+        self._detectors['lateral'] = []
+        for detector_config in config['lateral']['detectors']:
+            detector_name = detector_config['detector']
+            try:
+                lateral = detectors[detector_name]
+            except KeyError:
+                raise KeyError("Tried to create lateral zone with detector '{}' but detector not defined."
+                               .format(detector_name))
+            # Now we have the detector, set it up right.
+            for item in ('offset','spread_ok','spread_warn','spread_crit','side'):
+                try:
+                    setattr(lateral, item, detector_config[item])
+                except KeyError:
+                    self._logger.debug("Using default value for {}".format(item))
+                    try:
+                        setattr(lateral,item,config['lateral']['defaults'][item])
+                    except KeyError:
+                        raise KeyError("Needed default value for {} but not defined!".format(item))
+
+    # Method to set up the range detector
+    def _setup_range(self,config,detectors):
+        # Is the detector name specified.
+        try:
+            range_detector_name = config['range']['detector']
+        except KeyError:
+            raise KeyError("Detector is not defined for bay's range. This is required!")
+        # Try to get the detector.
+        try:
+            self._detectors['range'] = detectors[range_detector_name]
+        except KeyError:
+            raise KeyError("Provided detector name '{}' does not exist.".format(range_detector_name))
+        # Add the required range parameters.
+        self._logger.info("Setting range detector offset to: {}".format(config['range']['offset']))
+        self._detectors['range'].offset = config['range']['offset']
+        self._logger.info("Setting range detector bay depth to: {}".format(config['range']['bay_depth']))
+        self._detectors['range'].bay_depth = config['range']['bay_depth']
