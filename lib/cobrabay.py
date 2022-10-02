@@ -13,7 +13,7 @@ import atexit
 # Import the other CobraBay classes
 from .bay import Bay
 from .display import Display
-from .detector import Range
+from .detector import Lateral, Range
 from .network import Network
 from .systemhw import PiStatus
 from pint import Quantity
@@ -411,10 +411,13 @@ class CobraBay:
     def _setup_detectors(self):
         return_dict = {}
         for detector_name in self.config['detectors']:
-            print(detector_name)
+            self._logger.info("Creating detector: {}".format(detector_name))
             if self.config['detectors'][detector_name]['type'] == 'Range':
-                return_dict[detector_name] = Range(
-                    offset = self.config['detectors'][detector_name]['offset'],
-                    timing = self.config['detectors'][detector_name]['timing'],
-                    board_options = self.config['detectors'][detector_name]['sensor'])
+                return_dict[detector_name] = Range(board_options = self.config['detectors'][detector_name]['sensor'])
+                try:
+                    return_dict[detector_name].timing(self.config['detectors'][detector_name]['timing'])
+                except KeyError:
+                    return_dict[detector_name].timing('200 ms')
+            if self.config['detectors'][detector_name]['type'] == 'Lateral':
+                return_dict[detector_name] = Lateral(board_options = self.config['detectors'][detector_name]['sensor'])
         return return_dict
