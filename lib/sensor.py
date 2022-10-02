@@ -24,10 +24,6 @@ class Sensor:
     def _setup_sensor(self,board_options):
         pass
 
-    # Override this class in specific implementations to read the
-    def read(self):
-        pass
-
 class VL53L1X(Sensor):
     _i2c_address: int
     _i2c_bus: int
@@ -54,6 +50,10 @@ class VL53L1X(Sensor):
         except:
             raise
 
+        # Set the maximum ranging distance to the theoretical max. This will be compared to the bay distance to limit
+        # readings
+        self.max_range = Quantity('4m')
+
         # Check for required options in
         options = ['i2c_bus','enable_board','enable_pin']
         # Store the options.
@@ -68,7 +68,9 @@ class VL53L1X(Sensor):
             self.i2c_address = board_options['i2c_address']
         # Start ranging.
         self._sensor_obj.start_ranging()
+        # Initialize as medium ranging mode.
         self._distance_mode = 0
+        self.measurement_time = 200000 # Initialized here in microseconds. Detector class will do conversion.
         self.distance_mode = 'medium'
         self._previous_reading = self._sensor_obj.get_distance()
         self._previous_timestamp = monotonic()
@@ -85,6 +87,17 @@ class VL53L1X(Sensor):
 
     def disable(self):
         self.enable_pin.value = False
+
+    @property
+    def measurement_time(self):
+        return self._mt
+
+    @measurement_time.setter
+    def measurement_time(self,input):
+        self._mt = int(input)
+        self._imt = int(( self._mt / 1000 ) + 4)
+        print(self._mt, self._imt)
+        self._sensor_obj.set_timing(self._mt,self._imt)
 
     @property
     def distance_mode(self):
@@ -107,6 +120,7 @@ class VL53L1X(Sensor):
         else:
             raise ValueError("{} is not a valid distance mode".format(dm))
         self._sensor_obj.set_distance_mode(dm)
+        self._sensor_obj.set_timing(self._mt,self._imt)
         self._distance_mode = dm
 
     @property
@@ -116,7 +130,7 @@ class VL53L1X(Sensor):
         if monotonic() - self._previous_timestamp < 0.2:
             return self._previous_reading
         else:
-            return Quantity(self._sensor_obj.get_distance(), self._ureg.millimeter)
+            return Quantity(self._sensor_obj.get_distance(), self._ureg.millimeter) # .plus_minus(2.5)
 
     # Method to find out if an address is on the I2C bus.
     def _addr_on_bus(self,i2c_address):
