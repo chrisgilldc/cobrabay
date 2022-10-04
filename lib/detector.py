@@ -11,41 +11,29 @@ class Detector:
     def __init__(self):
         # A unit registry
         self._ureg = UnitRegistry()
-
-    # This should get overriden by the specific sub-classes.
-    def _setup_detector(self,settings):
-        pass
-
-    def reading(self):
-        pass
-
-    def detector(self):
-        pass
-
-# Single Detectors add wrappers around a single sensor.
-class SingleDetector(Detector):
-    def __init__(self, board_options):
-        super().__init__()
-        self._offset = Quantity("0 cm")
-        # Create the sense object using provided settings.
-        self._sensor_obj = CB_VL53L1X(board_options)
-        self._history = []
-        self._required_settings = []
-        self._settings = {}
+        # Is the detector ready for use?
         self._ready = False
+        # Settings for the detector. Starts as an empty dict.
+        self._settings = {}
+        # What settings are required before the detector can be used? Must be set by the subclass.
+        self._required_settings = None
+        # Measurement offset. We start this at zero, even though that's probably ridiculous!
+        self._offset = 0
 
-    # Allow adjustment of timing.
-    def timing(self, timing_input):
-        # Make sure the timing input is a Quantity.
-        timing_input = self._convert_value(timing_input)
-        # Sensor takes measurement time in microseconds.
-        mt =  timing_input.to('microseconds').magnitude
-        self._sensor_obj.measurement_time = mt
+    # All of the below methods should be overridden and are included here for direction.
+    def _setup_detector(self,settings):
+        raise NotImplementedError
 
+    # value will return the reading from the detector.
+    def value(self):
+        raise NotImplementedError
+
+    # These properties and methods are common to all detectors.
     @property
     def ready(self):
         return self._ready
 
+    # Measurement offset. All detectors will have this, even if it's 0.
     @property
     def offset(self):
         return self._offset
@@ -61,6 +49,53 @@ class SingleDetector(Detector):
         else:
             # Otherwise, it's *likely* numeric, so default to millimeters and hope it workse.
             self._offset = Quantity(input,"mm")
+
+    def _check_ready(self):
+        for setting in self._required_settings:
+            if self._settings[setting] is None:
+                self._ready = False
+                return False
+        self._ready = True
+        return True
+
+# Single Detectors add wrappers around a single sensor.
+class SingleDetector(Detector):
+    def __init__(self, board_options):
+        super().__init__()
+        self._offset = Quantity("0 cm")
+        # Create the sense object using provided settings.
+        self._sensor_obj = CB_VL53L1X(board_options)
+        self._history = []
+        self._required_settings = []
+        self._settings = {}
+        self._ready = False
+
+    @property
+    def value(self):
+        if not self.ready:
+            print("")
+            raise RuntimeError("Detector is not fully configured, cannot read value yet. "
+                               "Current settings:\n{}".format(self._settings))
+        # Read the sensor and put it at the start of the list, along with a timestamp.
+        self._history.insert(0,[self._sensor_obj.range, monotonic_ns()])
+        # Make sure the history list is always five elements, so we don't just grow this ridiculously.
+        self._history = self._history[:5]
+        # Return that reading, minus the offset.
+        return self._history[0][0] - self.offset
+
+    # Allow adjustment of timing.
+    def timing(self, timing_input):
+        # Make sure the timing input is a Quantity.
+        timing_input = self._convert_value(timing_input)
+        # Sensor takes measurement time in microseconds.
+        mt =  timing_input.to('microseconds').magnitude
+        self._sensor_obj.measurement_time = mt
+
+
+    # Pass-through of the I2c address, for debugging.
+    @property
+    def i2c_address(self):
+        return self._sensor_obj.i2c_address
 
     # Utility method to convert into quantities.
     def _convert_value(self, input_value):
@@ -78,13 +113,7 @@ class SingleDetector(Detector):
             results.append(self._sensor_obj.range)
         return mean(results) * results[0].units
 
-    def _check_ready(self):
-        for setting in self._required_settings:
-            if self._settings[setting] is None:
-                self._ready = False
-                return False
-        self._ready = True
-        return True
+
 
     # Called when the system needs to turn this sensor on.
     def activate(self):
@@ -111,17 +140,6 @@ class Range(SingleDetector):
         # Default the warn and critical percentages.
         self._settings['pct_crit'] = 5
         self._settings['pct_warn'] = 10
-
-    @property
-    def value(self):
-        if not self.ready:
-            raise RuntimeError("Detector is not fully configured, cannot read value yet.")
-        # Read the sensor and put it at the start of the list, along with a timestamp.
-        self._history.insert(0,[self._sensor_obj.range, monotonic_ns()])
-        # Make sure the history list is always five elements, so we don't just grow this ridiculously.
-        self._history = self._history[:5]
-        # Return that reading, minus the offset.
-        return self._history[0][0] - self.offset
 
     def distance_mode(self,input):
         try:
@@ -176,7 +194,7 @@ class Lateral(SingleDetector):
     def __init__(self,board_options):
         super().__init__(board_options)
         # Initialize required elements as None. This lets us do a readiness check later.
-        self._required_settings = ['offset','spread_ok','spread_warn','spread_critical','side']
+        self._required_settings = ['offset','spread_ok','spread_warn','spread_crit','side']
         self._settings = {}
         for setting in self._required_settings:
             self._settings[setting] = None
@@ -217,12 +235,12 @@ class Lateral(SingleDetector):
         self._check_ready()
 
     @property
-    def spread_critical(self):
-        return self._settings['spread_critical']
+    def spread_crit(self):
+        return self._settings['spread_crit']
 
-    @spread_critical.setter
-    def spread_critical(self,input):
-        self._settings['spread_warn'] = self._convert_value(input)
+    @spread_crit.setter
+    def spread_crit(self,input):
+        self._settings['spread_crit'] = self._convert_value(input)
         # Check to see if the detector is now ready.
         self._check_ready()
 
