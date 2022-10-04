@@ -12,6 +12,7 @@ import logging
 import adafruit_aw9523
 from pint import UnitRegistry, Quantity
 from time import monotonic
+import weakref
 
 class Sensor:
     def __init__(self,board_options):
@@ -28,6 +29,15 @@ class VL53L1X(Sensor):
     _i2c_address: int
     _i2c_bus: int
     from VL53L1X import VL53L1X as pimoroni_vl53l1x
+    instances = weakref.WeakSet()
+
+    def __init__(self, board_options):
+        # Call super.
+        super().__init__(board_options)
+        # Add self to instance list.
+        VL53L1X.instances.add(self)
+        # Flag for setting up addresses.
+        self._addr_set = False
 
     def _setup_sensor(self,board_options):
         # Set a default log level if not defined.
@@ -137,7 +147,6 @@ class VL53L1X(Sensor):
         while not self._i2c.try_lock():
             pass
         found_addresses = self._i2c.scan()
-        print("Addresses: {}".format(found_addresses))
         self._i2c.unlock()
         if i2c_address in found_addresses:
             return True
@@ -161,29 +170,14 @@ class VL53L1X(Sensor):
         return self._i2c_address
 
     @i2c_address.setter
+    # Sets the address of the board. This presumes that we start from a place of all boards being shut off.
     def i2c_address(self,i2c_address):
         # If it's in "0xYY" format, convert it to a base 16 int.
         if isinstance(i2c_address,str):
             i2c_address = int(i2c_address,base=16)
 
-        # If the address is already on the bus...
-        if self._addr_on_bus(i2c_address):
-            # Disable ourselves and see if the address goes away.
-            self.disable()
-            if not self._addr_on_bus(i2c_address):
-                # Disabling made the board go away! That means enable pin works and there are no other boards,
-                # so we're good to go!
-                self.enable()
-                self._i2c_address = i2c_address
-            else:
-                raise ValueError("Address {} still on bus even after disabling board. "
-                                 "Either address or enable pin is incorrect.".format(hex(i2c_address)))
-        else:
-            self.disable()
-            # Disable the board, check if 0x29 is clear for a reset.
-            if self._addr_on_bus("0x29"):
-                raise ValueError("Another board is already on the VL53L1X default 0x29 address. Cannot continue")
-            self.enable()
+        # Enable self, will show up on 0x29
+        self.enable()
         from VL53L1X import VL53L1X as pimoroni_vl53l1x
         print("Creating sensor object.")
         self._sensor_obj = pimoroni_vl53l1x(self._i2c_bus, 0x29)
@@ -194,6 +188,7 @@ class VL53L1X(Sensor):
         self._sensor_obj.change_address(i2c_address)
         self._sensor_obj.close()
         self._sensor_obj.open()
+        self._i2c_address = i2c_address
 
     @property
     def enable_board(self):
