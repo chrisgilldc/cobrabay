@@ -6,6 +6,53 @@ from .sensor import VL53L1X as CB_VL53L1X
 from pint import UnitRegistry, Quantity
 from statistics import mean
 from time import monotonic_ns
+from functools import wraps
+
+
+# Decorator method to check if a method is ready.
+def check_ready(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        # Call the function.
+        func(self, *args, **kwargs)
+        # Now check for readiness and set ready if we are.
+        for setting in self._required_settings:
+            if self._settings[setting] is None:
+                self._ready = False
+        self._ready = True
+    return wrapper
+
+
+# Use this decorator on any method that shouldn't be usable if the detector isn't marked ready. IE: don't let
+# a value be read if
+def only_if_ready(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if not self.ready:
+            raise RuntimeError("Detector is not fully configured, cannot read value yet. "
+                               "Current settings:\n{}".format(self._settings))
+        else:
+            return func(self, *args, **kwargs)
+    return wrapper
+
+# Decorate these methods to have methods check the value history before doing another hit on the sensor.
+def use_value_cache(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if len(self._history) > 0:
+            time_delta = Quantity(monotonic_ns() - self._history[0][1], 'nanoseconds')
+            # Get the timing of the sensor.
+            sensor_timing = Quantity(self.measurement_time + " milliseconds")
+            if time_delta < sensor_timing:  # If not enough time has passed, send back the most recent reading.
+                print("Only {} has passed. Using cached value.".format(time_delta))
+                value = self._history[0][0]
+            else:
+                value = self.value
+        else:
+            value = self.value
+        # Send whichever value it is into the function.
+        return func(self, value)
+    return wrapper
 
 class Detector:
     def __init__(self):
@@ -18,10 +65,12 @@ class Detector:
         # What settings are required before the detector can be used? Must be set by the subclass.
         self._required_settings = None
         # Measurement offset. We start this at zero, even though that's probably ridiculous!
-        self._offset = 0
+        self._offset = Quantity("0 cm")
+        # List to keep the history of sensor readings. This is used for some methods.
+        self._history = []
 
     # All of the below methods should be overridden and are included here for direction.
-    def _setup_detector(self,settings):
+    def _setup_detector(self, settings):
         raise NotImplementedError
 
     # value will return the reading from the detector.
@@ -39,63 +88,9 @@ class Detector:
         return self._offset
 
     @offset.setter
-    def offset(self,input):
-        if isinstance(input,Quantity):
-            # If offset is already a quantity, use that.
-            self._offset = input
-        elif isinstance(input,str):
-            # If it's a string, use the Quantity string-parser approach.
-            self._offset = Quantity(input)
-        else:
-            # Otherwise, it's *likely* numeric, so default to millimeters and hope it workse.
-            self._offset = Quantity(input,"mm")
-
-    def _check_ready(self):
-        for setting in self._required_settings:
-            if self._settings[setting] is None:
-                self._ready = False
-                return False
-        self._ready = True
-        return True
-
-# Single Detectors add wrappers around a single sensor.
-class SingleDetector(Detector):
-    def __init__(self, board_options):
-        super().__init__()
-        self._offset = Quantity("0 cm")
-        # Create the sense object using provided settings.
-        self._sensor_obj = CB_VL53L1X(board_options)
-        self._history = []
-        self._required_settings = []
-        self._settings = {}
-        self._ready = False
-
-    @property
-    def value(self):
-        if not self.ready:
-            print("")
-            raise RuntimeError("Detector is not fully configured, cannot read value yet. "
-                               "Current settings:\n{}".format(self._settings))
-        # Read the sensor and put it at the start of the list, along with a timestamp.
-        self._history.insert(0,[self._sensor_obj.range, monotonic_ns()])
-        # Make sure the history list is always five elements, so we don't just grow this ridiculously.
-        self._history = self._history[:5]
-        # Return that reading, minus the offset.
-        return self._history[0][0] - self.offset
-
-    # Allow adjustment of timing.
-    def timing(self, timing_input):
-        # Make sure the timing input is a Quantity.
-        timing_input = self._convert_value(timing_input)
-        # Sensor takes measurement time in microseconds.
-        mt =  timing_input.to('microseconds').magnitude
-        self._sensor_obj.measurement_time = mt
-
-
-    # Pass-through of the I2c address, for debugging.
-    @property
-    def i2c_address(self):
-        return self._sensor_obj.i2c_address
+    @check_ready
+    def offset(self, input):
+        self._settings['offset'] = self._convert_value(input)
 
     # Utility method to convert into quantities.
     def _convert_value(self, input_value):
@@ -107,13 +102,36 @@ class SingleDetector(Detector):
         else:
             raise ValueError("Not a parseable value!")
 
-    def _range_avg(self, num=5):
-        results = []
-        while len(results) < num:
-            results.append(self._sensor_obj.range)
-        return mean(results) * results[0].units
 
+# Single Detectors add wrappers around a single VL53L1X sensor.
+class SingleDetector(Detector):
+    def __init__(self, board_options):
+        super().__init__()
+        # Create the sense object using provided settings.
+        self._sensor_obj = CB_VL53L1X(board_options)
 
+    @property
+    @only_if_ready
+    def value(self):
+        # Read the sensor and put it at the start of the list, along with a timestamp.
+        self._history.insert(0, [self._sensor_obj.range, monotonic_ns()])
+        # Make sure the history list is always five elements, so we don't just grow this ridiculously.
+        self._history = self._history[:5]
+        # Return that reading, minus the offset.
+        return self._history[0][0] - self.offset
+
+    # Allow adjustment of timing.
+    def timing(self, timing_input):
+        # Make sure the timing input is a Quantity.
+        timing_input = self._convert_value(timing_input)
+        # Sensor takes measurement time in microseconds.
+        mt = timing_input.to('microseconds').magnitude
+        self._sensor_obj.measurement_time = mt
+
+    # Pass-through of the I2c address, for debugging.
+    @property
+    def i2c_address(self):
+        return self._sensor_obj.i2c_address
 
     # Called when the system needs to turn this sensor on.
     def activate(self):
@@ -133,7 +151,7 @@ class SingleDetector(Detector):
 class Range(SingleDetector):
     def __init__(self, board_options):
         super().__init__(board_options)
-        self._required_settings = ['offset','bay_depth','pct_warn','pct_crit']
+        self._required_settings = ['offset', 'bay_depth', 'pct_warn', 'pct_crit']
         self._settings = {}
         for setting in self._required_settings:
             self._settings[setting] = None
@@ -141,60 +159,63 @@ class Range(SingleDetector):
         self._settings['pct_crit'] = 5
         self._settings['pct_warn'] = 10
 
-    def distance_mode(self,input):
+    def distance_mode(self, input):
         try:
             self._sensor_obj.distance_mode = input
         except ValueError:
             print("Could not change distance mode to {}".format(input))
 
     @property
-    def offset(self):
-        return self._settings['offset']
-
-    @offset.setter
-    def offset(self, input):
-        self._settings['offset'] = self._convert_value(input)
-        self._check_ready()
-
-    @property
     def bay_depth(self):
         return self._settings['bay_depth']
 
     @bay_depth.setter
+    @check_ready
     def bay_depth(self, input):
         self._settings['bay_depth'] = self._convert_value(input)
-        self._check_ready()
 
     @property
     def pct_warn(self):
         return self._settings['pct_warn']
 
     @pct_warn.setter
+    @check_ready
     def pct_warn(self, input):
         self._settings['pct_warn'] = input
-        if self._check_ready():
-            self._derived_distances()
 
     @property
     def pct_crit(self):
         return self._settings['pct_crit']
 
     @pct_crit.setter
+    @check_ready
     def pct_crit(self, input):
         self._settings['pct_warn'] = input
-        if self._check_ready():
-            self._derived_distances()
 
     def _derived_distances(self):
-        self._settings['dist_warn'] = ( self._settings['bay_depth'] - self._settings['offset'] ) * ( self._settings['pct_warn'] / 100 )
-        self._settings['dist_crit'] = ( self._settings['bay_depth'] - self._settings['offset'] ) * ( self._settings['pct_crit'] / 100 )
+        self._settings['dist_warn'] = (self._settings['bay_depth'] - self._settings['offset']) * (
+                    self._settings['pct_warn'] / 100)
+        self._settings['dist_crit'] = (self._settings['bay_depth'] - self._settings['offset']) * (
+                    self._settings['pct_crit'] / 100)
+
+    # Reference some properties upward to the parent class. This is necessary because properties aren't directly
+    # inherented.
+
+    @property
+    def value(self):
+        return super().value
+
+    @property
+    def i2c_address(self):
+        return super().i2c_address
+
 
 # Detector for lateral position
 class Lateral(SingleDetector):
-    def __init__(self,board_options):
+    def __init__(self, board_options):
         super().__init__(board_options)
         # Initialize required elements as None. This lets us do a readiness check later.
-        self._required_settings = ['offset','spread_ok','spread_warn','spread_crit','side']
+        self._required_settings = ['offset', 'spread_ok', 'spread_warn', 'spread_crit', 'side']
         self._settings = {}
         for setting in self._required_settings:
             self._settings[setting] = None
@@ -208,54 +229,62 @@ class Lateral(SingleDetector):
         return self._settings['offset']
 
     @offset.setter
-    def offset(self,input):
+    @check_ready
+    def offset(self, input):
         # Convert into a Pint Quantity.
         self._settings['offset'] = self._convert_value(input)
         # Check to see if the detector is now ready.
-        self._check_ready()
 
     @property
     def spread_ok(self):
         return self._settings['spread_ok']
 
     @spread_ok.setter
-    def spread_ok(self,input):
+    @check_ready
+    def spread_ok(self, input):
         self._settings['spread_ok'] = self._convert_value(input)
         # Check to see if the detector is now ready.
-        self._check_ready()
 
     @property
     def spread_warn(self):
         return self._settings['spread_warn']
 
     @spread_warn.setter
-    def spread_warn(self,input):
+    @check_ready
+    def spread_warn(self, input):
         self._settings['spread_warn'] = self._convert_value(input)
         # Check to see if the detector is now ready.
-        self._check_ready()
 
     @property
     def spread_crit(self):
         return self._settings['spread_crit']
 
     @spread_crit.setter
-    def spread_crit(self,input):
+    @check_ready
+    def spread_crit(self, input):
         self._settings['spread_crit'] = self._convert_value(input)
         # Check to see if the detector is now ready.
-        self._check_ready()
 
     @property
     def side(self):
         return self._settings['side']
 
     @side.setter
-    def side(self,input):
-        if input.upper() not in ('R','L'):
+    @check_ready
+    def side(self, input):
+        if input.upper() not in ('R', 'L'):
             raise ValueError("Lateral side must be 'R' or 'L'")
         else:
             self._settings['side'] = input.upper()
-            self._check_ready()
 
-# Wrapper to group together multiple detectors
-class MultiDetector(Detector):
-    pass
+    # Reference some properties upward to the parent class. This is necessary because properties aren't directly
+    # inherented.
+
+    @property
+    def value(self):
+        return super().value
+
+    @property
+    def i2c_address(self):
+        return super().i2c_address
+
