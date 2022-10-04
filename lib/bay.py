@@ -21,12 +21,23 @@ class Bay:
         self._ureg = UnitRegistry
         # Set the unit system. Default to Metric. If units is in the config and is imperial, change it to imperial.
         self._unit_system = 'metric'
+        self._output_unit = 'm'
         if 'units' in config:
             if config['units'].lower() == 'imperial':
                 self._unit_system = 'imperial'
+                self._output_unit = 'in'
 
+        # Set up the detectors.
         self._setup_detectors(config,detectors)
-        self._lateral = False
+        self._logger.debug(self._detectors)
+        self._logger.debug("Detectors configured:")
+        self._logger.debug("\tRange: {}".format(hex(self._detectors['range'].i2c_address)))
+        lat_string = ""
+        for detector in self._detectors['lateral']:
+            lat_string = lat_string + " {}".format(hex(detector.i2c_address))
+            # self._logger.debug("\t\t{}: {}".format(
+        self._logger.debug("\tLateral: " + lat_string)
+
         # Set the display height. This is needed for some display calculations
         self._matrix = {'width': 64, 'height': 32 }
         self._display_som = "imperial"
@@ -86,13 +97,15 @@ class Bay:
         '''
         return_dict = {}
         # Longitudinal offset.
-        if self._unit_system == 'imperial':
-            return_dict['lo'] = self._detectors['range'].value.to('in')
-        else:
-            return_dict['lo'] = self._detectors['range'].value.to('m')
-
+        return_dict['lo'] = self._detectors['range'].value.to(self._output_unit)
         if len(self._detectors['lateral']) > 0:
-            pass
+            i = 0
+            return_dict['la'] = []
+            for lateral in self._detectors['lateral']:
+                lateral_dict = {'zone_name': 'zone_' + str( i + 1 ) }
+                lateral_dict['value'] = self._detectors['lateral'][i].value.to(self._output_unit)
+                return_dict['la'].append(lateral_dict)
+                i += 1
         else:
             return_dict['la'] = None
         return return_dict
@@ -118,8 +131,11 @@ class Bay:
         else:
             self._state = input
         if input in ('docking','undocking') and self._state not in ('docking','undocking'):
+            self._logger.debug("Entering state {}".format(input))
+            self._logger.debug("Detectors: {}".format(self._detectors))
             # When entering docking or undocking state, start ranging on the sensors.
             for detector in self._detectors:
+                self._logger.debug("Activating detector {}".format(detector))
                 self._detectors[detector].activate()
         if input not in ('docking','undocking') and self._state in ('docking', 'undocking'):
             # When leaving docking or undocking state, stop ranging on the sensors.
@@ -191,10 +207,12 @@ class Bay:
     def _setup_detectors(self,config,detectors):
         self._detectors = {}
         # Do the range setup. This behaves a little differently, so is coraled to a separate method for sanity.
+        self._logger.debug("Setting up range detector.")
         self._setup_range(config,detectors)
         # Lateral configuration.
         # Make the lateral array.
         self._detectors['lateral'] = []
+        self._logger.debug("Setting up lateral detectors.")
         for detector_config in config['lateral']['detectors']:
             detector_name = detector_config['detector']
             try:
@@ -212,6 +230,8 @@ class Bay:
                         setattr(lateral,item,config['lateral']['defaults'][item])
                     except KeyError:
                         raise KeyError("Needed default value for {} but not defined!".format(item))
+            # Append it to the lateral array.
+            self._detectors['lateral'].append(lateral)
 
     # Method to set up the range detector
     def _setup_range(self,config,detectors):
