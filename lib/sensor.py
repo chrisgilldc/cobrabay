@@ -81,6 +81,8 @@ class VL53L1X(Sensor):
         # Initialize as medium ranging mode.
         self._distance_mode = 0
         self.measurement_time = 200000 # Initialized here in microseconds. Detector class will do conversion.
+        # Set the timing.
+        self.measurement_time = Quantity(board_options['timing']).to('microseconds').magnitude
         self.distance_mode = 'medium'
         self._previous_reading = self._sensor_obj.get_distance()
         self._previous_timestamp = monotonic()
@@ -106,7 +108,6 @@ class VL53L1X(Sensor):
     def measurement_time(self,input):
         self._mt = int(input)
         self._imt = int(( self._mt / 1000 ) + 4)
-        print(self._mt, self._imt)
         self._sensor_obj.set_timing(self._mt,self._imt)
 
     @property
