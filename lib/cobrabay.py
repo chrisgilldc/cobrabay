@@ -9,6 +9,10 @@ import sys
 from time import monotonic, sleep
 import pprint
 import atexit
+import busio
+import board
+from digitalio import DigitalInOut
+from adafruit_aw9523 import AW9523
 
 # Import the other CobraBay classes
 from .bay import Bay
@@ -16,6 +20,7 @@ from .display import Display
 from .detector import Lateral, Range
 from .network import Network
 from .systemhw import PiStatus
+from .sensor import VL53L1X
 from pint import Quantity
 
 class CobraBay:
@@ -79,6 +84,9 @@ class CobraBay:
 
         # Basic checks passed. Good enough! Assign it.
         self.config = config
+
+        # Make the GPIO safe.
+        self._safe_gpio()
 
         # Initial device state
         self._device_state = 'on'
@@ -145,8 +153,6 @@ class CobraBay:
             if command['type'] == 'bay':
                 # Some commands can only run when we're *not* actively docking or undocking.
                 if self._bays[command['bay_id']] not in ('docking', 'undocking'):
-                    # if 'rescan_sensors' in command['cmd']:
-                    #     self._sensors.rescan()
                     if 'dock' in command['cmd']:
                         try:
                             self._bays[command['bay_id']].dock()
@@ -409,6 +415,7 @@ class CobraBay:
 
     # Method to set up the detectors based on the configuration.
     def _setup_detectors(self):
+        i2c_bus = busio.I2C(board.SCL, board.SDA)
         return_dict = {}
         for detector_name in self.config['detectors']:
             self._logger.info("Creating detector: {}".format(detector_name))
@@ -421,3 +428,39 @@ class CobraBay:
             if self.config['detectors'][detector_name]['type'] == 'Lateral':
                 return_dict[detector_name] = Lateral(board_options = self.config['detectors'][detector_name]['sensor'])
         return return_dict
+
+    # Make the GPIO safe.
+    def _safe_gpio(self):
+        # Gather up all the GPIO pins in the
+        processed_boards = []
+        processed_pins = []
+        i2c_bus = busio.I2C(board.SCL, board.SDA)
+        for detector_name in self.config['detectors']:
+            self._logger.debug("Checking detector: {}".format(detector_name))
+            eb = self.config['detectors'][detector_name]['sensor']['enable_board']
+            # Board "0" is used to mark the Pi. We can't turn off *all* Pi pins, so dig in and check.
+            if eb == 0:
+                self._logger.debug("Detector uses GPIO pin on-board the Pi.")
+                pin_number = self.config['detectors'][detector_name]['sensor']['enable_pin']
+                pin_name = 'D' + str(pin_number)
+                pin = DigitalInOut(getattr(board, pin_name))
+                pin.switch_to_output(value=False)
+                pin.value=False
+                processed_pins.append(pin_number)
+            # Otherwise, AW9523, so check and access.
+            else:
+                aw_addr = self.config['detectors'][detector_name]['sensor']['enable_board']
+                if aw_addr in processed_boards:
+                    self._logger.debug("Detector {} uses AW9523 at address {}, already processed.".format(detector_name,aw_addr))
+                    # If this board has already been processed, no need to do it again.
+                    break
+                # The AW9523 has 16 pins, 0-15, so do them all.
+                aw = AW9523(i2c_bus,address=aw_addr)
+                for i in range(15):
+                    self._logger.debug("Shutting off {}, pin {}".format(aw_addr, i))
+                    pin = aw.get_pin(i)
+                    pin.switch_to_output(value=False)
+                    pin.value=False
+                processed_boards.append(aw_addr)
+                del(aw)
+        del(i2c_bus)
