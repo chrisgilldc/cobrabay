@@ -19,7 +19,9 @@ def check_ready(func):
         for setting in self._required_settings:
             if self._settings[setting] is None:
                 self._ready = False
+                return
         self._ready = True
+        self._when_ready()
     return wrapper
 
 
@@ -65,7 +67,7 @@ class Detector:
         # What settings are required before the detector can be used? Must be set by the subclass.
         self._required_settings = None
         # Measurement offset. We start this at zero, even though that's probably ridiculous!
-        self._offset = Quantity("0 cm")
+        self._settings['offset'] = Quantity("0 cm")
         # List to keep the history of sensor readings. This is used for some methods.
         self._history = []
 
@@ -85,7 +87,7 @@ class Detector:
     # Measurement offset. All detectors will have this, even if it's 0.
     @property
     def offset(self):
-        return self._offset
+        return self._settings['offset']
 
     @offset.setter
     @check_ready
@@ -102,6 +104,10 @@ class Detector:
         else:
             raise ValueError("Not a parseable value!")
 
+    # This method will get called by the readiness checker once the detector is ready.
+    # If the detector has specific additional work to do on becoming ready, override this method and put it here.
+    def _when_ready(self):
+        pass
 
 # Single Detectors add wrappers around a single VL53L1X sensor.
 class SingleDetector(Detector):
@@ -156,9 +162,41 @@ class Range(SingleDetector):
         for setting in self._required_settings:
             self._settings[setting] = None
         # Default the warn and critical percentages.
-        self._settings['pct_crit'] = 5
-        self._settings['pct_warn'] = 10
+        self._settings['pct_crit'] = 5 / 100
+        self._settings['pct_warn'] = 10 / 100
 
+    # Quality assesses where the vehicle is on their approach relative to the depth of the bay and the stop location.
+    @property
+    @only_if_ready
+    def quality(self):
+        print("Evaluating park quality...")
+        # Get the value once. Will use either cached or uncached
+        value = self.value
+        print("Read value: {}".format(value))
+        if value <= 0:
+            # This means somebody has overshort the stopping point and is considered an emergency.
+            return 'emerg'
+        elif value <= self._settings['dist_crit']:
+            return 'crit'
+        elif value <= self._settings['dist_warn']:
+            return 'warn'
+        else:
+            return 'ok'
+
+    # Based on readings, is the vehicle in motion?
+    @only_if_ready
+    def motion(self):
+        # Get the value once. Will use either cached or uncached
+        value = self.value
+        # Compare the time between the most recent two readings. If it's too long, that probably means we've just
+        # started ranging, ie:
+
+    # Gets called when the rangefinder has all settings and is being made ready for use.
+    def _when_ready(self):
+        # Calculate specific distances to use based on the percentages.
+        self._derived_distances()
+
+    # Allow dynamic distance mode changes to come from the bay. This is largely used for debugging.
     def distance_mode(self, input):
         try:
             self._sensor_obj.distance_mode = input
@@ -174,29 +212,33 @@ class Range(SingleDetector):
     def bay_depth(self, input):
         self._settings['bay_depth'] = self._convert_value(input)
 
+    # Properties for warning and critical percentages. We take these are "normal" percentages (ie: 15.10) and convert
+    # to decimal so it can be readily used for multiplication.
     @property
     def pct_warn(self):
-        return self._settings['pct_warn']
+        return self._settings['pct_warn'] * 100
 
     @pct_warn.setter
     @check_ready
     def pct_warn(self, input):
-        self._settings['pct_warn'] = input
+        self._settings['pct_warn'] = input / 100
 
     @property
     def pct_crit(self):
-        return self._settings['pct_crit']
+        return self._settings['pct_crit'] * 100
 
     @pct_crit.setter
     @check_ready
     def pct_crit(self, input):
-        self._settings['pct_warn'] = input
+        self._settings['pct_crit'] = input / 100
 
+    # Pre-bake distances for warn and critical to make evaluations a little easier.
     def _derived_distances(self):
-        self._settings['dist_warn'] = (self._settings['bay_depth'] - self._settings['offset']) * (
-                    self._settings['pct_warn'] / 100)
-        self._settings['dist_crit'] = (self._settings['bay_depth'] - self._settings['offset']) * (
-                    self._settings['pct_crit'] / 100)
+        print("Bay depth: {}".format(self._settings['bay_depth']))
+        print("Offset: {}".format(self._settings['offset']))
+        adjusted_distance = self._settings['bay_depth'] - self._settings['offset']
+        self._settings['dist_warn'] = adjusted_distance.magnitude * self.pct_warn * adjusted_distance.units
+        self._settings['dist_crit'] = adjusted_distance.magnitude * self.pct_crit * adjusted_distance.units
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
@@ -209,6 +251,13 @@ class Range(SingleDetector):
     def i2c_address(self):
         return super().i2c_address
 
+    @property
+    def offset(self):
+        return super().offset
+
+    @offset.setter
+    def offset(self,input):
+        super(Range, self.__class__).offset.fset(self, input)
 
 # Detector for lateral position
 class Lateral(SingleDetector):
@@ -221,19 +270,13 @@ class Lateral(SingleDetector):
             self._settings[setting] = None
 
     @property
-    def ready(self):
-        return self._ready
+    @only_if_ready
+    def quality(self):
+        return "test"
 
     @property
-    def offset(self):
-        return self._settings['offset']
-
-    @offset.setter
-    @check_ready
-    def offset(self, input):
-        # Convert into a Pint Quantity.
-        self._settings['offset'] = self._convert_value(input)
-        # Check to see if the detector is now ready.
+    def ready(self):
+        return self._ready
 
     @property
     def spread_ok(self):
@@ -287,4 +330,12 @@ class Lateral(SingleDetector):
     @property
     def i2c_address(self):
         return super().i2c_address
+
+    @property
+    def offset(self):
+        return super().offset
+
+    @offset.setter
+    def offset(self,input):
+        super(Lateral, self.__class__).offset.fset(self, input)
 
