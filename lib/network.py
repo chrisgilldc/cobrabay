@@ -195,8 +195,8 @@ class Network:
                 }
             },
             # How good the parking job is.
-            'bay_park_quality': {
-                'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/bay_alignment',
+            'bay_quality': {
+                'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/quality',
                 'previous_state': {},
                 'enabled': True,
                 'ha_discovery': {
