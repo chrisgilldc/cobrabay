@@ -118,7 +118,7 @@ class CobraBay:
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
-        self._display = Display(self.config)
+        self._display = Display(self.config['display'])
 
         self._logger.info('CobraBay: Connecting to network...')
         # Connect to the network.
@@ -249,7 +249,7 @@ class CobraBay:
             else:
                 sensor_value = None
             try:
-                self._display.display_generic(system_state, sensor_value)
+                self._display.show_clock()
             except:
                 pass
 
