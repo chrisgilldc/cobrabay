@@ -42,6 +42,8 @@ class Bay:
         self._matrix = {'width': 64, 'height': 32 }
         self._display_som = "imperial"
         self._state = 'ready'
+        self._position = {}
+        self._quality = {}
         self._logger.info("Bay '{}' initialization complete.".format(self._bay_id))
 
     # Imperative commands
@@ -80,35 +82,33 @@ class Bay:
 
     # How good is the parking job?
     @property
-    def park_quality(self):
-        if self.occupied == 'occupied':
-            # Some logic here.
-            return 'Meh?'
-        else:
-            return 'Not Parked'
+    def quality(self):
+        return self._quality
 
     @property
     def position(self):
-        '''
-        Position of the vehicle in the bay
+        self._scan_detectors()
+        return self._position
 
-        :returns Positioning dictionary
-        :rtype Dict
-        '''
-        return_dict = {}
+    # Scans
+    def _scan_detectors(self):
+        self._position = {}
+        self._quality = {}
         # Longitudinal offset.
-        return_dict['lo'] = self._detectors['range'].value.to(self._output_unit)
+        self._position['lo'] = self._detectors['range'].value.to(self._output_unit)
+        self._quality['lo'] = self._detectors['range'].quality
         if len(self._detectors['lateral']) > 0:
             i = 0
-            return_dict['la'] = []
+            self._position['la'] = {}
+            self._quality['la'] = {}
             for lateral in self._detectors['lateral']:
-                lateral_dict = {'zone_name': 'zone_' + str( i + 1 ) }
-                lateral_dict['value'] = self._detectors['lateral'][i].value.to(self._output_unit)
-                return_dict['la'].append(lateral_dict)
+                zone_name = 'zone_' + str( i + 1 )
+                self._position['la'][zone_name] = self._detectors['lateral'][i].value.to(self._output_unit)
+                self._quality['la'][zone_name] = self._detectors['lateral'][i].quality
                 i += 1
         else:
-            return_dict['la'] = None
-        return return_dict
+            self._position['la'] = None
+            self._quality['la'] = None
 
     @property
     def state(self):
@@ -142,24 +142,23 @@ class Bay:
             for detector in self._detectors:
                 self._detectors[detector].deactivate()
 
-
     # MQTT status methods. These generate payloads the core network handler can send upward.
     def mqtt_messages(self,verify=False):
         outbound_messages = [] # topic, message, repease, topic_mappings
         # State message.
         outbound_messages.append(
-            {'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+            {'topic': 'bay_state', 'message': self.state, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
         )
         # Only generate  positioning messages if 1) we're  docking or undocking or 2)  a verify has been explicitly requested.
         if verify or self.state in ('docking','undocking'):
             outbound_messages.append(
-                {'topic': 'bay_park_quality', 'message': self.park_quality, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+                {'topic': 'bay_quality', 'message': self.quality, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
             )
             outbound_messages.append(
                 {'topic': 'bay_position', 'message': self.position, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
             )
             outbound_messages.append(
-                {'topic': 'bay_state', 'message': self.state, 'repeat': False,'topic_mappings': {'bay_id': self._bay_id}}
+                {'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
             )
         return outbound_messages
 
@@ -230,6 +229,7 @@ class Bay:
                         setattr(lateral,item,config['lateral']['defaults'][item])
                     except KeyError:
                         raise KeyError("Needed default value for {} but not defined!".format(item))
+            self._logger.debug("Lateral now has settings: {}".format(lateral._settings))
             # Append it to the lateral array.
             self._detectors['lateral'].append(lateral)
 
@@ -250,3 +250,13 @@ class Bay:
         self._detectors['range'].offset = config['range']['offset']
         self._logger.info("Setting range detector bay depth to: {}".format(config['range']['bay_depth']))
         self._detectors['range'].bay_depth = config['range']['bay_depth']
+        try:
+            self._logger.info("Setting range detector warn to: {}".format(config['range']['pct_warn']))
+            self._detectors['range'].bay_depth = config['range']['pct_warn']
+        except KeyError:
+            pass
+        try:
+            self._logger.info("Setting range detector warn to: {}".format(config['range']['pct_crit']))
+            self._detectors['range'].bay_depth = config['range']['pct_crit']
+        except KeyError:
+            pass
