@@ -18,8 +18,9 @@ Raspberry Pi OS Lite 64-bit. Any other Pi with Raspberry Pi OS should work.
 ### Required Libraries
 
 * [paho-mqtt](https://github.com/eclipse/paho.mqtt.python)
-* [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix)
-  *  Not available through pip, build as per instructions
+* Packages not available through PIP:
+  * [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix) - Build per instructions.
+  * [TFMini-I2C-Python](https://github.com/madewhatnow/TFmini-I2C-Python) - Copy TFmini_I2C.py into the cobrabay/lib directory.
 
 ### CobraBay
 * Copy 'cobrabay' to _device_/lib/cobrabay
