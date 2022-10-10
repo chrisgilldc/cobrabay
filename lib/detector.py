@@ -46,7 +46,6 @@ def use_value_cache(func):
             # Get the timing of the sensor.
             sensor_timing = Quantity(self.measurement_time + " milliseconds")
             if time_delta < sensor_timing:  # If not enough time has passed, send back the most recent reading.
-                print("Only {} has passed. Using cached value.".format(time_delta))
                 value = self._history[0][0]
             else:
                 value = self.value
@@ -117,14 +116,8 @@ class SingleDetector(Detector):
         self._sensor_obj = CB_VL53L1X(board_options)
 
     @property
-    @only_if_ready
     def value(self):
-        # Read the sensor and put it at the start of the list, along with a timestamp.
-        self._history.insert(0, [self._sensor_obj.range, monotonic_ns()])
-        # Make sure the history list is always five elements, so we don't just grow this ridiculously.
-        self._history = self._history[:5]
-        # Return that reading, minus the offset.
-        return self._history[0][0] - self.offset
+        raise NotImplemented
 
     # Allow adjustment of timing.
     def timing(self, timing_input):
@@ -157,7 +150,7 @@ class SingleDetector(Detector):
 class Range(SingleDetector):
     def __init__(self, board_options):
         super().__init__(board_options)
-        self._required_settings = ['offset', 'bay_depth', 'pct_warn', 'pct_crit']
+        self._required_settings = ['offset', 'bay_depth', 'spread_park', 'pct_warn', 'pct_crit']
         self._settings = {}
         for setting in self._required_settings:
             self._settings[setting] = None
@@ -165,17 +158,29 @@ class Range(SingleDetector):
         self._settings['pct_crit'] = 5 / 100
         self._settings['pct_warn'] = 10 / 100
 
+    @property
+    def value(self):
+        # Read the sensor and put it at the start of the list, along with a timestamp.
+        self._history.insert(0, [self._sensor_obj.range, monotonic_ns()])
+        # Make sure the history list is always five elements, so we don't just grow this ridiculously.
+        self._history = self._history[:5]
+        # Return that reading, minus the offset.
+        return self._history[0][0] - self.offset
+
     # Quality assesses where the vehicle is on their approach relative to the depth of the bay and the stop location.
     @property
     @only_if_ready
     def quality(self):
-        print("Evaluating park quality...")
         # Get the value once. Will use either cached or uncached
         value = self.value
-        print("Read value: {}".format(value))
-        if value <= 0:
-            # This means somebody has overshort the stopping point and is considered an emergency.
+        # You're about to hit the wall!
+        if ( value + self.offset ) < Quantity("2 in"):
             return 'emerg'
+        # Overshot by too much, back up.
+        elif value < 0 and abs(value) > self.spread_park:
+            return 'back-up'
+        elif abs(value) < self.spread_park:
+            return 'park'
         elif value <= self._settings['dist_crit']:
             return 'crit'
         elif value <= self._settings['dist_warn']:
@@ -184,6 +189,7 @@ class Range(SingleDetector):
             return 'ok'
 
     # Based on readings, is the vehicle in motion?
+    @property
     @only_if_ready
     def motion(self):
         # Get the value once. Will use either cached or uncached
@@ -212,6 +218,15 @@ class Range(SingleDetector):
     def bay_depth(self, input):
         self._settings['bay_depth'] = self._convert_value(input)
 
+    @property
+    def spread_park(self):
+        return self._settings['spread_park']
+
+    @spread_park.setter
+    @check_ready
+    def spread_park(self, input):
+        self._settings['spread_park'] = self._convert_value(input)
+
     # Properties for warning and critical percentages. We take these are "normal" percentages (ie: 15.10) and convert
     # to decimal so it can be readily used for multiplication.
     @property
@@ -234,18 +249,12 @@ class Range(SingleDetector):
 
     # Pre-bake distances for warn and critical to make evaluations a little easier.
     def _derived_distances(self):
-        print("Bay depth: {}".format(self._settings['bay_depth']))
-        print("Offset: {}".format(self._settings['offset']))
         adjusted_distance = self._settings['bay_depth'] - self._settings['offset']
         self._settings['dist_warn'] = adjusted_distance.magnitude * self.pct_warn * adjusted_distance.units
         self._settings['dist_crit'] = adjusted_distance.magnitude * self.pct_crit * adjusted_distance.units
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
-
-    @property
-    def value(self):
-        return super().value
 
     @property
     def i2c_address(self):
@@ -270,9 +279,34 @@ class Lateral(SingleDetector):
             self._settings[setting] = None
 
     @property
+    def value(self):
+        # Read the sensor and put it at the start of the list, along with a timestamp.
+        self._history.insert(0, [self._sensor_obj.range, monotonic_ns()])
+        # Make sure the history list is always five elements, so we don't just grow this ridiculously.
+        self._history = self._history[:5]
+        # Return that reading, minus the offset.
+        if self._history[0][0] < 0:
+            return "UR"
+        elif self._history[0][0] >= Quantity("96 in"):
+            return "BR"
+        else:
+            return self._history[0][0] - self.offset
+
+    @property
     @only_if_ready
     def quality(self):
-        return "test"
+        value = self.value
+        # Process quality if we get a quantity from the Detector.
+        if isinstance(value, Quantity):
+            if abs(value) <= self.spread_ok:
+                return "ok"
+            elif abs(value) <= self.spread_warn:
+                return "warn"
+            elif abs(value) >= self.spread_crit:
+                return "crit"
+        # Otherwise, return the text value of the detector.
+        else:
+            return value
 
     @property
     def ready(self):
@@ -324,10 +358,6 @@ class Lateral(SingleDetector):
     # inherented.
 
     @property
-    def value(self):
-        return super().value
-
-    @property
     def i2c_address(self):
         return super().i2c_address
 
@@ -336,6 +366,6 @@ class Lateral(SingleDetector):
         return super().offset
 
     @offset.setter
+    @check_ready
     def offset(self,input):
         super(Lateral, self.__class__).offset.fset(self, input)
-
