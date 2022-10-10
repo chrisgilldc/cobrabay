@@ -3,7 +3,7 @@
 ####
 import pint.errors
 
-from .detector import Range, Lateral
+from .detector import Detector, Range, Lateral
 from pint import UnitRegistry, Quantity
 from PIL import Image, ImageDraw
 import logging
@@ -34,7 +34,7 @@ class Bay:
         self._logger.debug("\tRange: {}".format(hex(self._detectors['range'].i2c_address)))
         lat_string = ""
         for detector in self._detectors['lateral']:
-            lat_string = lat_string + " {}".format(hex(detector.i2c_address))
+            lat_string = lat_string + " {}".format(hex(detector['obj'].i2c_address))
             # self._logger.debug("\t\t{}: {}".format(
         self._logger.debug("\tLateral: " + lat_string)
 
@@ -90,6 +90,12 @@ class Bay:
         self._scan_detectors()
         return self._position
 
+    # Get number of lateral detectors. This is used to pass to the display and set up layers correctly.
+    @property
+    def lateral_count(self):
+        self._logger.debug("Lateral count requested. Lateral detectors: {}".format(self._detectors['lateral']))
+        return len(self._detectors['lateral'])
+
     # Scans
     def _scan_detectors(self):
         self._position = {}
@@ -97,14 +103,27 @@ class Bay:
         # Longitudinal offset.
         self._position['lo'] = self._detectors['range'].value.to(self._output_unit)
         self._quality['lo'] = self._detectors['range'].quality
+        self._logger.debug("Scan Detector set longitudinal position to {} and quality to {}".
+                           format(self._position['lo'],self._quality['lo']))
         if len(self._detectors['lateral']) > 0:
             i = 0
             self._position['la'] = {}
             self._quality['la'] = {}
             for lateral in self._detectors['lateral']:
                 zone_name = 'zone_' + str( i + 1 )
-                self._position['la'][zone_name] = self._detectors['lateral'][i].value.to(self._output_unit)
-                self._quality['la'][zone_name] = self._detectors['lateral'][i].quality
+                # Has the vehicle reached the intercept range for this lateral sensor?
+                # If not, we return "NI", Not Intercepted.
+                if self._position['lo'] <= self._detectors['lateral'][i]['intercept']:
+                    detector_value = self._detectors['lateral'][i]['obj'].value
+                    if isinstance(detector_value,str):
+                        self._position['la'][zone_name] = 'BR'
+                        self._quality['la'][zone_name] = 'BR'
+                    else:
+                        self._position['la'][zone_name] = detector_value.to(self._output_unit)
+                        self._quality['la'][zone_name] = self._detectors['lateral'][i]['obj'].quality
+                else:
+                    self._position['la'][zone_name] = 'NI'
+                    self._quality['la'][zone_name] = 'NI'
                 i += 1
         else:
             self._position['la'] = None
@@ -152,10 +171,10 @@ class Bay:
         # Only generate  positioning messages if 1) we're  docking or undocking or 2)  a verify has been explicitly requested.
         if verify or self.state in ('docking','undocking'):
             outbound_messages.append(
-                {'topic': 'bay_quality', 'message': self.quality, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+                {'topic': 'bay_position', 'message': self.position, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
             )
             outbound_messages.append(
-                {'topic': 'bay_position', 'message': self.position, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+                {'topic': 'bay_quality', 'message': self.quality, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
             )
             outbound_messages.append(
                 {'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
@@ -190,8 +209,29 @@ class Bay:
 
     # Method to be called when CobraBay it shutting down.
     def shutdown(self):
-        for detector in self._detectors:
-            self._detectors[detector].shutdown()
+        self._logger.error("Beginning shutdown...")
+        self._logger.error("Shutting off detectors...")
+        self._shutdown_detectors(self._detectors)
+        self._logger.error("Shutdown complete. Exiting.")
+
+    # Traverse the detectors and make sure they're all stopped.
+    def _shutdown_detectors(self,detectors):
+        if isinstance(detectors,list):
+            for i in range(len(detectors)):
+                # Call nested lists iteratively.
+                if isinstance(detectors[i],list) or isinstance(detectors[i],dict):
+                    self._shutdown_detectors(detectors[i])
+                # If it's a Detector, it has shutdown, call it.
+                elif isinstance(detectors[i], Detector):
+                    detectors[i].shutdown()
+        elif isinstance(detectors,dict):
+            for item in detectors:
+                # Call nested lists and dicts iteratively.
+                if isinstance(detectors[item],list) or isinstance(detectors[item],dict):
+                    self._shutdown_detectors(detectors[item])
+                # If it's a Detector, it has shutdown, call it.
+                elif isinstance(detectors[item], Detector):
+                    detectors[item].shutdown()
 
     @property
     def bay_id(self):
@@ -215,23 +255,24 @@ class Bay:
         for detector_config in config['lateral']['detectors']:
             detector_name = detector_config['detector']
             try:
-                lateral = detectors[detector_name]
+                lateral_obj = detectors[detector_name]
             except KeyError:
                 raise KeyError("Tried to create lateral zone with detector '{}' but detector not defined."
                                .format(detector_name))
             # Now we have the detector, set it up right.
             for item in ('offset','spread_ok','spread_warn','spread_crit','side'):
                 try:
-                    setattr(lateral, item, detector_config[item])
+                    setattr(lateral_obj, item, detector_config[item])
                 except KeyError:
                     self._logger.debug("Using default value for {}".format(item))
                     try:
-                        setattr(lateral,item,config['lateral']['defaults'][item])
+                        setattr(lateral_obj,item,config['lateral']['defaults'][item])
                     except KeyError:
                         raise KeyError("Needed default value for {} but not defined!".format(item))
-            self._logger.debug("Lateral now has settings: {}".format(lateral._settings))
+            self._logger.debug("Lateral now has settings: {}".format(lateral_obj._settings))
+
             # Append it to the lateral array.
-            self._detectors['lateral'].append(lateral)
+            self._detectors['lateral'].append({'obj': lateral_obj, 'intercept': Quantity(detector_config['intercept'])})
 
     # Method to set up the range detector
     def _setup_range(self,config,detectors):
@@ -250,6 +291,8 @@ class Bay:
         self._detectors['range'].offset = config['range']['offset']
         self._logger.info("Setting range detector bay depth to: {}".format(config['range']['bay_depth']))
         self._detectors['range'].bay_depth = config['range']['bay_depth']
+        self._logger.info("Setting parking spread to: {}".format(config['range']['spread_park']))
+        self._detectors['range'].spread_park = config['range']['spread_park']
         try:
             self._logger.info("Setting range detector warn to: {}".format(config['range']['pct_warn']))
             self._detectors['range'].bay_depth = config['range']['pct_warn']
