@@ -205,6 +205,16 @@ class Network:
                     'icon': 'mdi:traffic-light'
                 }
             },
+            'bay_display': {
+                'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/display',
+                'previous_state': {},
+                'enabled': True,
+                'ha_discovery': {
+                    'type': 'sensor_group',
+                    'list': 'bay_position',
+                    'icon': 'mdi:traffic-light'
+                }
+            },
             'bay_command': {
                 'topic': 'cobrabay/' + self._client_id + '/+/cmd',
                 'ha_discovery': {
