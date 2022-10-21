@@ -6,8 +6,7 @@ import logging
 from logging.config import dictConfig as logging_dictConfig
 # from logging.handlers import SysLogHandler
 import sys
-from time import monotonic, sleep
-import pprint
+from time import monotonic
 import atexit
 import busio
 import board
@@ -18,18 +17,21 @@ from io import BytesIO
 
 # Import the other CobraBay classes
 from .bay import Bay
+from .config import CBConfig
 from .display import Display
 from .detector import Lateral, Range
 from .network import Network
 from .systemhw import PiStatus
-from .sensor import VL53L1X
-from pint import Quantity
 
 class CobraBay:
-    def __init__(self, config):
-        self._pp = pprint.PrettyPrinter()
+    def __init__(self, cmd_opts=None):
         # Register the exit handler.
-        atexit.register(self.system_exit)
+        # atexit.register(self.system_exit)
+
+        # Create a config object.
+        self._cbconfig = CBConfig(reset_sensors=True)
+
+        config = self._cbconfig._config
 
         # Create the object for checking hardware status.
         self._pistatus = PiStatus()
@@ -78,17 +80,14 @@ class CobraBay:
         self._logger.setLevel(logging.DEBUG)
 
         self._logger.info('CobraBay: CobraBay Initializing...')
-        # check for all basic options.
-        for option in ('global', 'detectors', 'bay'):
-            if option not in config:
-                self._logger.error('CobraBay: Configuration does not include required section: "' + option + '"')
-                sys.exit(1)
+        # # check for all basic options.
+        # for option in ('global', 'detectors', 'bay'):
+        #     if option not in config:
+        #         self._logger.error('CobraBay: Configuration does not include required section: "' + option + '"')
+        #         sys.exit(1)
 
         # Basic checks passed. Good enough! Assign it.
         self.config = config
-
-        # Make the GPIO safe.
-        self._safe_gpio()
 
         # Initial device state
         self._device_state = 'on'
@@ -96,8 +95,6 @@ class CobraBay:
         self._outbound_messages = []
         # Queue the startup message.
         self._outbound_messages.append({'topic': 'device_connectivity', 'message': 'online'})
-        # Information to display a sensor on the idle screen.
-        self._display_sensor = {'sensor': None}
 
         self._logger.debug("Creating network object...")
         # Create Network object.
@@ -272,14 +269,14 @@ class CobraBay:
             # Use the message data to send to the display.
             self._logger.debug("Sending bay data to display.")
             outbound_image = self._display.show_dock(position=bay_messages[1], quality=bay_messages[2])
-
+            self._logger.debug("Display processing returned type: {}".format(type(outbound_image)))
             if outbound_image is not None:
                 # Write to the image buffer as a PNG.
                 outbound_image.save(image_buffer, format="PNG")
                 # Send a base64 encoded version to MQTT.
                 self._outbound_messages.append(
                     {'topic': 'bay_display', 'message': b64encode(image_buffer.getvalue()),
-                     'repeat': False, 'topic_mappings': {'bay_id': bay_id} }
+                     'repeat': True, 'topic_mappings': {'bay_id': bay_id} }
                 )
 
             # Put the bay messages on the MQTT stack to go out.
@@ -391,39 +388,3 @@ class CobraBay:
             if self.config['detectors'][detector_name]['type'] == 'Lateral':
                 return_dict[detector_name] = Lateral(board_options = self.config['detectors'][detector_name]['sensor'])
         return return_dict
-
-    # Make the GPIO safe.
-    def _safe_gpio(self):
-        # Gather up all the GPIO pins in the
-        processed_boards = []
-        processed_pins = []
-        i2c_bus = busio.I2C(board.SCL, board.SDA)
-        for detector_name in self.config['detectors']:
-            self._logger.debug("Checking detector: {}".format(detector_name))
-            eb = self.config['detectors'][detector_name]['sensor']['enable_board']
-            # Board "0" is used to mark the Pi. We can't turn off *all* Pi pins, so dig in and check.
-            if eb == 0:
-                self._logger.debug("Detector uses GPIO pin on-board the Pi.")
-                pin_number = self.config['detectors'][detector_name]['sensor']['enable_pin']
-                pin_name = 'D' + str(pin_number)
-                pin = DigitalInOut(getattr(board, pin_name))
-                pin.switch_to_output(value=False)
-                pin.value=False
-                processed_pins.append(pin_number)
-            # Otherwise, AW9523, so check and access.
-            else:
-                aw_addr = self.config['detectors'][detector_name]['sensor']['enable_board']
-                if aw_addr in processed_boards:
-                    self._logger.debug("Detector {} uses AW9523 at address {}, already processed.".format(detector_name,aw_addr))
-                    # If this board has already been processed, no need to do it again.
-                    break
-                # The AW9523 has 16 pins, 0-15, so do them all.
-                aw = AW9523(i2c_bus,address=aw_addr)
-                for i in range(15):
-                    self._logger.debug("Shutting off {}, pin {}".format(aw_addr, i))
-                    pin = aw.get_pin(i)
-                    pin.switch_to_output(value=False)
-                    pin.value=False
-                processed_boards.append(aw_addr)
-                del(aw)
-        del(i2c_bus)
