@@ -10,8 +10,9 @@
 import logging
 
 import adafruit_aw9523
+from VL53L1X import VL53L1X as pimoroni_vl53l1x
 from pint import UnitRegistry, Quantity
-from time import monotonic
+from time import monotonic, sleep
 import weakref
 
 class Sensor:
@@ -28,7 +29,7 @@ class Sensor:
 class VL53L1X(Sensor):
     _i2c_address: int
     _i2c_bus: int
-    from VL53L1X import VL53L1X as pimoroni_vl53l1x
+
     instances = weakref.WeakSet()
 
     def __init__(self, board_options):
@@ -65,17 +66,18 @@ class VL53L1X(Sensor):
         self.max_range = Quantity('4m')
 
         # Check for required options in
-        options = ['i2c_bus','enable_board','enable_pin']
+        options = ['i2c_bus','i2c_address','enable_board','enable_pin']
         # Store the options.
         for item in options:
             if item not in board_options:
                 raise ValueError("Required board_option '{}' missing".format(item))
         # Set the properties
-        self.i2c_bus = board_options['i2c_bus']
         self.enable_board = board_options['enable_board']
         self.enable_pin = board_options['enable_pin']
-        if 'i2c_address' in board_options:
-            self.i2c_address = board_options['i2c_address']
+        self.i2c_bus = board_options['i2c_bus']
+        self.i2c_address = board_options['i2c_address']
+        # Enable self.
+
         # Start ranging.
         self._sensor_obj.start_ranging()
         # Initialize as medium ranging mode.
@@ -89,13 +91,23 @@ class VL53L1X(Sensor):
         self._sensor_obj.stop_ranging()
 
     def start_ranging(self):
+        self._sensor_obj.open()
         self._sensor_obj.start_ranging()
 
     def stop_ranging(self):
         self._sensor_obj.stop_ranging()
+        self._sensor_obj.close()
 
+    # Enable the sensor.
     def enable(self):
+        # Set the pin true to turn on the board.
         self.enable_pin.value = True
+        # Wait one second to make sure the bus has stabilized.
+        sleep(1)
+        self._sensor_obj = pimoroni_vl53l1x(self._i2c_bus, 0x29)
+        self._sensor_obj.open()
+        self._sensor_obj.change_address(self._i2c_address)
+        self._sensor_obj.close()
 
     def disable(self):
         self.enable_pin.value = False
@@ -176,20 +188,8 @@ class VL53L1X(Sensor):
         # If it's in "0xYY" format, convert it to a base 16 int.
         if isinstance(i2c_address,str):
             i2c_address = int(i2c_address,base=16)
-
-        # Enable self, will show up on 0x29
-        self.enable()
-        from VL53L1X import VL53L1X as pimoroni_vl53l1x
-        print("Creating sensor object.")
-        self._sensor_obj = pimoroni_vl53l1x(self._i2c_bus, 0x29)
-        print("Opening sensor object.")
-        self._sensor_obj.open()
-        print("Changing address.")
-        print("Target i2c address: {}".format(hex(i2c_address)))
-        self._sensor_obj.change_address(i2c_address)
-        self._sensor_obj.close()
-        self._sensor_obj.open()
-        self._i2c_address = i2c_address
+        else:
+            self._i2c_address = i2c_address
 
     @property
     def enable_board(self):
@@ -222,8 +222,9 @@ class VL53L1X(Sensor):
         else:
             from adafruit_aw9523 import AW9523
             # Otherwise, treat enable_board as the address of an AW9523.
+            # Note that reset=False is very import, otherwise creating this object will reset all other pins to off!
             try:
-                aw = AW9523(self._i2c,self.enable_board)
+                aw = AW9523(self._i2c,self.enable_board,reset=False)
             except:
                 raise
             # Get the pin from the AW9523.
