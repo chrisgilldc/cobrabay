@@ -1,0 +1,80 @@
+global:
+  units: imperial  # Defaults to 'metric' if set to anything other than 'imperial'.
+  system_name: CobraBay1  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
+  network: True  # Connect to the network at all?
+  homeassistant: False  # Integrate with Home Assistant. If yes, will send discovery messages.
+display:
+  matrix:
+    width: 64  # Columns on the Matrix
+    height: 32  # Rows on the Matrix
+    gpio_slowdown: 4  # How much to slow down the matrix to prevent flicker.
+  mqtt_image: True  # Should image updates be sent via MQTT
+  mqtt_update_interval: 5 s  # How often should a new image be spent. Keeps from spamming the server.
+# Define detectors
+detectors:
+  range:
+    # Range sensors have a type of Range. DUH.
+    type: Range
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x30
+      enable_board: 0
+      enable_pin: 25
+      timing: 200ms
+  lateral-front:
+    type: Lateral
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x33
+      enable_board: 0x58
+      enable_pin: 3
+      distance_mode: medium
+      timing: 200ms
+  lateral-middle:
+    type: Lateral
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x32
+      enable_board: 0x58
+      enable_pin: 2
+      distance_mode: medium
+      timing: 200ms
+  lateral-rear:
+    type: Lateral
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x31
+      enable_board: 0x58
+      enable_pin: 1
+      distance_mode: medium
+      timing: 200ms
+bay:
+  active: True
+  id: bay1  # ID of the bay.
+  part_time: 2 min  # How long until a stationary vehicle is counted as parked.
+  range:
+    detector: range  # Detector to use for range finding.
+    offset: 42 in  # Where the zero-point is for parking.
+    spread_park: 2 in  # How far off of zero you can stop and still be called "good"
+    bay_depth: 276 in
+    # Optional settings:
+    # pct_warn - to set the warning percentage for range approach. Default 15
+    # pct_crit - percentage of the total distance considered critical. Default 10
+  lateral:
+    defaults:
+      offset: 24 in
+      spread_ok: 1 in
+      spread_warn: 3 in
+      spread_crit: 5 in
+      side: R
+    detectors:
+      - detector: lateral-front
+        intercept: 75 in
+      - detector: lateral-middle
+        intercept: 100 in
+      - detector: lateral-rear
+        intercept: 125 in
