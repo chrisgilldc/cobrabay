@@ -105,12 +105,14 @@ class Bay:
         self._quality['lo'] = self._detectors['range'].quality
         self._logger.debug("Scan Detector set longitudinal position to {} and quality to {}".
                            format(self._position['lo'],self._quality['lo']))
+        self._logger.debug("Checking {} lateral detectors".format(len(self._detectors['lateral'])))
         if len(self._detectors['lateral']) > 0:
             i = 0
             self._position['la'] = {}
             self._quality['la'] = {}
             for lateral in self._detectors['lateral']:
                 zone_name = 'zone_' + str( i + 1 )
+                self._logger.debug("Checking {}".format(zone_name))
                 # Has the vehicle reached the intercept range for this lateral sensor?
                 # If not, we return "NI", Not Intercepted.
                 if self._position['lo'] <= self._detectors['lateral'][i]['intercept']:
@@ -244,8 +246,9 @@ class Bay:
     # Method to set up the detectors for the bay. This applies bay-specific options to the individual detectors, which
     # are initialized by the main routine.
     def _setup_detectors(self,config,detectors):
+        self._logger.debug("Setup got detectors: {}".format(detectors))
         self._detectors = {}
-        # Do the range setup. This behaves a little differently, so is coraled to a separate method for sanity.
+        # Do the range setup. This behaves a little differently, so is coralled to a separate method for sanity.
         self._logger.debug("Setting up range detector.")
         self._setup_range(config,detectors)
         # Lateral configuration.
