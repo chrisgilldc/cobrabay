@@ -8,9 +8,10 @@
 ####
 
 import logging
-
-import adafruit_aw9523
-from VL53L1X import VL53L1X as pimoroni_vl53l1x
+import board
+import busio
+from adafruit_aw9523 import AW9523
+from adafruit_vl53l1x import VL53L1X as af_VL53L1X
 from pint import UnitRegistry, Quantity
 from time import monotonic, sleep
 import weakref
@@ -77,26 +78,22 @@ class VL53L1X(Sensor):
         self.i2c_bus = board_options['i2c_bus']
         self.i2c_address = board_options['i2c_address']
         # Enable self.
+        self.enable()
 
         # Start ranging.
         self._sensor_obj.start_ranging()
-        # Initialize as medium ranging mode.
-        self._distance_mode = 0
-        self.measurement_time = 200000 # Initialized here in microseconds. Detector class will do conversion.
         # Set the timing.
         self.measurement_time = Quantity(board_options['timing']).to('microseconds').magnitude
-        self.distance_mode = 'medium'
-        self._previous_reading = self._sensor_obj.get_distance()
+        self.distance_mode = 'long'
+        self._previous_reading = self._sensor_obj.distance
         self._previous_timestamp = monotonic()
         self._sensor_obj.stop_ranging()
 
     def start_ranging(self):
-        self._sensor_obj.open()
         self._sensor_obj.start_ranging()
 
     def stop_ranging(self):
         self._sensor_obj.stop_ranging()
-        self._sensor_obj.close()
 
     # Enable the sensor.
     def enable(self):
@@ -104,31 +101,28 @@ class VL53L1X(Sensor):
         self.enable_pin.value = True
         # Wait one second to make sure the bus has stabilized.
         sleep(1)
-        self._sensor_obj = pimoroni_vl53l1x(self._i2c_bus, 0x29)
-        self._sensor_obj.open()
-        self._sensor_obj.change_address(self._i2c_address)
-        self._sensor_obj.close()
+        i2c = busio.I2C(board.SCL, board.SDA)
+        self._sensor_obj = af_VL53L1X(i2c, address=0x29)
+        self._sensor_obj.set_address(self._i2c_address)
 
     def disable(self):
         self.enable_pin.value = False
 
     @property
-    def measurement_time(self):
-        return self._mt
+    def timing_budget(self):
+        return self._sensor_obj.timing_budget
 
-    @measurement_time.setter
-    def measurement_time(self,input):
-        self._mt = int(input)
-        self._imt = int(( self._mt / 1000 ) + 4)
-        self._sensor_obj.set_timing(self._mt,self._imt)
+    @timing_budget.setter
+    def timing_budget(self,input):
+        if int(input) not in (20,33,50,100,200,500):
+            raise ValueError("Requested timing budget {} not valid. Must be one of: 20,33,50,100,200 or 500".format(input))
+        self._sensor_obj.timing_budget(int(input))
 
     @property
     def distance_mode(self):
-        if self._distance_mode == 1:
+        if self._sensor_obj.distance_mode == 1:
             return 'Short'
-        elif self._distance_mode == 2:
-            return 'Medium'
-        elif self._distance_mode == 3:
+        elif self._sensor_obj.distance_mode == 2:
             return 'Long'
 
     @distance_mode.setter
@@ -136,15 +130,11 @@ class VL53L1X(Sensor):
         # Pre-checking the distance mode lets us toss an error before actually setting anything.
         if dm.lower() == 'short':
             dm = 1
-        elif dm.lower() == 'medium':
-            dm = 2
         elif dm.lower() == 'long':
-            dm = 3
+            dm = 2
         else:
             raise ValueError("{} is not a valid distance mode".format(dm))
-        self._sensor_obj.set_distance_mode(dm)
-        self._sensor_obj.set_timing(self._mt,self._imt)
-        self._distance_mode = dm
+        self._sensor_obj.distance_mode = dm
 
     @property
     def range(self):
@@ -153,7 +143,7 @@ class VL53L1X(Sensor):
         if monotonic() - self._previous_timestamp < 0.2:
             return self._previous_reading
         else:
-            return Quantity(self._sensor_obj.get_distance(), self._ureg.millimeter) # .plus_minus(2.5)
+            return Quantity(self._sensor_obj.distance, self._ureg.centimeter) # .plus_minus(2.5)
 
     # Method to find out if an address is on the I2C bus.
     def _addr_on_bus(self,i2c_address):
@@ -220,7 +210,6 @@ class VL53L1X(Sensor):
             else:
                 self._enable_pin = enable_pin_obj
         else:
-            from adafruit_aw9523 import AW9523
             # Otherwise, treat enable_board as the address of an AW9523.
             # Note that reset=False is very import, otherwise creating this object will reset all other pins to off!
             try:
