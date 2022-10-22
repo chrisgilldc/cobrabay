@@ -33,8 +33,8 @@ class Bay:
         self._logger.debug("Detectors configured:")
         self._logger.debug("\tRange: {}".format(hex(self._detectors['range'].i2c_address)))
         lat_string = ""
-        for detector in self._detectors['lateral']:
-            lat_string = lat_string + " {}".format(hex(detector['obj'].i2c_address))
+        for detector_name in self._detectors['lateral'].keys():
+            lat_string = lat_string + " {}".format(hex(self._detectors['lateral'][detector_name]['obj'].i2c_address))
             # self._logger.debug("\t\t{}: {}".format(
         self._logger.debug("\tLateral: " + lat_string)
 
@@ -64,6 +64,14 @@ class Bay:
     def abort(self):
         # Return the bay to a ready state.
         self.state = 'unoccupied'
+
+    # Method to get info to pass to the Network module and register.
+    def discovery_info(self):
+        return_dict = {
+            'bay_id': self._bay_id,
+            'detectors': self._detectors
+        }
+        return return_dict
 
     # Bay properties
     @property
@@ -110,22 +118,21 @@ class Bay:
             i = 0
             self._position['la'] = {}
             self._quality['la'] = {}
-            for lateral in self._detectors['lateral']:
-                zone_name = 'zone_' + str( i + 1 )
-                self._logger.debug("Checking {}".format(zone_name))
+            for detector_name in self._detectors['lateral']:
+                self._logger.debug("Checking {}".format(detector_name))
                 # Has the vehicle reached the intercept range for this lateral sensor?
                 # If not, we return "NI", Not Intercepted.
-                if self._position['lo'] <= self._detectors['lateral'][i]['intercept']:
-                    detector_value = self._detectors['lateral'][i]['obj'].value
+                if self._position['lo'] <= self._detectors['lateral'][detector_name]['intercept']:
+                    detector_value = self._detectors['lateral'][detector_name]['obj'].value
                     if isinstance(detector_value,str):
-                        self._position['la'][zone_name] = 'BR'
-                        self._quality['la'][zone_name] = 'BR'
+                        self._position['la'][detector_name] = 'BR'
+                        self._quality['la'][detector_name] = 'BR'
                     else:
-                        self._position['la'][zone_name] = detector_value.to(self._output_unit)
-                        self._quality['la'][zone_name] = self._detectors['lateral'][i]['obj'].quality
+                        self._position['la'][detector_name] = detector_value.to(self._output_unit)
+                        self._quality['la'][detector_name] = self._detectors['lateral'][detector_name]['obj'].quality
                 else:
-                    self._position['la'][zone_name] = 'NI'
-                    self._quality['la'][zone_name] = 'NI'
+                    self._position['la'][detector_name] = 'NI'
+                    self._quality['la'][detector_name] = 'NI'
                 i += 1
         else:
             self._position['la'] = None
@@ -246,14 +253,14 @@ class Bay:
     # Method to set up the detectors for the bay. This applies bay-specific options to the individual detectors, which
     # are initialized by the main routine.
     def _setup_detectors(self,config,detectors):
-        self._logger.debug("Setup got detectors: {}".format(detectors))
         self._detectors = {}
         # Do the range setup. This behaves a little differently, so is coralled to a separate method for sanity.
         self._logger.debug("Setting up range detector.")
         self._setup_range(config,detectors)
         # Lateral configuration.
         # Make the lateral array.
-        self._detectors['lateral'] = []
+        self._detectors['lateral'] = {}
+
         self._logger.debug("Setting up lateral detectors.")
         for detector_config in config['lateral']['detectors']:
             detector_name = detector_config['detector']
@@ -274,8 +281,8 @@ class Bay:
                         raise KeyError("Needed default value for {} but not defined!".format(item))
             self._logger.debug("Lateral now has settings: {}".format(lateral_obj._settings))
 
-            # Append it to the lateral array.
-            self._detectors['lateral'].append({'obj': lateral_obj, 'intercept': Quantity(detector_config['intercept'])})
+            # Append it to the lateral dict.
+            self._detectors['lateral'][detector_name] = {'obj': lateral_obj, 'intercept': Quantity(detector_config['intercept'])}
 
     # Method to set up the range detector
     def _setup_range(self,config,detectors):
