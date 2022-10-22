@@ -80,11 +80,6 @@ class CobraBay:
         self._logger.setLevel(logging.DEBUG)
 
         self._logger.info('CobraBay: CobraBay Initializing...')
-        # # check for all basic options.
-        # for option in ('global', 'detectors', 'bay'):
-        #     if option not in config:
-        #         self._logger.error('CobraBay: Configuration does not include required section: "' + option + '"')
-        #         sys.exit(1)
 
         # Basic checks passed. Good enough! Assign it.
         self.config = config
@@ -99,9 +94,8 @@ class CobraBay:
         self._logger.debug("Creating network object...")
         # Create Network object.
         self._network = Network(
-            # Network object needs the whole config, since parts
-            # (esp. HA discovery) needs to reference multiple parts of the config.
-            config=config
+            # Network gets the general config.
+            config=self.config['global']
         )
 
         self._logger.debug("Creating detectors...")
@@ -113,7 +107,10 @@ class CobraBay:
         self._logger.debug("Creating bays...")
         # For testing, only one bay, hard-wire it ATM.
         self._bays[self.config['bay']['id']] = Bay(self.config['bay'], self._detectors)
-        self._logger.debug("Registering bays with network handler...")
+        self._logger.debug("Bay Discovery Info:")
+        self._logger.debug(self._bays[self.config['bay']['id']].discovery_info())
+        # self._logger.debug("Registering bays with network handler...")
+        sys.exit()
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
