@@ -37,7 +37,7 @@ class CBConfig():
         if self._config_file is None:
             raise ValueError("Cannot find valid config file! Attempted: {}".format(search_paths))
         # Load the config file. This does validation as well!
-        self.load_config(reset_sensors=reset_sensors)
+        self.load_config()
 
     def load_config(self,reset_sensors=False):
         pp = PrettyPrinter()
