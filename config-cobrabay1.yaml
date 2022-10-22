@@ -2,7 +2,7 @@ global:
   units: imperial  # Defaults to 'metric' if set to anything other than 'imperial'.
   system_name: CobraBay1  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
   network: True  # Connect to the network at all?
-  homeassistant: False  # Integrate with Home Assistant. If yes, will send discovery messages.
+  homeassistant: True # Integrate with Home Assistant. If yes, will send discovery messages.
 display:
   matrix:
     width: 64  # Columns on the Matrix
@@ -22,7 +22,7 @@ detectors:
       enable_board: 0
       enable_pin: 25
       timing: 200ms
-  lateral-front:
+  front:
     type: Lateral
     sensor:
       type: VL53L1X
@@ -32,7 +32,7 @@ detectors:
       enable_pin: 3
       distance_mode: medium
       timing: 200ms
-  lateral-middle:
+  middle:
     type: Lateral
     sensor:
       type: VL53L1X
@@ -42,7 +42,7 @@ detectors:
       enable_pin: 2
       distance_mode: medium
       timing: 200ms
-  lateral-rear:
+  rear:
     type: Lateral
     sensor:
       type: VL53L1X
@@ -72,9 +72,9 @@ bay:
       spread_crit: 5 in
       side: R
     detectors:
-      - detector: lateral-front
+      - detector: front
         intercept: 75 in
-      - detector: lateral-middle
+      - detector: middle
         intercept: 100 in
-      - detector: lateral-rear
+      - detector: rear
         intercept: 125 in
