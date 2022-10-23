@@ -11,7 +11,6 @@ class Convertomatic:
 
     def convert(self, input):
         if isinstance(input, Quantity):
-            # self._logger.debug("Converting Quantity...")
             # Check for various dimensionalities and convert as appropriate.
             if input.check('[length]'):
                 # self._logger.debug("Quantity is a length.")
@@ -19,17 +18,20 @@ class Convertomatic:
                     output = input.to("in")
                 else:
                     output = input.to("cm")
-            if input.check('[temperature]'):
+            elif input.check('[temperature]'):
                 if self._unit_system == "imperial":
                     output = input.to("degF")
                 else:
                     output = input.to("degC")
-            # Doesn't have a dimensionality to check, so we check for the unit name itself.
-            if str(input.units) == 'byte':
+            # Bytes don't have a dimensionality, so we check the unit name.
+            elif str(input.units) == 'byte':
                 output = input.to("Mbyte")
-            # Percents need no conversion.
-            if str(input.units) == 'percent':
+            # This should catch any dimensionless values.
+            elif str(input.units) == 'dimensionless':
                 output = input
+            # Anything else is out of left field, raise an error.
+            else:
+                raise ValueError("Dimensionality of {} is not supported by Convertomatic.".format(input.dimensionality))
             output = round(output.magnitude, 2)
             return output
         if isinstance(input, dict):
