@@ -40,5 +40,5 @@ class PiStatus:
             'mem_avail': self._Q(floor(memory.available), self._ureg.byte),
             'mem_total': self._Q(memory.total, self._ureg.byte)
         }
-        return_dict['mem_pct'] = self._Q(floor(return_dict['mem_avail']) / return_dict['mem_total'], self._ureg.percent)
+        return_dict['mem_pct'] = self._Q(1 - floor(return_dict['mem_avail']) / return_dict['mem_total'], self._ureg.percent)
         return return_dict
