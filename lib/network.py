@@ -60,8 +60,6 @@ class Network:
         self._logger.debug("Config file HA setting: {}".format(config['homeassistant']))
         try:
             self._logger.debug("Setting Home Assistant true.")
-            print("Config has HA value: {}".format(config['homeassistant']))
-            print(type(config['homeassistant']))
             self._homeassistant = config['homeassistant']
 
         except:
@@ -221,6 +219,7 @@ class Network:
                         'icon': 'mdi:traffic-light'
                     }
                 },
+                # This is a generic callback that will work for all bays.
                 'bay_command': {
                     'topic': 'cobrabay/' + self._client_id + '/+/cmd',
                     'ha_discovery': {
@@ -228,10 +227,28 @@ class Network:
                     },
                     'callback': self._cb_bay_command
                 }
-                }
+            }
         }
         self._known_bays = {}
         self._logger.info('Network: Initialization complete.')
+
+    # Method to register a bay.
+    def register_bay(self, discovery_info):
+        # We only need the names of things.
+        self._bay_registry[discovery_info['bay_id']] = {
+            'bay_id': discovery_info['bay_id'],
+            'detectors': {
+                'range': 'range',
+                'lateral': list(discovery_info['detectors']['lateral'].keys())
+            }
+        }
+        self._logger.debug("Have registered new bay info: {}".format(self._bay_registry[discovery_info['bay_id']]))
+
+    def unregister_bay(self, bay_id):
+        try:
+            del self._bay_registry[bay_id]
+        except KeyError:
+            self._logger.error("Asked to Unregister bay ID {} but bay by that ID does not exist.".format(bay_id))
 
     def _on_connect(self, userdata, flags, rc, properties=None):
         self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
@@ -243,11 +260,8 @@ class Network:
             for item in self._topics[type]:
                 if 'callback' in self._topics[type][item]:
                     self._logger.debug("Network: Creating callback for {}".format(item))
-                    self._mqtt_client.message_callback_add(self._topics[type][item]['topic'], self._topics[type][item]['callback'])
-        # Reconnect the bay command callbacks
-        for bay in self._bay_registry:
-            print("Adding callback for {}".format(bay))
-            self._mqtt_client.message_callback_add(self._bay_registry[bay]['topic'], self._bay_registry[bay]['callback'])
+                    self._mqtt_client.message_callback_add(self._topics[type][item]['topic'],
+                                                           self._topics[type][item]['callback'])
 
     # Device Command callback
     def _cb_device_command(self, client, userdata, message):
@@ -306,18 +320,8 @@ class Network:
             self._logger.info("Network: Received unknown MQTT bay command '{}'".format(message['cmd']))
 
     # Message publishing method
-    def _pub_message(self, topic, message, type="any", repeat=False, topic_mappings=None):
-        previous_state = self._topics[topic]['previous_state']
-
-        # Find the right dict for the type. This is a temporary shim, eventually all calls should have a type.
-        if type == 'any':
-            topic_dict = {**self._topics['system'], **self._topics['bay']}
-        elif type == 'system':
-            topic_dict = self._topics['system']
-        elif type == 'bay':
-            topic_dict = self._topics['system']
-        else:
-            raise ValueError("Provided message type {} is not valid.".format(type))
+    def _pub_message(self, topic_type, topic, message, repeat=False, topic_mappings=None):
+        previous_state = self._topics[topic_type][topic]['previous_state']
 
         # Send flag. Default to assuming we *won't* send. We'll send if either repeat is True (ie: send no matter what)
         # or if repeat is false *and* content has been determined to have changed.
@@ -327,14 +331,13 @@ class Network:
         # This is currently only used to put in bay_id.
         # No real bounds checking, and could explode in strange ways.
         if topic_mappings is not None:
-            target_topic = topic_dict[topic]['topic'].format(topic_mappings)
+            target_topic = self._topics[topic_type][topic]['topic'].format(topic_mappings)
         else:
-            target_topic = topic_dict[topic]['topic']
+            target_topic = self._topics[topic_type][topic]['topic']
 
         # Put the message through conversion. This converts Quantities to proper units and then flattens to floats
         # that can be sent through MQTT and understood by Home Assistant
         message = self._cv.convert(message)
-
         # By default, check to see if the data changed before sending it.
         if repeat is False:
             # Both strings, compare, process if different
@@ -352,7 +355,9 @@ class Network:
                         send = True
                         break
             else:
-                # If type has changed (and it shouldn't, usually), send it.
+                # # If type has changed (and it shouldn't, usually), send it.
+                # print("Mesage type: {}".format(type(message)))
+                # print("Previous message type: {}".format(type(message)))
                 if type(message) != type(previous_state):
                     send = True
         elif repeat is True:
@@ -360,13 +365,8 @@ class Network:
         # The 'repeat' option can be used in cases when a caller wants to send no matter the changed state.
         # Using this too much can make things super chatty.
         if send:
-            # If the enabled option is in the dict, it might be disabled for now, so check.
-            if 'enabled' in topic_dict[topic]:
-                if not topic_dict[topic]['enabled']:
-                    return
-
             # New message becomes the previous message.
-            topic_dict[topic]['previous_state'] = message
+            self._topics[topic_type][topic]['previous_state'] = message
             # Convert the message to JSON if it's a dict, otherwise just send it.
             if isinstance(message, dict):
                 outbound_message = json_dumps(message, default=str)
@@ -379,13 +379,13 @@ class Network:
     def poll(self, outbound_messages=None):
         # Send all the messages outbound.
         for message in outbound_messages:
+            self._logger.debug("Attempting to publish message: {}".format(message))
             self._pub_message(**message)
         # Check for any incoming commands.
         self._mqtt_client.loop()
         # Yank any commands to send upward and clear it for the next run.
         upward_data = {
-            # 'signal_strength': self._signal_strength(),
-            'signal_strength': 5,  # Replace later with eth/not eth logic.
+            'online': True,  # Replace later with eth/not eth logic.
             'mqtt_status': self._mqtt_client.is_connected(),
             'commands': self._upward_commands
         }
@@ -466,50 +466,44 @@ class Network:
             sw_version=str(__version__)
         )
 
-        # Process the topics.
-        for item in self._topics:
+        # Always do discovery for the system topics.
+        for item in self._topics['system']:
             # Create items that have HA Discovery, and are enabled. Enabled/disabled is really 100% for development.
-            if 'ha_discovery' in self._topics[item]:
-                # A sensor_group allows us to create multiple
-                if self._topics[item]['ha_discovery']['type'] == 'sensor_group':
-                    self._ha_create_sensor_group(item)
-                else:
-                    self._ha_create(item)
+            if 'ha_discovery' in self._topics['system'][item]:
+                self._ha_create(topic_type='system', topic_name=item)
 
-    # Special method for creating multiple sensors for a list. Should probably merge this with the main _ha_create
-    # at some point.
-    def _ha_create_sensor_group(self, mqtt_item):
-        # Pull over some variables to shorten them for convenience.
-        # Iterate the provided list, create a sensor for each one.
-        for item in self._topics[mqtt_item]['ha_discovery']['list']:
-            self._logger.debug("Multisensor now processing: {}".format(item))
+        # If there are registered bays, process them as well.
+        if len(self._bay_registry) > 0:
+            for bay in self._bay_registry:
+                # Each Bay element needs to get its HA config built on the fly.
+                # Let's try this with just range first.
+                ha_config = {
+                    'state_topic': 'cobrabay/' + self._client_id + '/' + self._bay_registry[bay]['bay_id'] + '/position',
+                    'value_template': '{{ value_json.lo }}',
+                    'type': 'sensor',
+                    'name': 'Bay 1 Range',
+                    'entity': 'range',
+                    'unit_of_measurement': self._uom('length')
+                }
+                self._ha_create(ha_config=ha_config)
 
-            # Set up a config dict we can pass to the Sensor creator.
-            config_dict = {
-                'type': 'sensor',
-                'entity': item,
-                # Sensors in a group all use the same topic so we pull it out of the template.
-                'value_template': '{{{{ value_json.{} }}}}'.format(item),
-                'unit_of_measurement': self._uom('length')
-            }
 
-            try:
-                # Use the item name a key to get an alias from the alias dict.
-                config_dict['name'] = ha_config['aliases'][item]['alias']
-            except:
-                # Otherwise just default it.
-                config_dict['name'] = item
+    # Method to create a properly formatted HA discovery message.
+    # This expects *either* a complete config dict passed in as ha_config, or a topic_type and topic, from which
+    # it will fetch the ha_discovery configuration.
+    def _ha_create(self, topic_type=None, topic_name=None, ha_config=None):
 
-            self._logger.debug("Created config for sensor {}: {}".format(item, config_dict))
-            self._logger.debug("Sending to main creation routine.")
-            self._ha_create(mqtt_item, ha_config=config_dict, sub_item=item)
-
-    def _ha_create(self, mqtt_item, ha_config=None, sub_item=None):
         # If ha_config dict wasn't specified, use one defined on the object.
         if ha_config is None:
-            ha_config = self._topics[mqtt_item]['ha_discovery']
-        if sub_item is None:
-            sub_item = mqtt_item
+            try:
+                ha_config = self._topics[topic_type][topic_name]['ha_discovery']
+            except KeyError:
+                raise KeyError("Tried to find HA Discovery config with type {} and topic {}, but got key error instead."
+                               .format(topic_type, topic_name))
+            state_topic = self._topics[topic_type][topic_name]['topic']
+        else:
+            state_topic = ha_config['state_topic']
+
 
         # Build a config topic.
         config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'], self._client_id,
@@ -518,9 +512,9 @@ class Network:
         try:
             config_dict = {
                 'name': ha_config['name'],
-                'object_id': self._system_name.replace(" ", "").lower() + "_" + sub_item,
+                'object_id': self._system_name.replace(" ", "").lower(),
                 'device': self._device_info,
-                'state_topic': self._topics[mqtt_item]['topic'],
+                'state_topic': state_topic,
                 'unique_id': self._client_id + '.' + ha_config['entity'],
             }
         except:
@@ -544,9 +538,9 @@ class Network:
 
         # If this isn't device connectivity itself, make the entity depend on device connectivity
         if config_topic != 'device_connectivity':
-            config_dict['availability_topic'] = self._topics['device_connectivity']['topic']
-            config_dict['payload_available'] = self._topics['device_connectivity']['ha_discovery']['payload_on']
-            config_dict['payload_not_available'] = self._topics['device_connectivity']['ha_discovery']['payload_off']
+            config_dict['availability_topic'] = self._topics['system']['device_connectivity']['topic']
+            config_dict['payload_available'] = self._topics['system']['device_connectivity']['ha_discovery']['payload_on']
+            config_dict['payload_not_available'] = self._topics['system']['device_connectivity']['ha_discovery']['payload_off']
 
         # Send it!
         self._logger.debug("Publishing HA discovery to topic {}\n\t{}".format(config_topic, config_dict))
@@ -556,8 +550,6 @@ class Network:
         # icon: mdi:test - tube
         # templates:
         # rgb_color: "if (state === 'on') return [251, 210, 41]; else return [54, 95, 140];"
-
-
 
     # Create a traffic-light style sensor. This is used for the parking position sensors.
     def _ha_create_trafficlight(self):
@@ -590,7 +582,4 @@ class Network:
                 uom = "°C"
         else:
             raise ValueError("{} isn't a valid unit type".format(unit_type))
-
-        # Unit of Measure to use for distances, based on the global setting.
-        # uom = 'in' if self._config['units'] == 'imperial' else 'cm'
         return uom
