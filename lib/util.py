@@ -27,7 +27,7 @@ class Convertomatic:
             elif str(input.units) == 'byte':
                 output = input.to("Mbyte")
             # This should catch any dimensionless values.
-            elif str(input.units) == 'dimensionless':
+            elif str(input.dimensionality) == 'dimensionless':
                 output = input
             # Anything else is out of left field, raise an error.
             else:
