@@ -175,18 +175,18 @@ class Bay:
         outbound_messages = [] # topic, message, repease, topic_mappings
         # State message.
         outbound_messages.append(
-            {'topic': 'bay_state', 'message': self.state, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+            {'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
         )
         # Only generate  positioning messages if 1) we're  docking or undocking or 2)  a verify has been explicitly requested.
         if verify or self.state in ('docking','undocking'):
             outbound_messages.append(
-                {'topic': 'bay_position', 'message': self.position, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+                {'topic_type': 'bay', 'topic': 'bay_position', 'message': self.position, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
             )
             outbound_messages.append(
-                {'topic': 'bay_quality', 'message': self.quality, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+                {'topic_type': 'bay', 'topic': 'bay_quality', 'message': self.quality, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
             )
             outbound_messages.append(
-                {'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+                {'topic_type': 'bay', 'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
             )
         return outbound_messages
 

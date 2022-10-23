@@ -89,7 +89,7 @@ class CobraBay:
         # Queue for outbound messages.
         self._outbound_messages = []
         # Queue the startup message.
-        self._outbound_messages.append({'topic': 'device_connectivity', 'message': 'online'})
+        self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'online'})
 
         self._logger.debug("Creating network object...")
         # Create Network object.
@@ -107,10 +107,9 @@ class CobraBay:
         self._logger.debug("Creating bays...")
         # For testing, only one bay, hard-wire it ATM.
         self._bays[self.config['bay']['id']] = Bay(self.config['bay'], self._detectors)
-        self._logger.debug("Bay Discovery Info:")
+        self._logger.debug("Sending bay discovery info to Network handler.")
         self._logger.debug(self._bays[self.config['bay']['id']].discovery_info())
-        # self._logger.debug("Registering bays with network handler...")
-        sys.exit()
+        self._network.register_bay(self._bays[self.config['bay']['id']].discovery_info())
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
@@ -235,7 +234,7 @@ class CobraBay:
             # Do a network poll, this method handles all the default outbound messages and any incoming commands.
             network_data = self._network_handler()
             # Update the network components of the system state.
-            system_state['signal_strength'] = network_data['signal_strength']
+            system_state['online'] = network_data['online']
             system_state['mqtt_status'] = network_data['mqtt_status']
 
             try:
@@ -272,7 +271,7 @@ class CobraBay:
                 outbound_image.save(image_buffer, format="PNG")
                 # Send a base64 encoded version to MQTT.
                 self._outbound_messages.append(
-                    {'topic': 'bay_display', 'message': b64encode(image_buffer.getvalue()),
+                    {'topic_type': 'bay', 'topic': 'bay_display', 'message': b64encode(image_buffer.getvalue()),
                      'repeat': True, 'topic_mappings': {'bay_id': bay_id} }
                 )
 
@@ -289,11 +288,11 @@ class CobraBay:
     # Utility method to put the hardware status on the outbound message queue. This needs to be used from a few places.
     def _mqtt_hw(self):
         self._outbound_messages.append(
-            {'topic': 'cpu_pct', 'message': self._pistatus.status('cpu_pct'), 'repeat': False})
+            {'topic_type': 'system', 'topic': 'cpu_pct', 'message': self._pistatus.status('cpu_pct'), 'repeat': False})
         self._outbound_messages.append(
-            {'topic': 'cpu_temp', 'message': self._pistatus.status('cpu_temp'), 'repeat': False})
+            {'topic_type': 'system', 'topic': 'cpu_temp', 'message': self._pistatus.status('cpu_temp'), 'repeat': False})
         self._outbound_messages.append(
-            {'topic': 'mem_info', 'message': self._pistatus.status('mem_info'), 'repeat': False})
+            {'topic_type': 'system', 'topic': 'mem_info', 'message': self._pistatus.status('mem_info'), 'repeat': False})
 
     def undock(self):
         self._logger.info('CobraBay: Undock not yet implemented.')
@@ -319,7 +318,7 @@ class CobraBay:
             return
 
         # Append the bay state to the outbound message queue.
-        self._outbound_messages.append(dict(topic='bay_raw_sensors', message=sensor_data, repeat=True))
+        self._outbound_messages.append(dict(typetopic='bay_raw_sensors', message=sensor_data, repeat=True))
         self._outbound_messages.append(dict(topic='bay_sensors', message=self._bay.sensors, repeat=True))
         self._outbound_messages.append(dict(topic='bay_motion', message=self._bay.motion, repeat=True))
         self._outbound_messages.append(dict(topic='bay_alignment', message=self._bay.alignment, repeat=True))
