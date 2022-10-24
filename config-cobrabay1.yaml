@@ -12,9 +12,12 @@ display:
   mqtt_update_interval: 5 s  # How often should a new image be spent. Keeps from spamming the server.
 # Define detectors
 detectors:
-  range:
-    # Range sensors have a type of Range. DUH.
+  range:  # Key here is the Bay ID, which is used elsewhere. IF you see a mention of 'bay_id', this is it.
+    # Range sensors have a type of Range. Obvs.
     type: Range
+    # Name is used for reporting MQTT, as distinct from the key. This will be prepended with the Bay's Name and
+    # appended with "Detector". So "Range" here for "Bay 1" will become "Bay 1 Range Detector"
+    name: Range
     sensor:
       type: VL53L1X
       i2c_bus: 1
@@ -24,6 +27,7 @@ detectors:
       timing: 200ms
   front:
     type: Lateral
+    name: Front
     sensor:
       type: VL53L1X
       i2c_bus: 1
@@ -34,6 +38,7 @@ detectors:
       timing: 200ms
   middle:
     type: Lateral
+    name: Middle
     sensor:
       type: VL53L1X
       i2c_bus: 1
@@ -44,6 +49,7 @@ detectors:
       timing: 200ms
   rear:
     type: Lateral
+    name: Rear
     sensor:
       type: VL53L1X
       i2c_bus: 1
@@ -55,16 +61,18 @@ detectors:
 bay:
   active: True
   id: bay1  # ID of the bay.
+  name: "Bay 1"  # Name of the bay for use in MQTT messages.
   part_time: 2 min  # How long until a stationary vehicle is counted as parked.
-  range:
-    detector: range  # Detector to use for range finding.
-    offset: 42 in  # Where the zero-point is for parking.
-    spread_park: 2 in  # How far off of zero you can stop and still be called "good"
-    bay_depth: 276 in
-    # Optional settings:
-    # pct_warn - to set the warning percentage for range approach. Default 15
-    # pct_crit - percentage of the total distance considered critical. Default 10
+  longitudinal:
+    defaults:
+      offset: 42 in
+      spread_park: 2 in
+      bay_depth: 276 in
+    # Longitudinal detectors are those the vehicles more towards or away from.
+    detectors:
+      - detector: range
   lateral:
+    # Lateral detectors are those that run perpendicular to the path of vehicle's travel.
     defaults:
       offset: 24 in
       spread_ok: 1 in
