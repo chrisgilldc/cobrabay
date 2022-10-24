@@ -56,13 +56,13 @@ def use_value_cache(func):
     return wrapper
 
 class Detector:
-    def __init__(self):
+    def __init__(self, detector_id, detector_name):
         # A unit registry
         self._ureg = UnitRegistry()
         # Is the detector ready for use?
         self._ready = False
         # Settings for the detector. Starts as an empty dict.
-        self._settings = {}
+        self._settings = { 'detector_id': detector_id, 'detector_name': detector_name }
         # What settings are required before the detector can be used? Must be set by the subclass.
         self._required_settings = None
         # Measurement offset. We start this at zero, even though that's probably ridiculous!
@@ -93,6 +93,14 @@ class Detector:
     def offset(self, input):
         self._settings['offset'] = self._convert_value(input)
 
+    @property
+    def id(self):
+        return self._settings['detector_id']
+
+    @property
+    def name(self):
+        return self._settings['detector_name']
+
     # Utility method to convert into quantities.
     def _convert_value(self, input_value):
         # If it's already a quantity, return it right away.
@@ -110,8 +118,8 @@ class Detector:
 
 # Single Detectors add wrappers around a single VL53L1X sensor.
 class SingleDetector(Detector):
-    def __init__(self, board_options):
-        super().__init__()
+    def __init__(self, detector_id, detector_name, board_options):
+        super().__init__(detector_id, detector_name)
         # Create the sense object using provided settings.
         self._sensor_obj = CB_VL53L1X(board_options)
 
@@ -148,10 +156,9 @@ class SingleDetector(Detector):
 
 # Detector that measures range progress.
 class Range(SingleDetector):
-    def __init__(self, board_options):
-        super().__init__(board_options)
+    def __init__(self, detector_id, detector_name, board_options):
+        super().__init__(detector_id, detector_name, board_options)
         self._required_settings = ['offset', 'bay_depth', 'spread_park', 'pct_warn', 'pct_crit']
-        self._settings = {}
         for setting in self._required_settings:
             self._settings[setting] = None
         # Default the warn and critical percentages.
@@ -270,11 +277,10 @@ class Range(SingleDetector):
 
 # Detector for lateral position
 class Lateral(SingleDetector):
-    def __init__(self, board_options):
-        super().__init__(board_options)
+    def __init__(self, detector_id, detector_name, board_options):
+        super().__init__(detector_id, detector_name, board_options)
         # Initialize required elements as None. This lets us do a readiness check later.
         self._required_settings = ['offset', 'spread_ok', 'spread_warn', 'spread_crit', 'side']
-        self._settings = {}
         for setting in self._required_settings:
             self._settings[setting] = None
 
