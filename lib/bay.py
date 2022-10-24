@@ -12,11 +12,15 @@ class Bay:
     def __init__(self,config,detectors):
         # Set the Bay ID. This is static for testing, real config processing will come later.
         self.bay_id = 'bay1'
+        try:
+            self.bay_name = config['bay_name']
+        except KeyError:
+            self.bay_name = self.bay_id
         # Create a logger.
-        self._logger = logging.getLogger("CobraBay").getChild(self._bay_id)
+        self._logger = logging.getLogger("CobraBay").getChild(self.bay_id)
         self._logger.setLevel(logging.DEBUG)
         # Log our initialization.
-        self._logger.info("Bay '{}' initializing...".format(self._bay_id))
+        self._logger.info("Bay '{}' initializing...".format(self.bay_id))
         # Create a unit registry.
         self._ureg = UnitRegistry
         # Set the unit system. Default to Metric. If units is in the config and is imperial, change it to imperial.
@@ -31,12 +35,12 @@ class Bay:
         self._setup_detectors(config,detectors)
         self._logger.debug(self._detectors)
         self._logger.debug("Detectors configured:")
-        self._logger.debug("\tRange: {}".format(hex(self._detectors['range'].i2c_address)))
-        lat_string = ""
-        for detector_name in self._detectors['lateral'].keys():
-            lat_string = lat_string + " {}".format(hex(self._detectors['lateral'][detector_name]['obj'].i2c_address))
-            # self._logger.debug("\t\t{}: {}".format(
-        self._logger.debug("\tLateral: " + lat_string)
+        self._logger.debug("\tLongitudinal - ")
+        for detector in self._detectors['longitudinal']:
+            self._logger.debug("\t\t{} - {}".format(detector, hex(self._detectors['longitudinal'][detector].i2c_address)))
+        self._logger.debug("\tLateral - ")
+        for detector in self._detectors['lateral'].keys():
+            self._logger.debug("\t\t{} - {}".format(detector, hex(self._detectors['lateral'][detector].i2c_address)))
 
         # Set the display height. This is needed for some display calculations
         self._matrix = {'width': 64, 'height': 32 }
@@ -44,7 +48,7 @@ class Bay:
         self._state = 'ready'
         self._position = {}
         self._quality = {}
-        self._logger.info("Bay '{}' initialization complete.".format(self._bay_id))
+        self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
 
     # Imperative commands
     def dock(self):
@@ -67,10 +71,22 @@ class Bay:
 
     # Method to get info to pass to the Network module and register.
     def discovery_info(self):
+        # For discovery, the detector hierarchy doesn't matter, so we can flatten it.
         return_dict = {
-            'bay_id': self._bay_id,
-            'detectors': self._detectors
+            'bay_id': self.bay_id,
+            'bay_name': self.bay_name,
+            'detectors': []
         }
+        self._logger.debug("Discovery trying to handle detectors: {}".format(self._detectors))
+        for direction in self._detectors:
+            for item in self._detectors[direction]:
+                detector = {
+                    'detector_id': item,
+                    'name': self._detectors[direction][item].name
+                }
+                return_dict['detectors'].append(detector)
+
+        self._logger.debug("Bay discovery info: {}".format(return_dict))
         return return_dict
 
     # Bay properties
@@ -175,23 +191,20 @@ class Bay:
         outbound_messages = [] # topic, message, repease, topic_mappings
         # State message.
         outbound_messages.append(
-            {'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+            {'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
         )
         # Only generate  positioning messages if 1) we're  docking or undocking or 2)  a verify has been explicitly requested.
         if verify or self.state in ('docking','undocking'):
             outbound_messages.append(
-                {'topic_type': 'bay', 'topic': 'bay_position', 'message': self.position, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+                {'topic_type': 'bay', 'topic': 'bay_position', 'message': self.position, 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
             )
             outbound_messages.append(
-                {'topic_type': 'bay', 'topic': 'bay_quality', 'message': self.quality, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+                {'topic_type': 'bay', 'topic': 'bay_quality', 'message': self.quality, 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
             )
             outbound_messages.append(
-                {'topic_type': 'bay', 'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False, 'topic_mappings': {'bay_id': self._bay_id}}
+                {'topic_type': 'bay', 'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
             )
         return outbound_messages
-
-    def mqtt_discovery(self):
-        pass
 
     # Image making methods
 
@@ -253,36 +266,41 @@ class Bay:
     # Method to set up the detectors for the bay. This applies bay-specific options to the individual detectors, which
     # are initialized by the main routine.
     def _setup_detectors(self,config,detectors):
-        self._detectors = {}
-        # Do the range setup. This behaves a little differently, so is coralled to a separate method for sanity.
-        self._logger.debug("Setting up range detector.")
-        self._setup_range(config,detectors)
-        # Lateral configuration.
-        # Make the lateral array.
-        self._detectors['lateral'] = {}
+        # Initialize the detector dicts.
+        self._detectors = {
+            'longitudinal': {},
+            'lateral': {}
+        }
+        self._lateral_order = {}
 
-        self._logger.debug("Setting up lateral detectors.")
-        for detector_config in config['lateral']['detectors']:
-            detector_name = detector_config['detector']
-            try:
-                lateral_obj = detectors[detector_name]
-            except KeyError:
-                raise KeyError("Tried to create lateral zone with detector '{}' but detector not defined."
-                               .format(detector_name))
-            # Now we have the detector, set it up right.
-            for item in ('offset','spread_ok','spread_warn','spread_crit','side'):
+        config_options = {
+            'longitudinal': ('offset','spread_park','bay_depth'),
+            'lateral': ('offset','spread_ok','spread_warn','spread_crit','side')
+        }
+        for direction in self._detectors.keys():
+            self._logger.debug("Setting up {} detectors.".format(direction))
+            for detector_config in config[direction]['detectors']:
                 try:
-                    setattr(lateral_obj, item, detector_config[item])
+                    detector_obj = detectors[detector_config['detector']]
                 except KeyError:
-                    self._logger.debug("Using default value for {}".format(item))
+                    raise KeyError("Tried to create lateral zone with detector '{}' but detector not defined."
+                                   .format(detector_config['detector']))
+                # Set the object attributes from the configuration.
+                for item in config_options[direction]:
                     try:
-                        setattr(lateral_obj,item,config['lateral']['defaults'][item])
+                        setattr(detector_obj, item, detector_config[item])
+                    except KeyError:
+                        self._logger.debug("Using default value for {}".format(item))
+                    try:
+                        setattr(detector_obj, item, config[direction]['defaults'][item])
                     except KeyError:
                         raise KeyError("Needed default value for {} but not defined!".format(item))
-            self._logger.debug("Lateral now has settings: {}".format(lateral_obj._settings))
-
-            # Append it to the lateral dict.
-            self._detectors['lateral'][detector_name] = {'obj': lateral_obj, 'intercept': Quantity(detector_config['intercept'])}
+                # If we're processing lateral, add the intercept range to the lateral order dict.
+                if direction == 'lateral':
+                    self._lateral_order[Quantity(detector_config['intercept'])] = detector_config['detector']
+                # Append the object to the appropriate object store.
+                self._detectors[direction][detector_config['detector']] = detector_obj
+        # self._lateral_order =
 
     # Method to set up the range detector
     def _setup_range(self,config,detectors):

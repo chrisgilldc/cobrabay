@@ -235,13 +235,7 @@ class Network:
     # Method to register a bay.
     def register_bay(self, discovery_info):
         # We only need the names of things.
-        self._bay_registry[discovery_info['bay_id']] = {
-            'bay_id': discovery_info['bay_id'],
-            'detectors': {
-                'range': 'range',
-                'lateral': list(discovery_info['detectors']['lateral'].keys())
-            }
-        }
+        self._bay_registry[discovery_info['bay_id']] = discovery_info
         self._logger.debug("Have registered new bay info: {}".format(self._bay_registry[discovery_info['bay_id']]))
 
     def unregister_bay(self, bay_id):
@@ -253,7 +247,7 @@ class Network:
     def _on_connect(self, userdata, flags, rc, properties=None):
         self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
         # Create last will, goes to the device topic.
-        self._logger.info("Network: Creating last will.")
+        self._logger.info("Creating last will.")
         self._mqtt_client.will_set(self._topics['system']['device_connectivity']['topic'], payload='offline')
         # Connect to the callback topics. This will only connect to the device command topic at this stage.
         for type in self._topics:
@@ -379,7 +373,6 @@ class Network:
     def poll(self, outbound_messages=None):
         # Send all the messages outbound.
         for message in outbound_messages:
-            self._logger.debug("Attempting to publish message: {}".format(message))
             self._pub_message(**message)
         # Check for any incoming commands.
         self._mqtt_client.loop()
