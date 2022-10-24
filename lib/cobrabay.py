@@ -14,6 +14,7 @@ from digitalio import DigitalInOut
 from adafruit_aw9523 import AW9523
 from base64 import b64encode
 from io import BytesIO
+from pprint import PrettyPrinter
 
 # Import the other CobraBay classes
 from .bay import Bay
@@ -210,9 +211,9 @@ class CobraBay:
                         }
 
     def _network_handler(self):
+        # Add hardware status messages.
+        self._mqtt_hw()
         # Send the outbound message queue to the network module to handle. After, we empty the message queue.
-        # print("Pending outbound messages: ")
-        # self._pp.pprint(self._outbound_messages)
         network_data = self._network.poll(self._outbound_messages)
         self._outbound_messages = []
         # Check the network command queue. If there are commands, run them.
@@ -278,8 +279,6 @@ class CobraBay:
             # Put the bay messages on the MQTT stack to go out.
             self._logger.debug("Collecting outbound MQTT messages.")
             self._outbound_messages = self._outbound_messages + bay_messages
-            # Put the hardware messages on as well.
-            self._mqtt_hw()
 
             # Poll the network.
             self._logger.debug("Polling network.")
@@ -373,14 +372,21 @@ class CobraBay:
     def _setup_detectors(self):
         i2c_bus = busio.I2C(board.SCL, board.SDA)
         return_dict = {}
-        for detector_name in self.config['detectors']:
-            self._logger.info("Creating detector: {}".format(detector_name))
-            if self.config['detectors'][detector_name]['type'] == 'Range':
-                return_dict[detector_name] = Range(board_options = self.config['detectors'][detector_name]['sensor'])
-                try:
-                    return_dict[detector_name].timing(self.config['detectors'][detector_name]['timing'])
-                except KeyError:
-                    return_dict[detector_name].timing('200 ms')
-            if self.config['detectors'][detector_name]['type'] == 'Lateral':
-                return_dict[detector_name] = Lateral(board_options = self.config['detectors'][detector_name]['sensor'])
+        for detector_id in self.config['detectors']:
+            self._logger.info("Creating detector: {}".format(detector_id))
+            if self.config['detectors'][detector_id]['type'] == 'Range':
+                return_dict[detector_id] = \
+                    Range(detector_id,
+                          self.config['detectors'][detector_id]['name'],
+                          board_options = self.config['detectors'][detector_id]['sensor'])
+                # This probably isn't needed anymore, let's try it without.
+                # try:
+                #     return_dict[detector_id].timing(self.config['detectors'][detector_id]['timing'])
+                # except KeyError:
+                #     return_dict[detector_id].timing('200 ms')
+            if self.config['detectors'][detector_id]['type'] == 'Lateral':
+                return_dict[detector_id] = \
+                    Lateral(detector_id,
+                            self.config['detectors'][detector_id]['name'],
+                            board_options = self.config['detectors'][detector_id]['sensor'])
         return return_dict
