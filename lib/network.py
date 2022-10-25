@@ -153,7 +153,7 @@ class Network:
                         'name': '{} Memory Use'.format(self._system_name),
                         'type': 'sensor',
                         'entity': '{}_mem_info'.format(self._system_name.lower()),
-                        'value_template': "{{ value_json.mem_pct }}",
+                        'value_template': "{{{{ value_json.mem_pct }}}}",
                         'unit_of_measurement': '%',
                         'icon': 'mdi:memory',
                         'json_attributes_topic': 'cobrabay/' + self._client_id + '/mem_info'
@@ -164,7 +164,17 @@ class Network:
                     'enabled': False,
                     'callback': self._cb_device_command
                     # May eventually do discovery here to create selectors, but not yet.
-                }
+                },
+                'display': {
+                    'topic': 'cobrabay/' + self._client_id + '/display',
+                    'previous_state': {},
+                    'ha_discovery': {
+                        'name': '{} Display'.format(self._system_name),
+                        'type': 'camera',
+                        'entity': '{}_display'.format(self._system_name.lower()),
+                        'encoding': 'b64'
+                    }
+                },
             },
             'bay': {
                 'bay_occupied': {
@@ -172,7 +182,7 @@ class Network:
                     'previous_state': 'Unknown',
                     'enabled': True,
                     'ha_discovery': {
-                        'name': '{} Occupied',
+                        'name': '{0[bay_name]} Occupied',
                         'type': 'binary_sensor',
                         'availability_topic': '{0[bay_id]}_state',
                         'entity': '{0[bay_id]}_occupied',
@@ -189,7 +199,7 @@ class Network:
                         'name': '{0[bay_name]} State',
                         'type': 'sensor',
                         'entity': '{0[bay_id]}_state',
-                        'value_template': '{{ value_json.state }}'
+                        'value_template': '{{{{ value_json.state }}}}'
                     }
                 },
                 # Adjusted readings from the sensors.
@@ -198,10 +208,10 @@ class Network:
                     'ha_type': 'sensor',
                     'previous_state': None,
                     'ha_discovery': {
-                        'name': '{0[bay_name]} {0[detector_name]} Position',
+                        'name': '{0[bay_name]} Detector Position: {0[detector_name]}',
                         'type': 'sensor',
                         'entity': '{0[bay_id]}_position_{0[detector_id]}',
-                        'value_template': '{{ value_json.{0[detector_id]} }}',
+                        'value_template': '{{{{ value_json.{0[detector_id]} }}}}',
                         'unit_of_measurement': self._uom('length'),
                         'icon': 'mdi:ruler'
                     }
@@ -209,24 +219,17 @@ class Network:
                 # How good the parking job is.
                 'bay_quality': {
                     'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/quality',
-                    'previous_state': {},
+                    'previous_state': None,
                     'enabled': True,
                     'ha_discovery': {
-                        'type': 'sensor_group',
-                        'list': 'bay_position',
+                        'name': '{0[bay_name]} Detector Quality: {0[detector_name]}',
+                        'type': 'sensor',
+                        'entity': '{0[bay_id]}_quality_{0[detector_id]}',
+                        'value_template': '{{{{ value_json. {0[detector_id]} }}}}',
                         'icon': 'mdi:traffic-light'
                     }
                 },
-                'bay_display': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/display',
-                    'previous_state': {},
-                    'enabled': True,
-                    'ha_discovery': {
-                        'type': 'sensor_group',
-                        'list': 'bay_position',
-                        'icon': 'mdi:traffic-light'
-                    }
-                },
+
                 # This is a generic callback that will work for all bays.
                 'bay_command': {
                     'topic': 'cobrabay/' + self._client_id + '/+/cmd',
@@ -244,8 +247,9 @@ class Network:
         # We only need the names of things.
         self._bay_registry[discovery_info['bay_id']] = discovery_info
         self._logger.debug("Have registered new bay info: {}".format(self._bay_registry[discovery_info['bay_id']]))
-        # If Home ASsistant is enabled, and we're already connected, run just the Bay discovery.
+        # If Home Assistant is enabled, and we're already connected, run just the Bay discovery.
         if self._mqtt_connected and self._homeassistant:
+            self._logger.debug("Running HA discovery for bay {}".format(discovery_info['bay_id']))
             self._ha_discovery_bay(discovery_info['bay_id'])
 
     def unregister_bay(self, bay_id):
@@ -420,12 +424,11 @@ class Network:
                         self._logger.error(e, exc_info=True)
 
         # Send a discovery message and an online notification.
-        print("Checkpoint!")
-        self._logger.debug("HA status: {}".format(self._homeassistant))
         if self._homeassistant:
-            self._logger.debug("Running HA Discovery...")
             self._ha_discovery()
         self._send_online()
+        # Set the internal MQTT tracker to True. Surprisingly, the client doesn't have a way to track this itself!
+        self._mqtt_connected = True
         return True
 
     # Convenience method to start everything network related at once.
@@ -434,7 +437,6 @@ class Network:
             self._connect_mqtt()
         except Exception as e:
             raise
-
         return None
 
     def disconnect(self, message=None):
@@ -446,6 +448,8 @@ class Network:
         self._send_offline()
         # Disconnect from broker
         self._mqtt_client.disconnect()
+        # SEt the internal tracker to disconnected.
+        self._mqtt_connected = False
 
     def _ha_discovery(self):
         self._logger.debug("HA Discovery has been called.")
@@ -474,17 +478,32 @@ class Network:
         # Get the bay name
         bay_name = self._bay_registry[bay_id]['bay_name']
         # Create the single entities. There's one of these per bay.
+        # Bay_display discovery is broken for now, so skipping it.
         for entity in ('bay_occupied','bay_state'):
-            self._ha_create('bay',entity,{'bay_id': bay_id, 'bay_name': bay_name})
-        # for detector in
+            self._ha_create(topic_type='bay',
+                            topic_name=entity,
+                            fields={'bay_id': bay_id, 'bay_name': bay_name})
+        for detector in self._bay_registry[bay_id]['detectors']:
+            for entity in ('bay_position','bay_quality'):
+                print(entity)
+                self._ha_create(
+                    topic_type='bay',
+                    topic_name=entity,
+                    fields={'bay_id': bay_id,
+                            'bay_name': bay_name,
+                            'detector_id': detector['detector_id'],
+                            'detector_name': detector['name'] }
+                )
 
     # Method to create a properly formatted HA discovery message.
     # This expects *either* a complete config dict passed in as ha_config, or a topic_type and topic, from which
     # it will fetch the ha_discovery configuration.
     def _ha_create(self, topic_type=None, topic_name=None, fields=None):
-        self._logger.debug("HA Create got fields: {}".format(fields))
+        self._logger.debug("HA Create input:\n\tTopic Type: {}\n\tTopic Name: {}\n\tFields: {}".format(topic_type,topic_name,fields))
         # Run all the items through a formatting filter. Static fields will just have nothing happen. If fields were
         # provided and strings have replacement, they'll get replaced, ie: for bay items.
+        self._logger.debug("State topic:")
+        self._logger.debug(self._topics[topic_type][topic_name]['topic'])
         try:
             config_dict = {
                 'state_topic': self._topics[topic_type][topic_name]['topic'].format(fields),
@@ -502,6 +521,7 @@ class Network:
 
         optional_params = (
             'device_class',
+            'encoding',
             'icon',
             'json_attributes_topic',
             'unit_of_measurement',
