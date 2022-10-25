@@ -54,7 +54,10 @@ class Network:
                     self._logger.info("Assigning Client ID {} from interface {}".format(self._client_id, interface))
                     break
 
+        # Initialize the system name
         self._system_name = config['system_name']
+        # Initialize the MQTT connected variable.
+        self._mqtt_connected = False
 
         # Set homeassistant integration state.
         self._logger.debug("Config file HA setting: {}".format(config['homeassistant']))
@@ -65,6 +68,7 @@ class Network:
         except:
             self._logger.debug("Setting Home Assistant false.")
             self._homeassistant = False
+        self._logger.debug("Home Assistant setting: {}".format(self._homeassistant))
 
         # Current device state. Will get updated every time we're polled.
         self._device_state = 'unknown'
@@ -96,7 +100,10 @@ class Network:
         if 'tls' in self.secrets:
             pass
 
+        # Connect callback.
         self._mqtt_client.on_connect = self._on_connect
+        # Disconnect callback
+        self._mqtt_client.on_disconnect = self._on_disconnect()
 
         # Define topic reference.
         self._topics = {
@@ -108,7 +115,7 @@ class Network:
                     'ha_discovery': {
                         'name': '{} Connectivity'.format(self._system_name),
                         'type': 'binary_sensor',
-                        'entity': 'connectivity',
+                        'entity': '{}_connectivity'.format(self._system_name.lower()),
                         'device_class': 'connectivity',
                         'payload_on': 'online',
                         'payload_off': 'offline'
@@ -121,7 +128,7 @@ class Network:
                     'ha_discovery': {
                         'name': '{} CPU Use'.format(self._system_name),
                         'type': 'sensor',
-                        'entity': 'cpu_pct',
+                        'entity': '{}_cpu_pct'.format(self._system_name.lower()),
                         'unit_of_measurement': '%',
                         'icon': 'mdi:chip'
                     }
@@ -133,7 +140,7 @@ class Network:
                     'ha_discovery': {
                         'name': '{} CPU Temperature'.format(self._system_name),
                         'type': 'sensor',
-                        'entity': 'cpu_temp',
+                        'entity': '{}_cpu_temp'.format(self._system_name.lower()),
                         'device_class': 'temperature',
                         'unit_of_measurement': self._uom('temp')
                     }
@@ -145,7 +152,7 @@ class Network:
                     'ha_discovery': {
                         'name': '{} Memory Use'.format(self._system_name),
                         'type': 'sensor',
-                        'entity': 'mem_info',
+                        'entity': '{}_mem_info'.format(self._system_name.lower()),
                         'value_template': "{{ value_json.mem_pct }}",
                         'unit_of_measurement': '%',
                         'icon': 'mdi:memory',
@@ -156,9 +163,7 @@ class Network:
                     'topic': 'cobrabay/' + self._client_id + '/cmd',
                     'enabled': False,
                     'callback': self._cb_device_command
-                    # 'ha_discovery': {
-                    #     'type': 'select'
-                    # }
+                    # May eventually do discovery here to create selectors, but not yet.
                 }
             },
             'bay': {
@@ -167,10 +172,10 @@ class Network:
                     'previous_state': 'Unknown',
                     'enabled': True,
                     'ha_discovery': {
+                        'name': '{} Occupied',
                         'type': 'binary_sensor',
-                        'availability_topic': 'bay_state',
-                        'name': 'Bay Occupied',
-                        'entity': 'occupied',
+                        'availability_topic': '{0[bay_id]}_state',
+                        'entity': '{0[bay_id]}_occupied',
                         'class': 'occupancy',
                         'payload_on': 'occupied',
                         'payload_off': 'vacant'
@@ -181,21 +186,24 @@ class Network:
                     'previous_state': None,
                     'enabled': True,
                     'ha_discovery': {
+                        'name': '{0[bay_name]} State',
                         'type': 'sensor',
-                        'name': 'Bay State',
-                        'entity': 'state',
+                        'entity': '{0[bay_id]}_state',
                         'value_template': '{{ value_json.state }}'
                     }
                 },
                 # Adjusted readings from the sensors.
                 'bay_position': {
                     'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/position',
-                    'enabled': True,
                     'ha_type': 'sensor',
                     'previous_state': None,
                     'ha_discovery': {
-                        'type': 'sensor_group',
-                        'list': 'bay.position',
+                        'name': '{0[bay_name]} {0[detector_name]} Position',
+                        'type': 'sensor',
+                        'entity': '{0[bay_id]}_position_{0[detector_id]}',
+                        'value_template': '{{ value_json.{0[detector_id]} }}',
+                        'unit_of_measurement': self._uom('length'),
+                        'icon': 'mdi:ruler'
                     }
                 },
                 # How good the parking job is.
@@ -229,7 +237,6 @@ class Network:
                 }
             }
         }
-        self._known_bays = {}
         self._logger.info('Network: Initialization complete.')
 
     # Method to register a bay.
@@ -237,6 +244,9 @@ class Network:
         # We only need the names of things.
         self._bay_registry[discovery_info['bay_id']] = discovery_info
         self._logger.debug("Have registered new bay info: {}".format(self._bay_registry[discovery_info['bay_id']]))
+        # If Home ASsistant is enabled, and we're already connected, run just the Bay discovery.
+        if self._mqtt_connected and self._homeassistant:
+            self._ha_discovery_bay(discovery_info['bay_id'])
 
     def unregister_bay(self, bay_id):
         try:
@@ -246,9 +256,6 @@ class Network:
 
     def _on_connect(self, userdata, flags, rc, properties=None):
         self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
-        # Create last will, goes to the device topic.
-        self._logger.info("Creating last will.")
-        self._mqtt_client.will_set(self._topics['system']['device_connectivity']['topic'], payload='offline')
         # Connect to the callback topics. This will only connect to the device command topic at this stage.
         for type in self._topics:
             for item in self._topics[type]:
@@ -256,6 +263,10 @@ class Network:
                     self._logger.debug("Network: Creating callback for {}".format(item))
                     self._mqtt_client.message_callback_add(self._topics[type][item]['topic'],
                                                            self._topics[type][item]['callback'])
+        self._mqtt_connected = True
+
+    def _on_disconnect(self):
+        self._mqtt_connected = False
 
     # Device Command callback
     def _cb_device_command(self, client, userdata, message):
@@ -386,6 +397,11 @@ class Network:
         return upward_data
 
     def _connect_mqtt(self):
+        # Set the last will prior to connecting.
+        self._logger.info("Creating last will.")
+        self._mqtt_client.will_set(
+            self._topics['system']['device_connectivity']['topic'],
+            payload='offline', qos=0, retain=True)
         try:
             self._mqtt_client.connect(host=self._mqtt_host, port=self._mqtt_port)
         except Exception as e:
@@ -404,12 +420,12 @@ class Network:
                         self._logger.error(e, exc_info=True)
 
         # Send a discovery message and an online notification.
-        self._logger.info('Network: Sending online message')
+        print("Checkpoint!")
         self._logger.debug("HA status: {}".format(self._homeassistant))
         if self._homeassistant:
             self._logger.debug("Running HA Discovery...")
             self._ha_discovery()
-        self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'], payload='online')
+        self._send_online()
         return True
 
     # Convenience method to start everything network related at once.
@@ -427,28 +443,12 @@ class Network:
         if message is not None:
             self._mqtt_client.publish(self._topics['system']['device_state']['topic'], message)
         # When disconnecting, mark the device and the bay as unavailable.
-        self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'], 'offline')
-        # self._mqtt_client.publish(self._topics['bay_state']['topic'], 'offline', )
-        # self._mqtt_client.publish(self._topics['bay_state']['topic'], 'offline')
+        self._send_offline()
         # Disconnect from broker
         self._mqtt_client.disconnect()
 
-    # Get a 'signal strength' out of RSSI. Based on the Android algorithm. Probably has issues, but hey, it's something.
-    def _signal_strength(self):
-        pass
-        # min_rssi = -100
-        # max_rssi = -55
-        # levels = 4
-        # if self._esp.rssi <= min_rssi:
-        #     return 0
-        # elif self._esp.rssi >= max_rssi:
-        #     return levels - 1
-        # else:
-        #     input_range = -1 * (min_rssi - max_rssi)
-        #     output_range = levels - 1
-        #     return floor((self._esp.rssi - min_rssi) * (output_range / input_range))
-
     def _ha_discovery(self):
+        self._logger.debug("HA Discovery has been called.")
         # Build the device JSON to include in other updates.
         self._device_info = dict(
             name=self._system_name,
@@ -465,53 +465,40 @@ class Network:
             if 'ha_discovery' in self._topics['system'][item]:
                 self._ha_create(topic_type='system', topic_name=item)
 
-        # If there are registered bays, process them as well.
-        if len(self._bay_registry) > 0:
-            for bay in self._bay_registry:
-                # Each Bay element needs to get its HA config built on the fly.
-                # Let's try this with just range first.
-                ha_config = {
-                    'state_topic': 'cobrabay/' + self._client_id + '/' + self._bay_registry[bay]['bay_id'] + '/position',
-                    'value_template': '{{ value_json.lo }}',
-                    'type': 'sensor',
-                    'name': 'Bay 1 Range',
-                    'entity': 'range',
-                    'unit_of_measurement': self._uom('length')
-                }
-                self._ha_create(ha_config=ha_config)
+        for bay in self._bay_registry:
+            self._ha_discovery_bay(bay)
 
+    # Method to do discovery for
+    def _ha_discovery_bay(self,bay_id):
+        self._logger.debug("HA Discovery for Bay ID {} has been called.".format(bay_id))
+        # Get the bay name
+        bay_name = self._bay_registry[bay_id]['bay_name']
+        # Create the single entities. There's one of these per bay.
+        for entity in ('bay_occupied','bay_state'):
+            self._ha_create('bay',entity,{'bay_id': bay_id, 'bay_name': bay_name})
+        # for detector in
 
     # Method to create a properly formatted HA discovery message.
     # This expects *either* a complete config dict passed in as ha_config, or a topic_type and topic, from which
     # it will fetch the ha_discovery configuration.
-    def _ha_create(self, topic_type=None, topic_name=None, ha_config=None):
-
-        # If ha_config dict wasn't specified, use one defined on the object.
-        if ha_config is None:
-            try:
-                ha_config = self._topics[topic_type][topic_name]['ha_discovery']
-            except KeyError:
-                raise KeyError("Tried to find HA Discovery config with type {} and topic {}, but got key error instead."
-                               .format(topic_type, topic_name))
-            state_topic = self._topics[topic_type][topic_name]['topic']
-        else:
-            state_topic = ha_config['state_topic']
-
-
-        # Build a config topic.
-        config_topic = "homeassistant/{}/cobrabay-{}/{}/config".format(ha_config['type'], self._client_id,
-                                                                       ha_config['entity'])
-        # Base, required parameters.
+    def _ha_create(self, topic_type=None, topic_name=None, fields=None):
+        self._logger.debug("HA Create got fields: {}".format(fields))
+        # Run all the items through a formatting filter. Static fields will just have nothing happen. If fields were
+        # provided and strings have replacement, they'll get replaced, ie: for bay items.
         try:
             config_dict = {
-                'name': ha_config['name'],
-                'object_id': self._system_name.replace(" ", "").lower(),
-                'device': self._device_info,
-                'state_topic': state_topic,
-                'unique_id': self._client_id + '.' + ha_config['entity'],
+                'state_topic': self._topics[topic_type][topic_name]['topic'].format(fields),
+                'type': self._topics[topic_type][topic_name]['ha_discovery']['type'],  ## Type shouldn't ever be templated.
+                'name': self._topics[topic_type][topic_name]['ha_discovery']['name'].format(fields),
+                'object_id': self._topics[topic_type][topic_name]['ha_discovery']['entity'].format(fields)
             }
-        except:
+        except KeyError:
             raise
+
+        # Set the Unique ID, which is the client ID plus the object ID.
+        config_dict['unique_id'] = self._client_id + '.' + config_dict['object_id']
+        # Always include the device info.
+        config_dict['device'] = self._device_info
 
         optional_params = (
             'device_class',
@@ -525,39 +512,26 @@ class Network:
         # Optional parameters
         for par in optional_params:
             try:
-                config_dict[par] = ha_config[par]
+                config_dict[par] = self._topics[topic_type][topic_name]['ha_discovery'][par].format(fields)
             except KeyError:
                 pass
 
+        # Set availability. Everything depends on device_connectivity, so we don't set this for device_connectivity.
+
         # If this isn't device connectivity itself, make the entity depend on device connectivity
-        if config_topic != 'device_connectivity':
+        if topic_name != 'device_connectivity':
             config_dict['availability_topic'] = self._topics['system']['device_connectivity']['topic']
             config_dict['payload_available'] = self._topics['system']['device_connectivity']['ha_discovery']['payload_on']
             config_dict['payload_not_available'] = self._topics['system']['device_connectivity']['ha_discovery']['payload_off']
 
+        # Configuration topic to which we'll send this configuration. This is based on the entity type and entity ID.
+        config_topic = "homeassistant/{}/cobrabay-{}/{}/config".\
+            format(config_dict['type'],
+                   self._client_id,
+                   config_dict['object_id'])
         # Send it!
         self._logger.debug("Publishing HA discovery to topic {}\n\t{}".format(config_topic, config_dict))
         self._mqtt_client.publish(config_topic, json_dumps(config_dict))
-
-        # sensor.tester_state:
-        # icon: mdi:test - tube
-        # templates:
-        # rgb_color: "if (state === 'on') return [251, 210, 41]; else return [54, 95, 140];"
-
-    # Create a traffic-light style sensor. This is used for the parking position sensors.
-    def _ha_create_trafficlight(self):
-        # icon_template = \
-        #     "{% if is_state('sensor.{}','Good') %}
-        #         mdi:check-circle
-        #     {% elif is_state('sensor.{}','OK') %}
-        #         mdi:alert-circle
-        #     {% elif is_state('sensor.{}','Bad') %}
-        #         mdi:close-circle
-        #     {% else %}
-        #         mdi:eye-circle
-        #     {% endif %}".format(entity_id)
-
-        pass
 
     # Helper method to determine the correct unit of measure to use. When we have reported sensor units, we use
     # this method to ensure the correct unit is being put in.
@@ -576,3 +550,10 @@ class Network:
         else:
             raise ValueError("{} isn't a valid unit type".format(unit_type))
         return uom
+
+    # Quick helper methods to send online/offline messages correctly.
+    def _send_online(self):
+        self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'], payload='online',retain=True)
+
+    def _send_offline(self):
+        self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'], payload='offline',retain=True)
