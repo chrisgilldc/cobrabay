@@ -22,6 +22,7 @@ from .display import Display
 from .detector import Lateral, Range
 from .network import Network
 from .systemhw import PiStatus
+from .util import mqtt_message_search
 
 class CobraBay:
     def __init__(self, cmd_opts=None):
@@ -153,12 +154,10 @@ class CobraBay:
                     if 'dock' in command['cmd']:
                         self._logger.debug("Got dock command for Bay ID {}".format(command['bay_id']))
                         self._logger.debug("Available bays: {}".format(self._bays.keys()))
-                        try:
-                            self._dock(command['bay_id'])
-                        except ValueError:
-                            self._logger.info("Bay command 'dock' was refused.")
-                        # except KeyError:
-                        #     self._logger.info("Receved command 'dock' for unknown bay '{}'".format(command['bay_id']))
+                        # try:
+                        self._dock(command['bay_id'])
+                        # except ValueError:
+                        #     self._logger.info("Bay command 'dock' was refused.")
                     if 'undock' in command['cmd']:
                         try:
                             self._undock(command['bay_id'])
@@ -229,8 +228,6 @@ class CobraBay:
             ## Messages from the bay.
             for bay in self._bays:
                 self._outbound_messages = self._outbound_messages + self._bays[bay].mqtt_messages()
-            ## Hardware messages
-
             # Do a network poll, this method handles all the default outbound messages and any incoming commands.
             network_data = self._network_handler()
             # Update the network components of the system state.
@@ -239,10 +236,10 @@ class CobraBay:
 
             self._display.show_clock()
             # Push out the image to MQTT.
-            self._outbound_messages.append(
-                {'topic_type': 'system',
-                 'topic': 'display',
-                 'message': self._display.current, 'repeat': True})
+            # self._outbound_messages.append(
+            #     {'topic_type': 'system',
+            #      'topic': 'display',
+            #      'message': self._display.current, 'repeat': True})
 
 
     # Start sensors and display to guide parking.
@@ -262,29 +259,27 @@ class CobraBay:
 
         # As long as the bay still thinks it's docking, keep displaying!
         while self._bays[bay_id].state == "docking":
-            self._logger.debug("Collecting bay messages.")
+            # Trigger a scan of the bay.
+            self._logger.debug("Requesting bay scan.")
+            self._bays[bay_id].scan()
             # Collect the MQTT mesasges from the bay itself.
+            self._logger.debug("Collecting MQTT messages from bay.")
             bay_messages = self._bays[bay_id].mqtt_messages()
-            # Use the message data to send to the display.
-            self._logger.debug("Sending bay data to display.")
-            outbound_image = self._display.show_dock(position=bay_messages[1], quality=bay_messages[2])
-            self._logger.debug("Display processing returned type: {}".format(type(outbound_image)))
-            if outbound_image is not None:
-                # Write to the image buffer as a PNG.
-                outbound_image.save(image_buffer, format="PNG")
-                # Send a base64 encoded version to MQTT.
-                self._outbound_messages.append(
-                    {'topic_type': 'bay', 'topic': 'bay_display', 'message': b64encode(image_buffer.getvalue()),
-                     'repeat': True, 'topic_mappings': {'bay_id': bay_id} }
-                )
-
-            # Put the bay messages on the MQTT stack to go out.
-            self._logger.debug("Collecting outbound MQTT messages.")
+            self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
             self._outbound_messages = self._outbound_messages + bay_messages
+            # Collect the display data to send to the display.
+            self._logger.debug("Collecting display data from bay.")
+            display_data = self._bays[bay_id].display_data()
+            self._logger.debug("Collected display data: {}".format(display_data))
+            self._display.show_dock(display_data)
+
+            # Put the display image on the MQTT stack.
+            # self._outbound_messages.append(
+            #     { 'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': True })
 
             # Poll the network.
             self._logger.debug("Polling network.")
-            network_data = self._network_handler()
+            self._network_handler()
 
     # Utility method to put the hardware status on the outbound message queue. This needs to be used from a few places.
     def _mqtt_hw(self):
