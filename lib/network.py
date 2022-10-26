@@ -184,7 +184,6 @@ class Network:
                     'ha_discovery': {
                         'name': '{0[bay_name]} Occupied',
                         'type': 'binary_sensor',
-                        'availability_topic': '{0[bay_id]}_state',
                         'entity': '{0[bay_id]}_occupied',
                         'class': 'occupancy',
                         'payload_on': 'occupied',
@@ -194,7 +193,6 @@ class Network:
                 'bay_state': {
                     'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/state',
                     'previous_state': None,
-                    'enabled': True,
                     'ha_discovery': {
                         'name': '{0[bay_name]} State',
                         'type': 'sensor',
@@ -202,10 +200,19 @@ class Network:
                         'value_template': '{{{{ value_json.state }}}}'
                     }
                 },
+                # Which detector is selected for active range use.
+                'bay_range_selected': {
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/range_selected',
+                    'previous_state': None,
+                    'ha_discovery': {
+                        'name': '{0[bay_name]} Selected Range Detector',
+                        'type': 'sensor',
+                        'entity': '{0[bay_id]}_range_selected'
+                    }
+                },
                 # Adjusted readings from the sensors.
                 'bay_position': {
                     'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/position',
-                    'ha_type': 'sensor',
                     'previous_state': None,
                     'ha_discovery': {
                         'name': '{0[bay_name]} Detector Position: {0[detector_name]}',
@@ -225,8 +232,43 @@ class Network:
                         'name': '{0[bay_name]} Detector Quality: {0[detector_name]}',
                         'type': 'sensor',
                         'entity': '{0[bay_id]}_quality_{0[detector_id]}',
-                        'value_template': '{{{{ value_json. {0[detector_id]} }}}}',
+                        'value_template': '{{{{ value_json.{0[detector_id]} }}}}',
                         'icon': 'mdi:traffic-light'
+                    }
+                },
+                'bay_motion': {
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/motion',
+                    'previous_state': 'Unknown',
+                    'enabled': True,
+                    'ha_discovery': {
+                        'name': '{0[bay_name]} Motion',
+                        'type': 'binary_sensor',
+                        'entity': '{0[bay_id]}_motion',
+                        'class': 'motion',
+                        'payload_on': 'True',
+                        'payload_off': 'False'
+                    }
+                },
+                'bay_speed': {
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/vector',
+                    'previous_state': None,
+                    'ha_discovery': {
+                        'name': '{0[bay_name]} Speed',
+                        'type': 'sensor',
+                        'entity': '{0[bay_id]}_speed',
+                        'value_template': '{{{{ value_json.speed }}}}',
+                        'class': 'speed',
+                        'unit_of_measurement': self._uom('speed')
+                    }
+                },
+                'bay_dock_time': {
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/dock_time',
+                    'previous_state': None,
+                    'ha_discovery': {
+                        'name': '{0[bay_name]} Time Until Docked',
+                        'type': 'sensor',
+                        'entity': '{0[bay_id]}_dock_time_remaining',
+                        'unit_of_measurement': 'seconds'
                     }
                 },
 
@@ -388,6 +430,7 @@ class Network:
     def poll(self, outbound_messages=None):
         # Send all the messages outbound.
         for message in outbound_messages:
+            self._logger.debug("Publishing MQTT message: {}".format(message))
             self._pub_message(**message)
         # Check for any incoming commands.
         self._mqtt_client.loop()
@@ -479,7 +522,7 @@ class Network:
         bay_name = self._bay_registry[bay_id]['bay_name']
         # Create the single entities. There's one of these per bay.
         # Bay_display discovery is broken for now, so skipping it.
-        for entity in ('bay_occupied','bay_state'):
+        for entity in ('bay_occupied','bay_state', 'bay_speed', 'bay_motion', 'bay_dock_time'):
             self._ha_create(topic_type='bay',
                             topic_name=entity,
                             fields={'bay_id': bay_id, 'bay_name': bay_name})
@@ -567,6 +610,11 @@ class Network:
                 uom = "°F"
             else:
                 uom = "°C"
+        elif unit_type == 'speed':
+            if system == 'imperial':
+                uom = 'mph'
+            else:
+                uom = 'kph'
         else:
             raise ValueError("{} isn't a valid unit type".format(unit_type))
         return uom
