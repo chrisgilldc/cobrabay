@@ -122,9 +122,8 @@ class Display:
         draw.text((w/2,h/2),dt_now,fill="green",font=font,anchor="mm")
         self._output_image(img)
 
-    def show_dock(self, position, quality):
-        self._logger.debug("Show Dock received position: {}".format(position))
-        self._logger.debug("Show Dock received quality: {}".format(quality))
+    def show_dock(self, display_data):
+        self._logger.debug("Show Dock received data: {}".format(display_data))
 
         # For easy reference.
         w = self._settings['matrix_width']
@@ -139,9 +138,10 @@ class Display:
             w_adjust = 8
 
         # Pull out the range and range quality to make the center placard.
-        self._logger.debug("Creating range placard with range: {}".format(position['message']['lo']))
-        range_layer = self._placard_range(position['message']['lo'],quality['message']['lo'])
+        self._logger.debug("Creating range placard with range: {}".format(display_data['range']))
+        range_layer = self._placard_range(display_data['range'],display_data['range_quality'])
         final_image = Image.alpha_composite(final_image, range_layer)
+        self._output_image(final_image)
 
     # Methods to create image objects that can then be composited.
     def _frame_approach(self):
@@ -168,7 +168,7 @@ class Display:
     def _placard_range(self,input_range,range_quality):
         if  self._settings['units'] == 'imperial':
             as_inches = input_range.to('in')
-            if as_inches < 12:
+            if as_inches.magnitude < 12:
                 range_string = "{}\"".format(as_inches.magnitude)
             else:
                 feet = int(as_inches.to(ureg.inch).magnitude // 12)
