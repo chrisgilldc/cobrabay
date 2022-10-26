@@ -140,6 +140,7 @@ class VL53L1X(Sensor):
     def range(self):
         # Make sure to pace the readings properly, so we're not over-running the native readings.
         # If a request comes in before the sleep time (200ms), return the previous reading.
+
         if monotonic() - self._previous_timestamp < 0.2:
             return self._previous_reading
         else:
