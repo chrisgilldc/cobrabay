@@ -195,14 +195,52 @@ class Range(SingleDetector):
         else:
             return 'ok'
 
+    @property
+    @only_if_ready
+    def vector(self):
+        # Only consider readings within the past 10s. This makes sure nothing bogus gets in here for wild readings.
+        readings = []
+        for reading in self._history:
+            if monotonic_ns() - reading[1] <= 10000000000:
+                readings.append(reading)
+        # print("Calculated readings: {}".format(readings))
+        i = 0
+        vectors = []
+        while i < len(readings):
+            try:
+                d = ( self._history[i][0] - self._history[i+1][0] )
+            except IndexError:
+                i +=1
+            else:
+                print("Calculated distance: {}".format(d))
+                t = Quantity(self._history[i+1][1] - self._history[i][1],'nanoseconds').to('seconds')
+                print("Calculated time: {}".format(t))
+                v = d/t
+                vectors.append(v)
+                print("Calculated velocity: {}".format(v))
+                i += 1
+        net_vector = mean(vectors)
+        if net_vector.magnitude == 0:
+            direction = 'still'
+            speed = net_vector
+        elif net_vector.magnitude > 0:
+            direction = 'forward'
+            speed = net_vector
+        elif net_vector.magnitude < 0:
+            # Make the speed positive, we'll report direction separately.
+            direction = 'reverse'
+            speed = net_vector * -1
+        return {'speed': speed, 'direction': direction}
+
     # Based on readings, is the vehicle in motion?
     @property
     @only_if_ready
     def motion(self):
-        # Get the value once. Will use either cached or uncached
-        value = self.value
-        # Compare the time between the most recent two readings. If it's too long, that probably means we've just
-        # started ranging, ie:
+        if self.vector['speed'] > 0:
+            return True
+        else:
+            return False
+
 
     # Gets called when the rangefinder has all settings and is being made ready for use.
     def _when_ready(self):
