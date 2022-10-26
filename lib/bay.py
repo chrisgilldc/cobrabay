@@ -1,19 +1,21 @@
 ####
 # Cobray Bay - The Bay!
 ####
+import time
+
 import pint.errors
 
 from .detector import Detector, Range, Lateral
 from pint import UnitRegistry, Quantity
 from PIL import Image, ImageDraw
+from time import monotonic
 from .detector import CB_VL53L1X
 import logging
 
 class Bay:
     def __init__(self,config,detectors):
-        # Set the Bay ID. This is static for testing, real config processing will come later.
         self._detectors = None
-        self.bay_id = 'bay1'
+        self.bay_id = config['id']
         try:
             self.bay_name = config['name']
         except KeyError:
@@ -23,6 +25,7 @@ class Bay:
         self._logger.setLevel(logging.DEBUG)
         # Log our initialization.
         self._logger.info("Bay '{}' initializing...".format(self.bay_id))
+        self._logger.debug("Bay received config: {}".format(config))
         # Create a unit registry.
         self._ureg = UnitRegistry
         # Set the unit system. Default to Metric. If units is in the config and is imperial, change it to imperial.
@@ -44,12 +47,14 @@ class Bay:
         for detector in self._detectors['lateral'].keys():
             self._logger.debug("\t\t{} - {}".format(detector, hex(self._detectors['lateral'][detector].i2c_address)))
 
-        # Set the display height. This is needed for some display calculations
-        self._matrix = {'width': 64, 'height': 32 }
-        self._display_som = "imperial"
         self._state = 'ready'
         self._position = {}
         self._quality = {}
+        # Dock timer.
+        self._dock_timer = {
+            'allowed': Quantity(config['park_time']).to('seconds').magnitude,
+            'mark': None
+        }
         self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
 
     # Imperative commands
@@ -107,18 +112,22 @@ class Bay:
     # How good is the parking job?
     @property
     def quality(self):
-        return self._quality
+        return { **self._quality['longitudinal'], **self._quality['lateral'] }
 
     @property
     def position(self):
-        self._scan_detectors()
-        return self._position
+        return { **self._position['longitudinal'], **self._position['lateral'] }
 
     # Get number of lateral detectors. This is used to pass to the display and set up layers correctly.
     @property
     def lateral_count(self):
         self._logger.debug("Lateral count requested. Lateral detectors: {}".format(self._detectors['lateral']))
         return len(self._detectors['lateral'])
+
+    # Public method to scan detectors.
+    # Right now this is a pass through, there may be further logic here in the future.
+    def scan(self):
+        self._scan_detectors()
 
     # Scans
     def _scan_detectors(self):
@@ -145,23 +154,17 @@ class Bay:
             # Now we can get the position and quality from the detector.
             self._position['lateral'][detector_name] = self._detectors['lateral'][detector_name].value.to(self._output_unit)
             self._quality['lateral'][detector_name] = self._detectors['lateral'][detector_name].quality
-        #     # Has the vehicle reached the intercept range for this lateral sensor?
-        #     # If not, we return "NI", Not Intercepted.
-        #     if self._position['lo'] <= self._detectors['lateral'][detector_name]['intercept']:
-        #         detector_value = self._detectors['lateral'][detector_name]['obj'].value
-        #             if isinstance(detector_value,str):
-        #             self._position['la'][detector_name] = 'BR'
-        #                 self._quality['la'][detector_name] = 'BR'
-        #             else:
-        #                 self._position['la'][detector_name] = detector_value.to(self._output_unit)
-        #                 self._quality['la'][detector_name] = self._detectors['lateral'][detector_name]['obj'].quality
-        #         else:
-        #             self._position['la'][detector_name] = 'NI'
-        #             self._quality['la'][detector_name] = 'NI'
-        #         i += 1
-        # else:
-        #     self._position['la'] = None
-        #     self._quality['la'] = None
+        # Update the dock timer.
+        if self._detectors['longitudinal'][self._selected_range].motion:
+            # If motion is detected, update the time mark to the current time.
+            self._logger.debug("Motion found, resetting dock timer.")
+            self._dock_timer['mark'] = time.monotonic()
+        else:
+            self._logger.debug("No motion found, checking for dock timer expiry.")
+            # No motion, check for completion
+            if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
+                self._logger.debug("Dock timer has expired, setting bay to occupied.")
+                self.state = 'occupied'
 
     @property
     def state(self):
@@ -181,18 +184,27 @@ class Bay:
         # Trap invalid bay states.
         if input not in ('docking','undocking','occupied','unoccupied','unavailable'):
             raise ValueError("{} is not a valid bay state.".format(input))
-        else:
-            self._state = input
+        self._logger.debug("Old state: {}, new state: {}".format(self._state,input))
         if input in ('docking','undocking') and self._state not in ('docking','undocking'):
-            self._logger.debug("Entering state {}".format(input))
+            self._logger.debug("Entering state: {}".format(input))
+            self._logger.debug("Start time: {}".format(monotonic()))
             self._logger.debug("Detectors: {}".format(self._detectors))
             # When entering docking or undocking state, start ranging on the sensors.
             self._detector_state('activate')
+            # Set the start time.
+            self._dock_timer['mark'] = monotonic()
         if input not in ('docking','undocking') and self._state in ('docking', 'undocking'):
+            self._logger.debug("Entering state: {}".format(input))
+            # Deactivate the detectors.
             self._detector_state('deactivate')
+            # Reset some variables.
+            self._dock_timer['mark'] = None
+        # Now store the state.
+        self._state = input
 
     # MQTT status methods. These generate payloads the core network handler can send upward.
     def mqtt_messages(self,verify=False):
+        # Initialize the outbound message list.
         outbound_messages = [] # topic, message, repease, topic_mappings
         # State message.
         outbound_messages.append(
@@ -201,38 +213,70 @@ class Bay:
         # Only generate  positioning messages if 1) we're  docking or undocking or 2)  a verify has been explicitly requested.
         if verify or self.state in ('docking','undocking'):
             outbound_messages.append(
-                {'topic_type': 'bay', 'topic': 'bay_position', 'message': self.position, 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
+                {'topic_type': 'bay', 'topic': 'bay_range_selected', 'message': self._selected_range, 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
             )
             outbound_messages.append(
-                {'topic_type': 'bay', 'topic': 'bay_quality', 'message': self.quality, 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
+                {'topic_type': 'bay',
+                 'topic': 'bay_position',
+                 'message': self.position,
+                 'repeat': False,
+                 'topic_mappings': {'bay_id': self.bay_id}}
             )
             outbound_messages.append(
-                {'topic_type': 'bay', 'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
+                {'topic_type': 'bay',
+                 'topic': 'bay_quality',
+                 'message': self.quality,
+                 'repeat': False,
+                 'topic_mappings': {'bay_id': self.bay_id}}
+            )
+            outbound_messages.append(
+                {'topic_type': 'bay',
+                 'topic': 'bay_occupied',
+                 'message': self.occupied,
+                 'repeat': False,
+                 'topic_mappings': {'bay_id': self.bay_id}}
+            )
+            outbound_messages.append(
+                {'topic_type': 'bay',
+                 'topic': 'bay_speed',
+                 'message': self._detectors['longitudinal'][self._selected_range].vector,
+                 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
+            )
+            outbound_messages.append(
+                {'topic_type': 'bay',
+                 'topic': 'bay_motion',
+                 'message': self._detectors['longitudinal'][self._selected_range].motion,
+                 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
+            ),
+            outbound_messages.append(
+                {'topic_type': 'bay',
+                 'topic': 'bay_dock_time',
+                 'message': self._dock_timer['allowed'] - ( monotonic() - self._dock_timer['mark'] ),
+                 'repeat': True,
+                 'topic_mappings': {'bay_id': self.bay_id}}
             )
         return outbound_messages
 
-    # Image making methods
+    # Send collect data needed to send to the display. This is synactically shorter than the MQTT messages.
+    def display_data(self):
+        return_data = {}
+        # Give only the range reading of the selected range sensor. The display will only use one of them.
+        return_data['range'] = self._position['longitudinal'][self._selected_range]
+        # The range quality band. This is used for color coding.
+        return_data['range_quality'] = self._quality['longitudinal'][self._selected_range]
+        # List for lateral state.
+        return_data['lateral'] = []
+        self._logger.debug("Using lateral order: {}".format(self._lateral_order))
+        # Assemble the lateral data with *closest first*.
+        # This will result in the display putting things together top down.
+        # Lateral ordering is determined by intercept range when bay is started up.
+        for lateral_detector in self._lateral_order:
+            return_data['lateral'].append({
+                'quality': self._quality['lateral'][lateral_detector],
+                'side': self._detectors['lateral'][lateral_detector].side }
+            )
+        return return_data
 
-    # Draws the image to be overlaid on the RGB Matrix
-    def image(self):
-        img = Image.new("RGB", (64,32))
-        im.rectangle()
-
-    def _frame(self,w,h):
-        img = Image.new("RGB", (w,h))
-        # Left box
-        img.rectangle((0,0),(3,h-4))
-        # Right box
-        img.rectangle((w-3,0),(3,h-4))
-
-    def _approach_strobe(self):
-        pass
-
-    def _range_text(self):
-        pass
-
-    def _lateral_markers(self):
-        pass
 
     # Method to be called when CobraBay it shutting down.
     def shutdown(self):
@@ -245,9 +289,11 @@ class Bay:
     def _detector_state(self,mode):
         if mode not in ('activate','deactivate'):
             raise ValueError("Bay can only set detector states to 'activate', or 'deactivate'")
+        self._logger.debug("Traversing detectors to {}".format(mode))
         # Traverse the dict looking for detectors that need activation.
         for direction in ('longitudinal','lateral'):
             for detector in self._detectors[direction]:
+                self._logger.debug("Changing detector {}".format(detector))
                 if isinstance(self._detectors[direction][detector],CB_VL53L1X):
                     if mode == 'activate':
                         self._detectors[direction][detector].activate()
@@ -292,7 +338,7 @@ class Bay:
             'longitudinal': {},
             'lateral': {}
         }
-        self._lateral_order = {}
+        lateral_order = {}
 
         config_options = {
             'longitudinal': ('offset','spread_park','bay_depth'),
@@ -318,37 +364,10 @@ class Bay:
                         except KeyError:
                             raise KeyError("Needed default value for {} but not defined!".format(item))
                 # # If we're processing lateral, add the intercept range to the lateral order dict.
-                # if direction == 'lateral':
-                #     self._lateral_order[Quantity(detector_config['intercept'])] = detector_config['detector']
+                if direction == 'lateral':
+                    lateral_order[detector_config['detector']] = Quantity(detector_config['intercept'])
                 # Append the object to the appropriate object store.
                 self._detectors[direction][detector_config['detector']] = detector_obj
-
-    # # Method to set up the range detector
-    # def _setup_range(self,config,detectors):
-    #     # Is the detector name specified.
-    #     try:
-    #         range_detector_name = config['range']['detector']
-    #     except KeyError:
-    #         raise KeyError("Detector is not defined for bay's range. This is required!")
-    #     # Try to get the detector.
-    #     try:
-    #         self._detectors['range'] = detectors[range_detector_name]
-    #     except KeyError:
-    #         raise KeyError("Provided detector name '{}' does not exist.".format(range_detector_name))
-    #     # Add the required range parameters.
-    #     self._logger.info("Setting range detector offset to: {}".format(config['range']['offset']))
-    #     self._detectors['range'].offset = config['range']['offset']
-    #     self._logger.info("Setting range detector bay depth to: {}".format(config['range']['bay_depth']))
-    #     self._detectors['range'].bay_depth = config['range']['bay_depth']
-    #     self._logger.info("Setting parking spread to: {}".format(config['range']['spread_park']))
-    #     self._detectors['range'].spread_park = config['range']['spread_park']
-    #     try:
-    #         self._logger.info("Setting range detector warn to: {}".format(config['range']['pct_warn']))
-    #         self._detectors['range'].bay_depth = config['range']['pct_warn']
-    #     except KeyError:
-    #         pass
-    #     try:
-    #         self._logger.info("Setting range detector warn to: {}".format(config['range']['pct_crit']))
-    #         self._detectors['range'].bay_depth = config['range']['pct_crit']
-    #     except KeyError:
-    #         pass
+        self._logger.debug("Now have lateral order: {}".format(lateral_order))
+        self._lateral_order = sorted(lateral_order, key=lateral_order.get)
+        self._logger.debug("Sorted lateral order: {}".format(self._lateral_order))
