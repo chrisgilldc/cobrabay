@@ -144,7 +144,11 @@ class VL53L1X(Sensor):
         if monotonic() - self._previous_timestamp < 0.2:
             return self._previous_reading
         else:
-            return Quantity(self._sensor_obj.distance, self._ureg.centimeter) # .plus_minus(2.5)
+            reading = self._sensor_obj.distance
+            if reading is None:
+                return None
+            else:
+                return Quantity(self._sensor_obj.distance, self._ureg.centimeter)
 
     # Method to find out if an address is on the I2C bus.
     def _addr_on_bus(self,i2c_address):
