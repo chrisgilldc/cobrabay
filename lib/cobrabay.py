@@ -12,7 +12,6 @@ import busio
 import board
 from digitalio import DigitalInOut
 from adafruit_aw9523 import AW9523
-from base64 import b64encode
 from io import BytesIO
 from pprint import PrettyPrinter
 
@@ -85,19 +84,21 @@ class CobraBay:
         # Basic checks passed. Good enough! Assign it.
         self.config = config
 
-        # Initial device state
-        self._device_state = 'on'
-        # Queue for outbound messages.
-        self._outbound_messages = []
-        # Queue the startup message.
-        self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'online'})
-
+        # Create the network object.
         self._logger.debug("Creating network object...")
         # Create Network object.
         self._network = Network(
             # Network gets the general config.
             config=self.config['global']
         )
+        self._logger.info('CobraBay: Connecting to network...')
+        # Connect to the network.
+        self._network.connect()
+
+        # Queue for outbound messages.
+        self._outbound_messages = []
+        # Queue the startup message.
+        self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'online'})
 
         self._logger.debug("Creating detectors...")
         # Create the detectors
@@ -118,9 +119,7 @@ class CobraBay:
         display_config['global'] = self.config['global']
         self._display = Display(display_config)
 
-        self._logger.info('CobraBay: Connecting to network...')
-        # Connect to the network.
-        self._network.connect()
+
 
         # Check for Syslog, if so, connect.
         if 'syslog' in config['global']:
@@ -238,10 +237,13 @@ class CobraBay:
             system_state['online'] = network_data['online']
             system_state['mqtt_status'] = network_data['mqtt_status']
 
-            try:
-                self._display.show_clock()
-            except:
-                pass
+            self._display.show_clock()
+            # Push out the image to MQTT.
+            self._outbound_messages.append(
+                {'topic_type': 'system',
+                 'topic': 'display',
+                 'message': self._display.current, 'repeat': True})
+
 
     # Start sensors and display to guide parking.
     def _dock(self,bay_id):
