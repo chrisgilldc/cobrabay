@@ -291,7 +291,9 @@ class Lateral(SingleDetector):
         # Make sure the history list is always five elements, so we don't just grow this ridiculously.
         self._history = self._history[:5]
         # Return that reading, minus the offset.
-        if self._history[0][0] < 0:
+        if self._range_reading > self._settings['intercept']:
+            return 'NI'
+        elif self._history[0][0] < 0:
             return "UR"
         elif self._history[0][0] >= Quantity("96 in"):
             return "BR"
@@ -317,6 +319,24 @@ class Lateral(SingleDetector):
     @property
     def ready(self):
         return self._ready
+
+    # The intercept distance of this lateral detector.
+    @property
+    def intercept(self):
+        return self._settings['intercept']
+
+    @intercept.setter
+    def intercept(self, input):
+        self._settings['intercept'] = self._convert_value(input)
+
+    # Take in range readings from the bay.
+    @property
+    def range_reading(self):
+        return self._range_reading
+
+    @range_reading.setter
+    def range_reading(self, input):
+        self._range_reading = input
 
     @property
     def spread_ok(self):
