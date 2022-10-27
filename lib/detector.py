@@ -2,7 +2,7 @@
 # CobraBay Detector
 ####
 
-from .sensor import VL53L1X as CB_VL53L1X
+from .sensors import CB_VL53L1X, TFMini
 from pint import UnitRegistry, Quantity
 from statistics import mean
 from time import monotonic_ns
@@ -168,6 +168,8 @@ class Range(SingleDetector):
     @property
     def value(self):
         # Read the sensor and put it at the start of the list, along with a timestamp.
+        value = self._sensor_obj.range
+        print("Read value from sensor: {}".format(value))
         self._history.insert(0, [self._sensor_obj.range, monotonic_ns()])
         # Make sure the history list is always five elements, so we don't just grow this ridiculously.
         self._history = self._history[:5]
