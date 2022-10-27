@@ -1,19 +1,60 @@
-#####
-# Cobra Bay Sensor - VL53L1X
-# This wraps the Adafruit libraries with additional functionality.
-#####
+####
+# Cobra Bay Sensors Module
+####
 
-from . import BaseSensor
+import logging
+import weakref
+from time import monotonic, sleep
+
 import board
 import busio
 from adafruit_aw9523 import AW9523
 from adafruit_vl53l1x import VL53L1X as af_VL53L1X
-from pint import UnitRegistry, Quantity
-from time import monotonic, sleep
-import weakref
-import logging
+from pint import Quantity
+from pint import UnitRegistry
+from .TFmini_I2C import TFminiI2C
 
-class VL53L1X(BaseSensor):
+
+class BaseSensor:
+    def __init__(self,board_options):
+        # Check for the Base I2C Sensors
+        required = ('i2c_bus','i2c_address')
+        for item in required:
+            if item not in board_options:
+                raise ValueError("Required board_option '{}' missing.".format(item))
+        # Create a logger
+        self._name = "{}-{}".format(type(self).__name__,hex(board_options['i2c_address']))
+        self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
+        self._logger.info("Initializing sensor...")
+
+        # Set the I2C bus and I2C Address
+        self._logger.debug("Setting I2C Properties...")
+        self._i2c_bus = board_options['i2c_bus']
+        self._i2c_address = board_options['i2c_address']
+
+        # Create a unit registry for the object.
+        self._ureg = UnitRegistry()
+
+        # Sensor should call this init and then extend with its own options.
+        # super().__init__(board_options)
+
+    # Override this class in specific implementations
+    def _setup_sensor(self,board_options):
+        pass
+
+    # Global properties. Since all supported sensors are I2C at the moment, these can be global.
+    @property
+    def i2c_bus(self):
+        return self._i2c_bus
+
+    @i2c_bus.setter
+    def i2c_bus(self,input):
+        if input not in (1,2):
+            raise ValueError("I2C Bus ID for Raspberry Pi must be 1 or 2, not {}".format(input))
+        else:
+            self._i2c_bus = input
+
+class CB_VL53L1X(BaseSensor):
     _i2c_address: int
     _i2c_bus: int
 
@@ -23,17 +64,18 @@ class VL53L1X(BaseSensor):
         # Call super.
         super().__init__(board_options)
         # Add self to instance list.
-        VL53L1X.instances.add(self)
+        self._enable_pin = None
+        CB_VL53L1X.instances.add(self)
         self._performance = {
             'max_range': Quantity('4000mm'),
             'min_range': Quantity('30mm')
         }
 
-    def _setup_sensor(self,board_options):
+    def _setup_sensor(self, board_options):
         # Set a default log level if not defined.
         try:
             self._log_level = logging.getLevelName(board_options['log_level'])
-        except:
+        except KeyError:
             # Default to warning.
             self._log_level = logging.WARNING
 
@@ -47,7 +89,7 @@ class VL53L1X(BaseSensor):
             raise
 
         # Check for required options in
-        options = ['i2c_bus','i2c_address','enable_board','enable_pin']
+        options = ['i2c_bus', 'i2c_address', 'enable_board', 'enable_pin']
         # Store the options.
         for item in options:
             if item not in board_options:
@@ -93,9 +135,10 @@ class VL53L1X(BaseSensor):
         return self._sensor_obj.timing_budget
 
     @timing_budget.setter
-    def timing_budget(self,input):
-        if int(input) not in (20,33,50,100,200,500):
-            raise ValueError("Requested timing budget {} not valid. Must be one of: 20,33,50,100,200 or 500".format(input))
+    def timing_budget(self, input):
+        if int(input) not in (20, 33, 50, 100, 200, 500):
+            raise ValueError("Requested timing budget {} not valid. "
+                             "Must be one of: 20,33,50,100,200 or 500".format(input))
         self._sensor_obj.timing_budget(int(input))
 
     @property
@@ -106,7 +149,7 @@ class VL53L1X(BaseSensor):
             return 'Long'
 
     @distance_mode.setter
-    def distance_mode(self,dm):
+    def distance_mode(self, dm):
         # Pre-checking the distance mode lets us toss an error before actually setting anything.
         if dm.lower() == 'short':
             dm = 1
@@ -131,7 +174,7 @@ class VL53L1X(BaseSensor):
                 return Quantity(self._sensor_obj.distance, self._ureg.centimeter)
 
     # Method to find out if an address is on the I2C bus.
-    def _addr_on_bus(self,i2c_address):
+    def _addr_on_bus(self, i2c_address):
         while not self._i2c.try_lock():
             pass
         found_addresses = self._i2c.scan()
@@ -141,18 +184,16 @@ class VL53L1X(BaseSensor):
         else:
             return False
 
-
-
     @property
     def i2c_address(self):
         return self._i2c_address
 
     @i2c_address.setter
     # Sets the address of the board. This presumes that we start from a place of all boards being shut off.
-    def i2c_address(self,i2c_address):
+    def i2c_address(self, i2c_address):
         # If it's in "0xYY" format, convert it to a base 16 int.
-        if isinstance(i2c_address,str):
-            i2c_address = int(i2c_address,base=16)
+        if isinstance(i2c_address, str):
+            self._i2c_address = int(i2c_address, base=16)
         else:
             self._i2c_address = i2c_address
 
@@ -161,7 +202,7 @@ class VL53L1X(BaseSensor):
         return self._enable_board
 
     @enable_board.setter
-    def enable_board(self,enable_board):
+    def enable_board(self, enable_board):
         self._enable_board = enable_board
 
     @property
@@ -174,12 +215,12 @@ class VL53L1X(BaseSensor):
         # If enable_board is set to 0, then we try this on the Pi itself.
         if self.enable_board == 0:
             # Check to see if this is just a pin number.
-            if isinstance(enable_pin,int):
+            if isinstance(enable_pin, int):
                 pin_name = 'D' + str(enable_pin)
             else:
                 pin_name = enable_pin
             try:
-                enable_pin_obj = DigitalInOut(getattr(self._board,pin_name))
+                enable_pin_obj = DigitalInOut(getattr(self._board, pin_name))
             except:
                 raise
             else:
@@ -188,7 +229,7 @@ class VL53L1X(BaseSensor):
             # Otherwise, treat enable_board as the address of an AW9523.
             # Note that reset=False is very import, otherwise creating this object will reset all other pins to off!
             try:
-                aw = AW9523(self._i2c,self.enable_board,reset=False)
+                aw = AW9523(self._i2c, self.enable_board, reset=False)
             except:
                 raise
             # Get the pin from the AW9523.
@@ -199,5 +240,18 @@ class VL53L1X(BaseSensor):
     def shutdown(self):
         # Stop from ranging
         self.stop_ranging()
-        # Close the object.
-        self._sensor_obj.close()
+
+class TFMini(BaseSensor):
+    def __init__(self, board_options):
+        super().__init__(board_options)
+        self._performance = {
+            'max_range': Quantity('12m'),
+            'min_range': Quantity('0.3m')
+        }
+
+    def _setup_sensor(self, board_options):
+        self.max_range = Quantity('12m')
+        options = ['i2c_bus','i2c_address']
+        for item in options:
+            if item not in board_options:
+                raise ValueError("Required board_option '{}' missing.".format(item))

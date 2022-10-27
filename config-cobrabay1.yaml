@@ -25,64 +25,71 @@ detectors:
       enable_board: 0
       enable_pin: 25
       timing: 200ms
-  front:
-    type: Lateral
-    name: Front
+  rangeXL:
+    type: Range
+    name: RangeXL
     sensor:
-      type: VL53L1X
+      type: TFMini
       i2c_bus: 1
-      i2c_address: 0x33
-      enable_board: 0x58
-      enable_pin: 3
-      distance_mode: medium
-      timing: 200ms
-  middle:
-    type: Lateral
-    name: Middle
-    sensor:
-      type: VL53L1X
-      i2c_bus: 1
-      i2c_address: 0x32
-      enable_board: 0x58
-      enable_pin: 2
-      distance_mode: medium
-      timing: 200ms
-  rear:
-    type: Lateral
-    name: Rear
-    sensor:
-      type: VL53L1X
-      i2c_bus: 1
-      i2c_address: 0x31
-      enable_board: 0x58
-      enable_pin: 1
-      distance_mode: medium
-      timing: 200ms
-bay:
-  active: True
-  id: bay1  # ID of the bay.
-  name: "Bay 1"  # Name of the bay for use in MQTT messages.
-  part_time: 2 min  # How long until a stationary vehicle is counted as parked.
-  longitudinal:
-    defaults:
-      offset: 42 in
-      spread_park: 2 in
-      bay_depth: 276 in
-    # Longitudinal detectors are those the vehicles more towards or away from.
-    detectors:
-      - detector: range
-  lateral:
-    # Lateral detectors are those that run perpendicular to the path of vehicle's travel.
-    defaults:
-      offset: 24 in
-      spread_ok: 1 in
-      spread_warn: 3 in
-      spread_crit: 5 in
-      side: R
-    detectors:
-      - detector: front
-        intercept: 75 in
-      - detector: middle
-        intercept: 100 in
-      - detector: rear
-        intercept: 125 in
+      i2c_address: 0x2f
+#  front:
+#    type: Lateral
+#    name: Front
+#    sensor:
+#      type: VL53L1X
+#      i2c_bus: 1
+#      i2c_address: 0x33
+#      enable_board: 0x58
+#      enable_pin: 3
+#      distance_mode: medium
+#      timing: 200ms
+#  middle:
+#    type: Lateral
+#    name: Middle
+#    sensor:
+#      type: VL53L1X
+#      i2c_bus: 1
+#      i2c_address: 0x32
+#      enable_board: 0x58
+#      enable_pin: 2
+#      distance_mode: medium
+#      timing: 200ms
+#  rear:
+#    type: Lateral
+#    name: Rear
+#    sensor:
+#      type: VL53L1X
+#      i2c_bus: 1
+#      i2c_address: 0x31
+#      enable_board: 0x58
+#      enable_pin: 1
+#      distance_mode: medium
+#      timing: 200ms
+#bay:
+#  active: True
+#  id: bay1  # ID of the bay.
+#  name: "Bay 1"  # Name of the bay for use in MQTT messages.
+#  park_time: 2 min  # How long until a stationary vehicle is counted as parked.
+#  longitudinal:
+#    defaults:
+#      offset: 42 in
+#      spread_park: 2 in
+#      bay_depth: 276 in
+#    # Longitudinal detectors are those the vehicles more towards or away from.
+#    detectors:
+#      - detector: range
+#  lateral:
+#    # Lateral detectors are those that run perpendicular to the path of vehicle's travel.
+#    defaults:
+#      offset: 24 in
+#      spread_ok: 1 in
+#      spread_warn: 3 in
+#      spread_crit: 5 in
+#      side: R
+#    detectors:
+#      - detector: front
+#        intercept: 75 in
+#      - detector: middle
+#        intercept: 100 in
+#      - detector: rear
+#        intercept: 125 in
