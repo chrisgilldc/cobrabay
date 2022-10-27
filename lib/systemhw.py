@@ -3,13 +3,13 @@
 #
 # Gets System Hardware Status
 ####
-from typing import Dict, Union, Any
+
+from math import floor
 
 import psutil
 from gpiozero import CPUTemperature
 from pint import UnitRegistry
-from math import ceil, floor
-
+from rpi_bad_power import new_under_voltage
 
 class PiStatus:
     def __init__(self):
@@ -25,6 +25,8 @@ class PiStatus:
             return self._cpu_temp()
         elif metric == 'mem_info':
             return self._mem_info()
+        elif metric == 'undervoltage':
+            return self._undervoltage()
         else:
             raise ValueError('Not a valid metric')
 
@@ -42,3 +44,13 @@ class PiStatus:
         }
         return_dict['mem_pct'] = self._Q(1 - floor(return_dict['mem_avail']) / return_dict['mem_total'], self._ureg.percent)
         return return_dict
+
+    def _undervoltage(self):
+        under_voltage = new_under_voltage()
+        if under_voltage is None:
+            return "Not Supported"
+        elif under_voltage.get():
+            return "Under voltage detected"
+        else:
+            return "Voltage normal"
+

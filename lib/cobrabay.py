@@ -289,6 +289,9 @@ class CobraBay:
             {'topic_type': 'system', 'topic': 'cpu_temp', 'message': self._pistatus.status('cpu_temp'), 'repeat': False})
         self._outbound_messages.append(
             {'topic_type': 'system', 'topic': 'mem_info', 'message': self._pistatus.status('mem_info'), 'repeat': False})
+        self._outbound_messages.append(
+            {'topic_type': 'system', 'topic': 'undervoltage', 'message': self._pistatus.status('undervoltage'), 'repeat': False}
+        )
 
     def undock(self):
         self._logger.info('CobraBay: Undock not yet implemented.')

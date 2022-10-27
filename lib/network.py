@@ -159,6 +159,18 @@ class Network:
                         'json_attributes_topic': 'cobrabay/' + self._client_id + '/mem_info'
                     }
                 },
+                'undervoltage': {
+                    'topic': 'cobrabay/' + self._client_id + '/undervoltage',
+                    'previous_state': {},
+                    'ha_discovery': {
+                        'name': '{} Undervoltage'.format(self._system_name),
+                        'type': 'binary_sensor',
+                        'entity': '{}_undervoltage'.format(self._system_name.lower()),
+                        'payload_on': 'Under voltage detected',
+                        'payload_off': 'Voltage normal',
+                        'icon': 'mdi:lightning-bolt'
+                    }
+                },
                 'device_command': {
                     'topic': 'cobrabay/' + self._client_id + '/cmd',
                     'enabled': False,
@@ -178,16 +190,14 @@ class Network:
             },
             'bay': {
                 'bay_occupied': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/occupied',
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/state',
                     'previous_state': 'Unknown',
-                    'enabled': True,
                     'ha_discovery': {
                         'name': '{0[bay_name]} Occupied',
                         'type': 'binary_sensor',
                         'entity': '{0[bay_id]}_occupied',
                         'class': 'occupancy',
-                        'payload_on': 'occupied',
-                        'payload_off': 'vacant'
+                        'value_template': "{{% if value_json.state == 'occupied' %}} ON {{% else %}} OFF {{% endif %}}"
                     }
                 },
                 'bay_state': {
