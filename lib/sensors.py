@@ -34,13 +34,10 @@ class BaseSensor:
 
         # Create a unit registry for the object.
         self._ureg = UnitRegistry()
+        self._previous_timestamp = monotonic()
 
         # Sensor should call this init and then extend with its own options.
         # super().__init__(board_options)
-
-    # Override this class in specific implementations
-    def _setup_sensor(self,board_options):
-        pass
 
     # Global properties. Since all supported sensors are I2C at the moment, these can be global.
     @property
@@ -53,6 +50,10 @@ class BaseSensor:
             raise ValueError("I2C Bus ID for Raspberry Pi must be 1 or 2, not {}".format(input))
         else:
             self._i2c_bus = input
+
+    @property
+    def range(self):
+        raise NotImplementedError("Range should be overridden by specific sensor class.")
 
 class CB_VL53L1X(BaseSensor):
     _i2c_address: int
@@ -108,7 +109,7 @@ class CB_VL53L1X(BaseSensor):
         self.measurement_time = Quantity(board_options['timing']).to('microseconds').magnitude
         self.distance_mode = 'long'
         self._previous_reading = self._sensor_obj.distance
-        self._previous_timestamp = monotonic()
+
         self._sensor_obj.stop_ranging()
 
     def start_ranging(self):
@@ -171,7 +172,7 @@ class CB_VL53L1X(BaseSensor):
             if reading is None:
                 return None
             else:
-                return Quantity(self._sensor_obj.distance, self._ureg.centimeter)
+                return Quantity(reading, self._ureg.centimeter)
 
     # Method to find out if an address is on the I2C bus.
     def _addr_on_bus(self, i2c_address):
@@ -249,9 +250,25 @@ class TFMini(BaseSensor):
             'min_range': Quantity('0.3m')
         }
 
-    def _setup_sensor(self, board_options):
-        self.max_range = Quantity('12m')
-        options = ['i2c_bus','i2c_address']
-        for item in options:
-            if item not in board_options:
-                raise ValueError("Required board_option '{}' missing.".format(item))
+        # Create the sensor object.
+        self._sensor_obj = TFminiI2C(self.i2c_bus, self._i2c_address)
+        self._sensor_obj.setUnit(0x01)  # Make sure we're set to centimeters.
+
+    # This sensor doesn't need an enable, do nothing.
+    def enable(self):
+        return True
+
+    # Likewise, we don't need to disable, do nothing.
+    def disable(self):
+        return True
+
+    @property
+    def range(self):
+        if monotonic() - self._previous_timestamp < 0.2:
+            return self._previous_reading
+        else:
+            reading = self._sensor_obj.readDistance()
+            if reading is None:
+                return None
+            else:
+                return Quantity(reading, self._ureg.centimeter)
