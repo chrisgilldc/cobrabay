@@ -1,13 +1,9 @@
-####
-# Cobra Bay - Sensor
-#
-# Abstract class for a hardware sensor.
-# Supports:
-#  - VL53L1X sensor
-#  - "Synthetic" sensor library for testing
-####
+#####
+# Cobra Bay Sensor - VL53L1X
+# This wraps the Adafruit libraries with additional functionality.
+#####
 
-import logging
+from . import BaseSensor
 import board
 import busio
 from adafruit_aw9523 import AW9523
@@ -15,19 +11,9 @@ from adafruit_vl53l1x import VL53L1X as af_VL53L1X
 from pint import UnitRegistry, Quantity
 from time import monotonic, sleep
 import weakref
+import logging
 
-class Sensor:
-    def __init__(self,board_options):
-        # Each class should implement its own board setup method.
-        self._setup_sensor(board_options)
-        # Create a unit registry for the object.
-        self._ureg = UnitRegistry()
-
-    # Override this class in specific implementations
-    def _setup_sensor(self,board_options):
-        pass
-
-class VL53L1X(Sensor):
+class VL53L1X(BaseSensor):
     _i2c_address: int
     _i2c_bus: int
 
@@ -38,8 +24,10 @@ class VL53L1X(Sensor):
         super().__init__(board_options)
         # Add self to instance list.
         VL53L1X.instances.add(self)
-        # Flag for setting up addresses.
-        self._addr_set = False
+        self._performance = {
+            'max_range': Quantity('4000mm'),
+            'min_range': Quantity('30mm')
+        }
 
     def _setup_sensor(self,board_options):
         # Set a default log level if not defined.
@@ -49,10 +37,6 @@ class VL53L1X(Sensor):
             # Default to warning.
             self._log_level = logging.WARNING
 
-        # Import libraries needed by the VL53L1X.
-        import board
-        import busio
-
         # Create a board object we can reference.
         self._board = board
 
@@ -61,10 +45,6 @@ class VL53L1X(Sensor):
             self._i2c = busio.I2C(board.SCL, board.SDA)
         except:
             raise
-
-        # Set the maximum ranging distance to the theoretical max. This will be compared to the bay distance to limit
-        # readings
-        self.max_range = Quantity('4m')
 
         # Check for required options in
         options = ['i2c_bus','i2c_address','enable_board','enable_pin']
@@ -161,17 +141,7 @@ class VL53L1X(Sensor):
         else:
             return False
 
-    # Properties
-    @property
-    def i2c_bus(self):
-        return self._i2c_bus
 
-    @i2c_bus.setter
-    def i2c_bus(self,bus_id):
-        if bus_id not in (1,2):
-            raise ValueError("I2C Bus ID for Raspberry Pi must be 1 or 2, not {}".format(bus_id))
-        else:
-            self._i2c_bus = bus_id
 
     @property
     def i2c_address(self):
@@ -231,6 +201,3 @@ class VL53L1X(Sensor):
         self.stop_ranging()
         # Close the object.
         self._sensor_obj.close()
-
-# class Synth(Sensor):
-# from .synthsensor import SynthSensor
