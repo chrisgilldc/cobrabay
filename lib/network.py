@@ -21,12 +21,12 @@ from .version import __version__
 
 class Network:
     def __init__(self, config):
-        # Save the config
-        self._config = config
-        # Create the logger.
+        # Get our settings.
+        self._settings = config.network()
+        # Set up logger.
         self._logger = logging.getLogger("CobraBay").getChild("Network")
-        self._logger.setLevel(logging.DEBUG)
-        self._logger.info('Initializing...')
+        self._logger.setLevel(config.get_loglevel('network'))
+        self._logger.info("Network initializing...")
 
         try:
             from secrets import secrets
@@ -35,11 +35,8 @@ class Network:
             self._logger.error('Network: No secrets.py file, cannot get connection details.')
             raise
 
-        if self._config['units'].lower() == "imperial":
-            self._unit_system = "imperial"
-        else:
-            self._unit_system = "metric"
-        self._cv = Convertomatic(self._unit_system)
+        # Create a convertomatic instance.
+        self._cv = Convertomatic(self._settings['units'])
 
         # Find a MAC to use as client_id. Wireless is preferred, but if we don't have a wireless interface, fall back on
         # the ethernet interface.
@@ -54,21 +51,8 @@ class Network:
                     self._logger.info("Assigning Client ID {} from interface {}".format(self._client_id, interface))
                     break
 
-        # Initialize the system name
-        self._system_name = config['system_name']
         # Initialize the MQTT connected variable.
         self._mqtt_connected = False
-
-        # Set homeassistant integration state.
-        self._logger.debug("Config file HA setting: {}".format(config['homeassistant']))
-        try:
-            self._logger.debug("Setting Home Assistant true.")
-            self._homeassistant = config['homeassistant']
-
-        except:
-            self._logger.debug("Setting Home Assistant false.")
-            self._homeassistant = False
-        self._logger.debug("Home Assistant setting: {}".format(self._homeassistant))
 
         # Current device state. Will get updated every time we're polled.
         self._device_state = 'unknown'
@@ -113,9 +97,9 @@ class Network:
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
-                        'name': '{} Connectivity'.format(self._system_name),
+                        'name': '{} Connectivity'.format(self._settings['system_name']),
                         'type': 'binary_sensor',
-                        'entity': '{}_connectivity'.format(self._system_name.lower()),
+                        'entity': '{}_connectivity'.format(self._settings['system_name'].lower()),
                         'device_class': 'connectivity',
                         'payload_on': 'online',
                         'payload_off': 'offline'
@@ -126,9 +110,9 @@ class Network:
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
-                        'name': '{} CPU Use'.format(self._system_name),
+                        'name': '{} CPU Use'.format(self._settings['system_name']),
                         'type': 'sensor',
-                        'entity': '{}_cpu_pct'.format(self._system_name.lower()),
+                        'entity': '{}_cpu_pct'.format(self._settings['system_name'].lower()),
                         'unit_of_measurement': '%',
                         'icon': 'mdi:chip'
                     }
@@ -138,9 +122,9 @@ class Network:
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
-                        'name': '{} CPU Temperature'.format(self._system_name),
+                        'name': '{} CPU Temperature'.format(self._settings['system_name']),
                         'type': 'sensor',
-                        'entity': '{}_cpu_temp'.format(self._system_name.lower()),
+                        'entity': '{}_cpu_temp'.format(self._settings['system_name'].lower()),
                         'device_class': 'temperature',
                         'unit_of_measurement': self._uom('temp')
                     }
@@ -150,9 +134,9 @@ class Network:
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
-                        'name': '{} Memory Use'.format(self._system_name),
+                        'name': '{} Memory Use'.format(self._settings['system_name']),
                         'type': 'sensor',
-                        'entity': '{}_mem_info'.format(self._system_name.lower()),
+                        'entity': '{}_mem_info'.format(self._settings['system_name'].lower()),
                         'value_template': "{{{{ value_json.mem_pct }}}}",
                         'unit_of_measurement': '%',
                         'icon': 'mdi:memory',
@@ -163,9 +147,9 @@ class Network:
                     'topic': 'cobrabay/' + self._client_id + '/undervoltage',
                     'previous_state': {},
                     'ha_discovery': {
-                        'name': '{} Undervoltage'.format(self._system_name),
+                        'name': '{} Undervoltage'.format(self._settings['system_name']),
                         'type': 'binary_sensor',
-                        'entity': '{}_undervoltage'.format(self._system_name.lower()),
+                        'entity': '{}_undervoltage'.format(self._settings['system_name'].lower()),
                         'payload_on': 'Under voltage detected',
                         'payload_off': 'Voltage normal',
                         'icon': 'mdi:lightning-bolt'
@@ -181,9 +165,9 @@ class Network:
                     'topic': 'cobrabay/' + self._client_id + '/display',
                     'previous_state': {},
                     'ha_discovery': {
-                        'name': '{} Display'.format(self._system_name),
+                        'name': '{} Display'.format(self._settings['system_name']),
                         'type': 'camera',
-                        'entity': '{}_display'.format(self._system_name.lower()),
+                        'entity': '{}_display'.format(self._settings['system_name'].lower()),
                         'encoding': 'b64'
                     }
                 },
@@ -300,7 +284,7 @@ class Network:
         self._bay_registry[discovery_info['bay_id']] = discovery_info
         self._logger.debug("Have registered new bay info: {}".format(self._bay_registry[discovery_info['bay_id']]))
         # If Home Assistant is enabled, and we're already connected, run just the Bay discovery.
-        if self._mqtt_connected and self._homeassistant:
+        if self._mqtt_connected and self._settings['homeassistant']:
             self._logger.debug("Running HA discovery for bay {}".format(discovery_info['bay_id']))
             self._ha_discovery_bay(discovery_info['bay_id'])
 
@@ -477,7 +461,7 @@ class Network:
                         self._logger.error(e, exc_info=True)
 
         # Send a discovery message and an online notification.
-        if self._homeassistant:
+        if self._settings['homeassistant']:
             self._ha_discovery()
         self._send_online()
         # Set the internal MQTT tracker to True. Surprisingly, the client doesn't have a way to track this itself!
@@ -508,7 +492,7 @@ class Network:
         self._logger.debug("HA Discovery has been called.")
         # Build the device JSON to include in other updates.
         self._device_info = dict(
-            name=self._system_name,
+            name=self._settings['system_name'],
             identifiers=[self._client_id],
             suggested_area='Garage',
             manufacturer='ConHugeCo',
@@ -538,7 +522,6 @@ class Network:
                             fields={'bay_id': bay_id, 'bay_name': bay_name})
         for detector in self._bay_registry[bay_id]['detectors']:
             for entity in ('bay_position','bay_quality'):
-                print(entity)
                 self._ha_create(
                     topic_type='bay',
                     topic_name=entity,
@@ -609,7 +592,7 @@ class Network:
     # Helper method to determine the correct unit of measure to use. When we have reported sensor units, we use
     # this method to ensure the correct unit is being put in.
     def _uom(self, unit_type):
-        system = self._config['units']
+        system = self._settings['units']
         if unit_type == 'length':
             if system == 'imperial':
                 uom = "in"

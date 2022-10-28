@@ -45,92 +45,15 @@ class CBConfig():
         # Open the current config file and suck it into a staging variable.
         staging_yaml = self._open_yaml(self._config_file)
         # Do a formal validation here? Probably!
-        # Should we reset sensors to their defined addresses and validate while loading?
-        # This should probably *only* be done during startup.
-        if reset_sensors:
-            self._reset_sensors(staging_yaml)
-
-        # We're good, so assign the staging to the real config.
-        self._config = staging_yaml
-
-    # Scan the configuration, reset VL53L1X sensors to their assigned addresses.
-    def _reset_sensors(self,config):
-        # Call the method that traverses and shuts off all defined GPIO pins and boards.
-        self._gpio_shutoff(config['detectors'])
-        # Things should be off, now we can bring things up at the correct address!
-        for detector_name in config['detectors']:
-            # Is it a single-sensor detector?
-            if 'sensor' in config['detectors'][detector_name].keys():
-                if config['detectors'][detector_name]['sensor']['type'] == 'VL53L1X':
-                    self._set_vl53l1x_addr(
-                        i2c_bus=config['detectors'][detector_name]['sensor']['i2c_bus'],
-                        i2c_address=config['detectors'][detector_name]['sensor']['i2c_address'],
-                        enable_board=config['detectors'][detector_name]['sensor']['enable_board'],
-                        enable_pin=config['detectors'][detector_name]['sensor']['enable_pin'],
-                    )
-
-    # Set the address for a specific VL53L1X
-    @staticmethod
-    def _set_vl53l1x_addr(i2c_bus,i2c_address,enable_board,enable_pin):
-        i2c = busio.I2C(board.SCL, board.SDA)
-        # Get pins directly on the Pi.
-        if enable_board == 0:
-            enable_pin_name = 'D' + str(enable_pin)
-            enable_pin_obj = DigitalInOut(getattr(board, enable_pin_name))
+        try:
+            validated_yaml = self._validate(staging_yaml)
+        except:
+            self._logger.warning("Could not validate config file. Will not load.")
         else:
-            # Get pin on a remote AW9523 board
-            aw = AW9523(i2c, enable_board, reset=False)
-            enable_pin_obj = aw.get_pin(enable_pin)
-        # Switch to an output and turn on. This will enable the VL53L1X.
-        enable_pin_obj.switch_to_output(value=True)
-        # Wait 2s for the device to stabilize
-        sleep(1)
-        # Create a sensor object that opens up on the default address.
-        sensor = VL53L1X(i2c, 0x29)
-        print("Using enable pin {} to set device to address {}".format(enable_pin,i2c_address))
-        # Open the object.
-        sensor.set_address(i2c_address)
-        del(sensor)
-        del(enable_pin_obj)
-
-    # Shuts off all GPIO pins in the detector config.
-    def _gpio_shutoff(self,detectors):
-        processed_boards = []
-        processed_pins = []
-        i2c_bus = busio.I2C(board.SCL, board.SDA)
-        for detector_name in detectors:
-            self._logger.debug("Checking detector: {}".format(detector_name))
-            eb = detectors[detector_name]['sensor']['enable_board']
-            # Board "0" is used to mark the Pi. We can't turn off *all* Pi pins, so dig in and check.
-            if eb == 0:
-                self._logger.debug("Detector uses GPIO pin on-board the Pi.")
-                pin_number = detectors[detector_name]['sensor']['enable_pin']
-                pin_name = 'D' + str(pin_number)
-                pin = DigitalInOut(getattr(board, pin_name))
-                pin.switch_to_output(value=False)
-                pin.value = False
-                processed_pins.append(pin_number)
-            # Otherwise, AW9523, so check and access.
-            else:
-                aw_addr = detectors[detector_name]['sensor']['enable_board']
-                if aw_addr in processed_boards:
-                    self._logger.debug(
-                        "Detector {} uses AW9523 at address {}, already processed.".format(detector_name,
-                                                                                           aw_addr))
-                    # If this board has already been processed, no need to do it again.
-                    break
-                # The AW9523 has 16 pins, 0-15, so do them all.
-                aw = AW9523(i2c_bus, address=aw_addr)
-                for i in range(15):
-                    self._logger.debug("Shutting off {}, pin {}".format(aw_addr, i))
-                    pin = aw.get_pin(i)
-                    pin.switch_to_output(value=False)
-                    pin.value = False
-                processed_boards.append(aw_addr)
-                # Nuke the AW9523 device.
-                del (aw)
-        # Nuke the I2C Bus object so we don't have conflicts later.
-        del (i2c_bus)
+            self._logger.info("Config file validated. Loading.")
+            self._logger.debug(validated_yaml)
+            # We're good, so assign the staging to the real config.
+            self._config = validated_yaml
 
     @property
     def config_file(self):
@@ -159,6 +82,14 @@ class CBConfig():
                 config_yaml = yaml.safe_load(config_file_handle)
         return config_yaml
 
+    # Main validator.
+    def _validate(self,staging_yaml):
+        # Check for the main sections.
+        for section in ('system','display','detectors','bay'):
+            if section not in staging_yaml.keys():
+                raise KeyError("Required section {} not in config file.".format(section))
+        return staging_yaml
+
     def _validate_basic(self):
         pass
 
@@ -166,21 +97,35 @@ class CBConfig():
         pass
 
     # Method to let modules get their proper logging levels.
-    def get_loglevel(self,module):
+    def get_loglevel(self, module):
         if 'logging' not in self._config['system']:
             # If there's no logging section at all, return info.
-            return logging.INFO
+            self._logger.error("No logging section in config, using INFO as default.")
+            return "INFO"
         else:
             try:
                 result = logging.getLevelName(self._config['system']['logging']['default_level'])
             except KeyError:
                 # If default_level wasn't defined (which is strange!), return info as default.
-                return logging.INFO
+                self._logger.error("No default logging level defined externally, using INFO")
+                return "INFO"
             if module in self._config['system']['logging']:
-                result = logging.getLevelName(self._config['system']['logging'][module])
-                return result
+                requested_level = self._config['system']['logging'][module].lower()
+                if requested_level == "debug":
+                    return "DEBUG"
+                elif requested_level == "info":
+                    return "INFO"
+                elif requested_level == "warning":
+                    return "WARNING"
+                elif requested_level == "error":
+                    return "ERROR"
+                elif requested_level == "critical":
+                    return "CRITICAL"
+                else:
+                    self._logger.error("Module {} had unknown level {}. Using INFO instead.".format(module,requested_level))
+                    return "INFO"
             else:
-                return logging.INFO
+                return "INFO"
 
     # Return a settings dict to be used for the Display module.
     def display(self):
@@ -201,4 +146,17 @@ class CBConfig():
         config_dict['mqtt_image'] = self._config['display']['mqtt_image']
         config_dict['mqtt_update_interval'] = Quantity(self._config['display']['mqtt_update_interval'])
         config_dict['core_font'] = 'fonts/OpenSans-Light.ttf'
+        return config_dict
+
+    # Return a settings dict to be used for the Network module.
+    def network(self):
+        config_dict = {}
+        config_dict['units'] = self._config['system']['units']
+        config_dict['system_name'] = self._config['system']['system_name']
+        try:
+            config_dict['homeassistant'] = self._config['system']['homeassistant']
+        except KeyError:
+            config_dict['homeassistant'] = False
+
+
         return config_dict

@@ -24,70 +24,39 @@ class CobraBay:
         # Register the exit handler.
         # atexit.register(self.system_exit)
 
+        # Create the master logger. All modules will hang off this.
+        self._master_logger = logging.getLogger("CobraBay")
+        # Default to INFO level.
+        self._master_logger.setLevel(logging.DEBUG)
+        # Set up console handling.
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        basic_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        console_handler.setFormatter(basic_formatter)
+        self._master_logger.addHandler(console_handler)
+        # Create a "core" logger, for just this module.
+        self._logger = logging.getLogger("CobraBay").getChild("core")
+
+        # Drop a message to
+        self._logger.info("Initializing...")
+
         # Create a config object.
         self._cbconfig = CBConfig(reset_sensors=True)
+        # Reset our own level based on the configuration.
+        self._logger.setLevel(self._cbconfig.get_loglevel("core"))
 
-        config = self._cbconfig._config
+        # Put the raw config in a variable, this is a patch.
+        self.config = self._cbconfig._config
 
         # Create the object for checking hardware status.
+        self._logger.debug("Creating Pi hardware monitor...")
         self._pistatus = PiStatus()
-
-        # Set up Logging.
-        logging_config_dict = {
-            'version': 1,
-            'disable_existing_loggers': False,
-            'handlers': {
-                'debug_console_handler': {
-                    'level': 'DEBUG',
-                    'formatter': 'info',
-                    'class': 'logging.StreamHandler',
-                    'stream': 'ext://sys.stdout'
-                }
-            },
-            'formatters': {
-                'info': {
-                    'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    'datefmt': '%Y-%m-%d %H:%M:%S'
-                }
-            },
-            'loggers': {
-                '': {
-                    'level': 'DEBUG',
-                    'handlers': ['debug_console_handler']
-                }
-            }
-        }
-        self._core_logger = logging_dictConfig(logging_config_dict)
-
-        # Master logger takes all log levels and runs them through the same formatter and
-        self._core_logger = logging.Logger('master')
-        self._core_logger.setLevel(logging.DEBUG)
-        # Create a formatter
-        formatter = logging.Formatter()
-        # Create a basic console handler.
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        # syslog_handler = logging.handlers.SysLogHandler()
-        # syslog_handler.setFormatter(formatter)
-        # self._logger.addHandler(syslog_handler)
-        self._core_logger.addHandler(console_handler)
-        # Create a logger for this module.
-        self._logger = logging.Logger('master').getChild(__name__)
-        self._logger.setLevel(logging.DEBUG)
-
-        self._logger.info('CobraBay: CobraBay Initializing...')
-
-        # Basic checks passed. Good enough! Assign it.
-        self.config = config
 
         # Create the network object.
         self._logger.debug("Creating network object...")
         # Create Network object.
-        self._network = Network(
-            # Network gets the general config.
-            config=self.config['system']
-        )
-        self._logger.info('CobraBay: Connecting to network...')
+        self._network = Network(config=self._cbconfig)
+        self._logger.info('Connecting to network...')
         # Connect to the network.
         self._network.connect()
 
@@ -114,26 +83,6 @@ class CobraBay:
         # display_config = self.config['display']
         # display_config['system'] = self.config['system']
         self._display = Display(self._cbconfig)
-
-
-
-        # Check for Syslog, if so, connect.
-        if 'syslog' in config['system']:
-            # try:
-            self._logger.info("Attempting to add Syslog handler to {} {} via {}".
-                              format(config['system']['syslog']['host'],
-                                     config['system']['syslog']['facility'],
-                                     config['system']['syslog']['protocol']))
-            from logging.handlers import SysLogHandler
-            try:
-                self.syslog = SysLogHandler(
-                    address=config['system']['syslog']['host'],
-                    facility=config['system']['syslog']['facility'])
-                    # protocol=config['system']['syslog']['protocol'])
-            except Exception as e:
-                self._logger.error("Could not set up Syslog logging: {}".format(e))
-            else:
-                self._logger.addHandler(self.syslog)
 
         self._logger.info('CobraBay: Initialization complete.')
 
@@ -240,6 +189,8 @@ class CobraBay:
     # Start sensors and display to guide parking.
     def _dock(self,bay_id):
         self._logger.info('Beginning dock.')
+        # Wipe the post_action dict.
+        self._post_action = {}
 
         # Set up the displays lateral layers.
         self._logger.info('Creating lateral layers.')

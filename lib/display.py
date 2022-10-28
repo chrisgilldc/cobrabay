@@ -22,7 +22,7 @@ class Display:
         # Get a logger!
         self._logger = logging.getLogger("CobraBay").getChild("Display")
         self._logger.setLevel(config.get_loglevel('display'))
-        self._logger.info("Creating Display...")
+        self._logger.info("Display initializing...")
         # Initialize the internal settings.
         self._settings = config.display()
         self._logger.info("Now have settings: {}".format(self._settings))
