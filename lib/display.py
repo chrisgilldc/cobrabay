@@ -9,9 +9,10 @@ from time import monotonic_ns
 from datetime import datetime
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
 from pint import UnitRegistry, Quantity
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageColor
 from base64 import b64encode
 from io import BytesIO
+import math
 
 ureg = UnitRegistry()
 
@@ -38,8 +39,6 @@ class Display:
         self._running['strobe_offset'] = 0
         self._running['strobe_timer'] = monotonic_ns()
 
-        # Initialize the image holding.
-        self._image_buffer = BytesIO()
         self._current_image = None
 
         # Layers dict.
@@ -63,6 +62,9 @@ class Display:
     # Create layers for the lateral markers based on number of lateral zones. This is done at the start of each
     # dock/undock since the number of lateral zones might change.
     def setup_lateral_markers(self,lateral_count):
+        if lateral_count == 0:
+            return
+
         # Wipe out previous layers, in case we've reduced the count, to make sure nothing lingers.
         self._layers['lateral'] = dict()
 
@@ -112,36 +114,89 @@ class Display:
             i += 1
         print(self._layers['lateral'])
 
-    def show_clock(self):
-        w = self._settings['matrix_width']
-        h = self._settings['matrix_height']
-        dt_now = datetime.now().strftime("%-I:%M:%S %p")
-        img = Image.new("RGB", (w, h), (0,0,0))
-        draw = ImageDraw.Draw(img)
-        font = ImageFont.truetype(font=self._settings['core_font'], size=self._scale_font(dt_now, w - 8, h - 4))
-        draw.text((w/2,h/2),dt_now,fill="green",font=font,anchor="mm")
-        self._output_image(img)
+    # General purpose message displayer
+    def show(self,mode,message=None,color="white"):
+        if mode == 'clock':
+            string = datetime.now().strftime("%-I:%M %p")
+            # Clock is always in green.
+            color = "green"
+        elif mode == 'message':
+            if message is None:
+                raise ValueError("Show requires a message when used in Message mode.")
+            string = message
+        else:
+            raise ValueError("Show did not get a valid mode.")
+        # Make a base layer.
+        base_img = Image.new("RGBA", (self._settings['matrix_width'], self._settings['matrix_height']), (0,0,0,255))
+        placard = self._placard(string, color, w_adjust=0, h_adjust=0)
+        final_image = Image.alpha_composite(base_img, placard)
+        self._output_image(final_image)
 
+    # Specific displayer for docking.
     def show_dock(self, display_data):
         self._logger.debug("Show Dock received data: {}".format(display_data))
-
         # For easy reference.
         w = self._settings['matrix_width']
         h = self._settings['matrix_height']
         # Make a base image, black background.
-        base_img = Image.new("RGBA", (w, h), (0,0,0,255))
-        # Add the bottom strobe box.
-        final_image = Image.alpha_composite(base_img, self._layers['frame_approach'])
+        base_image = Image.new("RGBA", (w, h), (0,0,0,255))
+        ## Center area, the range number.
+        # Pull out the range and range quality to make the center placard.
+        self._logger.debug("Creating range placard with range: {}".format(display_data['range']))
+        range_layer = self._placard_range(display_data['range'], display_data['range_quality'])
+        final_image = Image.alpha_composite(base_image, range_layer)
+
+        ## Bottom strobe box.
+        # Frame is a pre-baked box.
+        final_image = Image.alpha_composite(final_image, self._layers['frame_approach'])
+        # Strober calculate the blocking box and the strobe bugs.
+        final_image = Image.alpha_composite(final_image, self._strober(display_data))
+
         # If lateral zones exist, add the lateral frame.
         if len(self._layers['lateral']) > 0:
             final_image = Image.alpha_composite(final_image, self._layers['frame_lateral'])
             w_adjust = 8
 
-        # Pull out the range and range quality to make the center placard.
-        self._logger.debug("Creating range placard with range: {}".format(display_data['range']))
-        range_layer = self._placard_range(display_data['range'],display_data['range_quality'])
-        final_image = Image.alpha_composite(final_image, range_layer)
         self._output_image(final_image)
+
+    def _strober(self, display_data):
+        w = self._settings['matrix_width']
+        h = self._settings['matrix_height']
+        img = Image.new("RGBA", (w, h), (0,0,0,0))
+        draw = ImageDraw.Draw(img)
+        # Calculate where the blockers need to be.
+        available_width = (w-2)/2
+        blocker_width = math.floor(available_width * (1-display_data['range_pct']))
+        self._logger.debug("Strober blocker width: {}".format(blocker_width))
+        # Because of rounding, we can wind up with an entirely closed bar if we're not fully parked.
+        # Thus, fudge the space unless we're okay.
+
+        if display_data['range_quality'] != 'ok' and blocker_width > 28:
+            blocker_width = 28
+        # Draw the blockers.
+        draw.line([(1, h-2),(blocker_width+1, h-2)], fill="white")
+        draw.line([(w-blocker_width-2, h-2), (w-2, h-2)], fill="white")
+        # If we're fully parked the line is full and there's nowhere for the bugs, so don't bother.
+        if blocker_width < 30:
+            left_strobe_start = blocker_width+2+self._running['strobe_offset']
+            left_strobe_stop = left_strobe_start + 3
+            if left_strobe_stop > (w/2)-1:
+                left_strobe_stop = (w/2)-1
+            draw.line([(left_strobe_start, h-2),(left_strobe_stop,h-2)], fill="red")
+            right_strobe_start = w - 2 - blocker_width - self._running['strobe_offset']
+            right_strobe_stop = right_strobe_start - 3
+            if right_strobe_stop < (w/2)+1:
+                right_strobe_stop = (w/2)+1
+            draw.line([(right_strobe_start, h - 2), (right_strobe_stop, h - 2)], fill="red")
+
+        # If time is up, move the strobe bug forward.
+        if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
+            self._running['strobe_offset'] += 1
+            self._running['strobe_timer'] = monotonic_ns()
+            # Don't let the offset push the bugs out to infinity.
+            if self._running['strobe_offset'] > (w/2) - blocker_width:
+                self._running['strobe_offset'] = 0
+        return img
 
     # Methods to create image objects that can then be composited.
     def _frame_approach(self):
@@ -169,7 +224,7 @@ class Display:
         if  self._settings['units'] == 'imperial':
             as_inches = input_range.to('in')
             if as_inches.magnitude < 12:
-                range_string = "{}\"".format(as_inches.magnitude)
+                range_string = "{}\"".format(round(as_inches.magnitude,1))
             else:
                 feet = int(as_inches.to(ureg.inch).magnitude // 12)
                 inches = round(as_inches.to(ureg.inch).magnitude % 12,0)
@@ -184,8 +239,8 @@ class Display:
         else:
             text_color = 'white'
         # Now we can get it formatted and return it.
-        self._logger.debug("Requesting placard with range string: {}".format(range_string))
-        return self._placard(range_string,text_color)
+        self._logger.debug("Requesting placard with range string {} in color {}".format(range_string, text_color))
+        return self._placard(range_string, text_color)
 
     # Generalized placard creator. Make an image for arbitrary text.
     def _placard(self,text,color,w_adjust=8,h_adjust=4):
@@ -198,7 +253,7 @@ class Display:
         font = ImageFont.truetype(font=self._settings['core_font'],
                                   size=self._scale_font(text, w-w_adjust, h-h_adjust))
         # Make the text. Center it in the middle of the area, using the derived font size.
-        draw.text((w/2, (h-4)/2), text, fill="blue", font=font, anchor="mm")
+        draw.text((w/2, (h-4)/2), text, fill=ImageColor.getrgb(color), font=font, anchor="mm")
         return img
 
     # Utility method to find the largest font size that can fit in a space.
@@ -236,9 +291,13 @@ class Display:
         # Send to the matrix
         self._matrix.SetImage(image.convert('RGB'))
 
+        image_buffer = BytesIO()
         # Put in the staging variable for pickup, base64 encoded.
-        image.save(self._image_buffer, format='PNG')
-        self.current = b64encode(self._image_buffer.getvalue())
+        image.save(image_buffer, format='PNG')
+        self.current = b64encode(image_buffer.getvalue())
+
+        # For debugging, write to a file in tmp.
+        image.save("/tmp/cobrabay-display.png", format='PNG')
 
     @property
     def current(self):
