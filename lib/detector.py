@@ -7,6 +7,7 @@ from pint import UnitRegistry, Quantity
 from statistics import mean
 from time import monotonic_ns
 from functools import wraps
+import logging
 
 
 # Decorator method to check if a method is ready.
@@ -57,6 +58,8 @@ def use_value_cache(func):
 
 class Detector:
     def __init__(self, detector_id, detector_name):
+        # Create a logger.
+        self._logger = logging.getLogger("CobraBay").getChild("Detector").getChild(detector_name)
         # A unit registry
         self._ureg = UnitRegistry()
         # Is the detector ready for use?
@@ -120,8 +123,14 @@ class Detector:
 class SingleDetector(Detector):
     def __init__(self, detector_id, detector_name, board_options):
         super().__init__(detector_id, detector_name)
-        # Create the sense object using provided settings.
-        self._sensor_obj = CB_VL53L1X(board_options)
+        if board_options['type'] == 'VL53L1X':
+            # Create the sensor object using provided settings.
+            self._sensor_obj = CB_VL53L1X(board_options)
+        elif board_options['type'] == 'TFMini':
+            self._sensor_obj = TFMini(board_options)
+        else:
+            raise ValueError("Detector {} trying to use unknown sensor type {}".format(
+                detector_name, board_options['type']))
 
     @property
     def value(self):
@@ -158,6 +167,7 @@ class SingleDetector(Detector):
 class Range(SingleDetector):
     def __init__(self, detector_id, detector_name, board_options):
         super().__init__(detector_id, detector_name, board_options)
+        self._logger.info("Initializing Range detector.")
         self._required_settings = ['offset', 'bay_depth', 'spread_park', 'pct_warn', 'pct_crit']
         for setting in self._required_settings:
             self._settings[setting] = None
@@ -169,8 +179,8 @@ class Range(SingleDetector):
     def value(self):
         # Read the sensor and put it at the start of the list, along with a timestamp.
         value = self._sensor_obj.range
-        print("Read value from sensor: {}".format(value))
-        self._history.insert(0, [self._sensor_obj.range, monotonic_ns()])
+        self._logger.debug("Sensor returned raw value: {}".format(value))
+        self._history.insert(0, [value, monotonic_ns()])
         # Make sure the history list is always five elements, so we don't just grow this ridiculously.
         self._history = self._history[:5]
         # Return that reading, minus the offset.
@@ -205,7 +215,6 @@ class Range(SingleDetector):
         for reading in self._history:
             if monotonic_ns() - reading[1] <= 10000000000:
                 readings.append(reading)
-        # print("Calculated readings: {}".format(readings))
         i = 0
         vectors = []
         while i < len(readings):
@@ -214,12 +223,9 @@ class Range(SingleDetector):
             except IndexError:
                 i +=1
             else:
-                print("Calculated distance: {}".format(d))
                 t = Quantity(self._history[i+1][1] - self._history[i][1],'nanoseconds').to('seconds')
-                print("Calculated time: {}".format(t))
                 v = d/t
                 vectors.append(v)
-                print("Calculated velocity: {}".format(v))
                 i += 1
         net_vector = mean(vectors)
         if net_vector.magnitude == 0:
