@@ -162,7 +162,7 @@ class TFminiI2C:
             return
 
         self.AddReg = i2c_msg.write(self.address, self.RegDetPattern)
-        self._setReg = i2c_msg.write(self.address, [0x01])
+        self.SetReg = i2c_msg.write(self.address, [0x01])
         """deactivate automatic range switching"""
 
         print("Set range mode to fixed.")
