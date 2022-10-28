@@ -85,7 +85,7 @@ class CobraBay:
         # Create Network object.
         self._network = Network(
             # Network gets the general config.
-            config=self.config['global']
+            config=self.config['system']
         )
         self._logger.info('CobraBay: Connecting to network...')
         # Connect to the network.
@@ -111,25 +111,25 @@ class CobraBay:
 
         self._logger.info('CobraBay: Creating display...')
         # Create Display object
-        display_config = self.config['display']
-        display_config['global'] = self.config['global']
-        self._display = Display(display_config)
+        # display_config = self.config['display']
+        # display_config['system'] = self.config['system']
+        self._display = Display(self._cbconfig)
 
 
 
         # Check for Syslog, if so, connect.
-        if 'syslog' in config['global']:
+        if 'syslog' in config['system']:
             # try:
             self._logger.info("Attempting to add Syslog handler to {} {} via {}".
-                              format(config['global']['syslog']['host'],
-                                     config['global']['syslog']['facility'],
-                                     config['global']['syslog']['protocol']))
+                              format(config['system']['syslog']['host'],
+                                     config['system']['syslog']['facility'],
+                                     config['system']['syslog']['protocol']))
             from logging.handlers import SysLogHandler
             try:
                 self.syslog = SysLogHandler(
-                    address=config['global']['syslog']['host'],
-                    facility=config['global']['syslog']['facility'])
-                    # protocol=config['global']['syslog']['protocol'])
+                    address=config['system']['syslog']['host'],
+                    facility=config['system']['syslog']['facility'])
+                    # protocol=config['system']['syslog']['protocol'])
             except Exception as e:
                 self._logger.error("Could not set up Syslog logging: {}".format(e))
             else:

@@ -12,6 +12,7 @@ from time import sleep
 from adafruit_aw9523 import AW9523
 from digitalio import DigitalInOut
 from adafruit_vl53l1x import VL53L1X
+from pint import Quantity
 
 
 class CBConfig():
@@ -163,3 +164,41 @@ class CBConfig():
 
     def _validate_general(self):
         pass
+
+    # Method to let modules get their proper logging levels.
+    def get_loglevel(self,module):
+        if 'logging' not in self._config['system']:
+            # If there's no logging section at all, return info.
+            return logging.INFO
+        else:
+            try:
+                result = logging.getLevelName(self._config['system']['logging']['default_level'])
+            except KeyError:
+                # If default_level wasn't defined (which is strange!), return info as default.
+                return logging.INFO
+            if module in self._config['system']['logging']:
+                result = logging.getLevelName(self._config['system']['logging'][module])
+                return result
+            else:
+                return logging.INFO
+
+    # Return a settings dict to be used for the Display module.
+    def display(self):
+        # Initialize the config dict.
+        config_dict = {}
+        # Bring in the units system.
+        config_dict['units'] = self._config['system']['units']
+        # Set the strobe update speed.
+        try:
+            config_dict['strobe_speed'] = Quantity(self._config['display']['strobe_speed']).to('nanosecond').magnitude
+        except KeyError:
+            # IF not defined, default to 100ms
+            config_dict['strobe_speed'] = Quantity("100 ms").to('nanosecond').magnitude
+        # Matrix settings.
+        config_dict['matrix_width'] = self._config['display']['matrix']['width']
+        config_dict['matrix_height'] = self._config['display']['matrix']['height']
+        config_dict['gpio_slowdown'] = self._config['display']['matrix']['gpio_slowdown']
+        config_dict['mqtt_image'] = self._config['display']['mqtt_image']
+        config_dict['mqtt_update_interval'] = Quantity(self._config['display']['mqtt_update_interval'])
+        config_dict['core_font'] = 'fonts/OpenSans-Light.ttf'
+        return config_dict

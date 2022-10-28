@@ -21,18 +21,11 @@ class Display:
     def __init__(self, config):
         # Get a logger!
         self._logger = logging.getLogger("CobraBay").getChild("Display")
-        self._logger.debug("Creating Display...")
+        self._logger.setLevel(config.get_loglevel('display'))
+        self._logger.info("Creating Display...")
         # Initialize the internal settings.
-        self._settings = {}
-        self._settings['units'] = config['global']['units']
-
-        # Default strobe speed of 100 ms
-        self._settings['strobe_speed'] = 100 * 1000000
-        self._settings['matrix_width'] = config['matrix']['width']
-        self._settings['matrix_height'] = config['matrix']['height']
-        self._settings['mqtt_image'] = config['mqtt_image']
-        self._settings['mqtt_update_interval'] = Quantity(config['mqtt_update_interval'])
-        self._settings['core_font'] = 'fonts/OpenSans-Light.ttf'
+        self._settings = config.display()
+        self._logger.info("Now have settings: {}".format(self._settings))
 
         # Operating settings. These get reset on every start.
         self._running = {}
@@ -45,11 +38,12 @@ class Display:
         self._layers = {
             'lateral': {}
         }
+
         # Create static layers
         self._setup_layers()
 
         # Set up the matrix object itself.
-        self._create_matrix(config['matrix'])
+        self._create_matrix(self._settings['matrix_width'], self._settings['matrix_height'], self._settings['gpio_slowdown'])
 
     # Method to set up image layers for use. This takes a command when the bay is ready so lateral zones can be prepped.
     def _setup_layers(self):
@@ -272,17 +266,17 @@ class Display:
         return fontsize
 
     # Utility method to do all the matrix creation.
-    def _create_matrix(self, matrix_config):
+    def _create_matrix(self, width, height, gpio_slowdown):
         self._logger.info("Initializing Matrix...")
         # Create a matrix. This is hard-coded for now.
         matrix_options = RGBMatrixOptions()
-        matrix_options.rows = matrix_config['height']
-        matrix_options.cols = matrix_config['width']
+        matrix_options.cols = width
+        matrix_options.rows = height
         matrix_options.chain_length = 1
         matrix_options.parallel = 1
         matrix_options.hardware_mapping = 'adafruit-hat-pwm'
         matrix_options.disable_hardware_pulsing = True
-        matrix_options.gpio_slowdown = matrix_config['gpio_slowdown']
+        matrix_options.gpio_slowdown = gpio_slowdown
         self._matrix = RGBMatrix(options=matrix_options)
 
     # Outputs a given image to the matrix, and puts it in the current_image property to be picked up
