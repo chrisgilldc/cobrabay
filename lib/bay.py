@@ -14,9 +14,15 @@ import logging
 
 class Bay:
     def __init__(self,config,detectors):
+        # Initialize variables.
+        self._position = {}
+        self._quality = {}
+        self._settings = {}
         self._lateral_order = None
         self._detectors = None
+        # Extract the bay ID from the config.
         self.bay_id = config['id']
+        # Get the Name. If no name defined, use the bay ID.
         try:
             self.bay_name = config['name']
         except KeyError:
@@ -30,12 +36,12 @@ class Bay:
         # Create a unit registry.
         self._ureg = UnitRegistry
         # Set the unit system. Default to Metric. If units is in the config and is imperial, change it to imperial.
-        self._unit_system = 'metric'
-        self._output_unit = 'm'
+        self._settings['unit_system'] = 'metric'
+        self._settings['output_unit'] = 'm'
         if 'units' in config:
             if config['units'].lower() == 'imperial':
-                self._unit_system = 'imperial'
-                self._output_unit = 'in'
+                self._settings['unit_system'] = 'imperial'
+                self._settings['output_unit'] = 'in'
 
         # Set up the detectors.
         self._setup_detectors(config,detectors)
@@ -48,9 +54,9 @@ class Bay:
         for detector in self._detectors['lateral'].keys():
             self._logger.debug("\t\t{} - {}".format(detector, hex(self._detectors['lateral'][detector].i2c_address)))
 
-        self._state = 'ready'
-        self._position = {}
-        self._quality = {}
+        # Sensor to door distance.
+        self._settings['depth'] = Quantity(config['bay_depth']).to('cm')
+        self._settings['adjusted_depth'] = Quantity(config['bay_depth']) - Quantity(config['longitudinal']['defaults']['offset']).to('cm')
         # Dock timer.
         self._dock_timer = {
             'allowed': Quantity(config['park_time']).to('seconds').magnitude,
@@ -58,19 +64,22 @@ class Bay:
         }
         self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
 
-    # Imperative commands
-    def dock(self):
-        self._logger.debug("Received dock command.")
-        if self.state in ('docking','undocking'):
-            raise ValueError("Cannot dock, already {}".format(self.state))
-        elif self.state == 'unavailable':
-            raise ValueError("Cannot dock, bay is unavailable")
-        else:
-            # Do the things to do when docking.
-            self.state = 'docking'
+        # Mark self as ready.
+        self._state = 'ready'
 
-    def undock(self):
-        pass
+    # # Imperative commands
+    # def dock(self):
+    #     self._logger.debug("Received dock command.")
+    #     if self.state in ('docking','undocking'):
+    #         raise ValueError("Cannot dock, already {}".format(self.state))
+    #     elif self.state == 'unavailable':
+    #         raise ValueError("Cannot dock, bay is unavailable")
+    #     else:
+    #         # Do the things to do when docking.
+    #         self.state = 'docking'
+    #
+    # def undock(self):
+    #     pass
 
     # Abort gets called when we want to cancel a docking.
     def abort(self):
@@ -141,7 +150,7 @@ class Bay:
         for detector in self._detectors['longitudinal']:
             value = self._detectors['longitudinal'][detector].value
             self._logger.debug("Read of longitudinal detector {} returned {}".format(detector, value))
-            self._position['longitudinal'][detector] = self._detectors['longitudinal'][detector].value.to(self._output_unit)
+            self._position['longitudinal'][detector] = self._detectors['longitudinal'][detector].value.to(self._settings['output_unit'])
             self._quality['longitudinal'][detector] = self._detectors['longitudinal'][detector].quality
         # Pick a reading for authoritative range.
         # If there's only one longitudinal sensor, we go with that.
@@ -153,7 +162,7 @@ class Bay:
             # Give the lateral detector the current range reading.
             self._detectors['lateral'][detector_name].range_reading = self._position['longitudinal'][self._selected_range]
             # Now we can get the position and quality from the detector.
-            self._position['lateral'][detector_name] = self._detectors['lateral'][detector_name].value.to(self._output_unit)
+            self._position['lateral'][detector_name] = self._detectors['lateral'][detector_name].value.to(self._settings['output_unit'])
             self._quality['lateral'][detector_name] = self._detectors['lateral'][detector_name].quality
         # Update the dock timer.
         if self._detectors['longitudinal'][self._selected_range].motion:
@@ -265,6 +274,8 @@ class Bay:
         return_data['range'] = self._position['longitudinal'][self._selected_range]
         # The range quality band. This is used for color coding.
         return_data['range_quality'] = self._quality['longitudinal'][self._selected_range]
+        # Percentage of the range covered. This is needed to construct the strober, so everyone knows this is a Cylon.
+        return_data['range_pct'] = return_data['range'].to('cm') / self._settings['adjusted_depth'].to('cm')
         # List for lateral state.
         return_data['lateral'] = []
         self._logger.debug("Using lateral order: {}".format(self._lateral_order))
@@ -278,7 +289,6 @@ class Bay:
                     'side': self._detectors['lateral'][lateral_detector].side }
                 )
         return return_data
-
 
     # Method to be called when CobraBay it shutting down.
     def shutdown(self):
@@ -341,10 +351,9 @@ class Bay:
             'lateral': {}
         }
         lateral_order = {}
-
         config_options = {
-            'longitudinal': ('offset','spread_park','bay_depth'),
-            'lateral': ('offset','spread_ok','spread_warn','spread_crit','side','intercept')
+            'longitudinal': ('offset', 'bay_depth', 'spread_park'),
+            'lateral': ('offset', 'spread_ok', 'spread_warn', 'spread_crit', 'side', 'intercept')
         }
         for direction in self._detectors.keys():
             self._logger.debug("Checking for {} detectors.".format(direction))
