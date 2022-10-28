@@ -3,10 +3,14 @@
 ####
 
 from pint import Quantity
+import board
+import busio
+from time import sleep
+
 
 # General purpose converter.
 class Convertomatic:
-    def __init__(self,unit_system):
+    def __init__(self, unit_system):
         self._unit_system = unit_system
 
     def convert(self, input):
@@ -58,8 +62,44 @@ class Convertomatic:
         return self._unit_system
 
     @unit_system.setter
-    def unit_system(self,input):
-        if input.lower() in ('imperial','metric'):
+    def unit_system(self, input):
+        if input.lower() in ('imperial', 'metric'):
             self._unit_system = input.lower()
         else:
             raise ValueError("Convertomatic unit system must be 'imperial' or 'metric'")
+
+
+def mqtt_message_search(input, element, value, extract=None):
+    if not isinstance(input, list):
+        raise TypeError("MQTT Message Search expects a list of dicts.")
+    matching_messages = []
+    # Iterate the messages.
+    for mqtt_message in input:
+        try:
+            # If the message's search element has the value we want, put it on the matching list.
+            if mqtt_message[element] == value:
+                matching_messages.append(mqtt_message)
+        # If we get a key error, IE: the element doesn't exist, pass, we don't care.
+        except KeyError:
+            pass
+    # If we haven't been asked to extract a particular value, return the complete list of matched messages.
+    if extract is None:
+        return matching_messages
+    else:
+        if len(matching_messages) == 1:
+            # If there's only one matched message, return the extract value directly.
+            return matching_messages[0][extract]
+        else:
+            return_values = []
+            for matched_message in matching_messages:
+                return_values.append(matched_message[extract])
+            return return_values
+
+def scan_i2c():
+    i2c = busio.I2C(board.SCL, board.SDA)
+    while not i2c.try_lock():
+        pass
+    found_addresses = [hex(device_address) for device_address in i2c.scan()]
+    sleep(2)
+    i2c.unlock()
+    return found_addresses
