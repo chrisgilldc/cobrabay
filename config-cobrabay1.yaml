@@ -1,16 +1,27 @@
-global:
+system:
   units: imperial  # Defaults to 'metric' if set to anything other than 'imperial'.
   system_name: CobraBay1  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
   network: True  # Connect to the network at all?
   homeassistant: True # Integrate with Home Assistant. If yes, will send discovery messages.
+  # Logging definition
+  logging:
+    # Default level for the system. If a specific module doesn't have its own level, this is used.
+    # If not defined, default is 'info'.
+    default_level: info
+    # Valid modules are:
+    # core - the main system.
+    # display - the display system
+    # network - The network system
+# Settings for the display. We presume only one.
 display:
   matrix:
     width: 64  # Columns on the Matrix
     height: 32  # Rows on the Matrix
     gpio_slowdown: 4  # How much to slow down the matrix to prevent flicker.
+  strobe_speed: 100 ms
   mqtt_image: True  # Should image updates be sent via MQTT
   mqtt_update_interval: 5 s  # How often should a new image be spent. Keeps from spamming the server.
-# Define detectors
+# Define detectors. These are individual sensing units that then get assigned to a bay later.
 detectors:
   range:  # Key here is the Bay ID, which is used elsewhere. IF you see a mention of 'bay_id', this is it.
 #    # Range sensors have a type of Range. Obvs.
