@@ -14,6 +14,7 @@ import logging
 
 class Bay:
     def __init__(self,config,detectors):
+        self._lateral_order = None
         self._detectors = None
         self.bay_id = config['id']
         try:
@@ -270,11 +271,12 @@ class Bay:
         # Assemble the lateral data with *closest first*.
         # This will result in the display putting things together top down.
         # Lateral ordering is determined by intercept range when bay is started up.
-        for lateral_detector in self._lateral_order:
-            return_data['lateral'].append({
-                'quality': self._quality['lateral'][lateral_detector],
-                'side': self._detectors['lateral'][lateral_detector].side }
-            )
+        if self._lateral_order is not None:
+            for lateral_detector in self._lateral_order:
+                return_data['lateral'].append({
+                    'quality': self._quality['lateral'][lateral_detector],
+                    'side': self._detectors['lateral'][lateral_detector].side }
+                )
         return return_data
 
 
@@ -345,29 +347,35 @@ class Bay:
             'lateral': ('offset','spread_ok','spread_warn','spread_crit','side','intercept')
         }
         for direction in self._detectors.keys():
-            self._logger.debug("Setting up {} detectors.".format(direction))
-            for detector_config in config[direction]['detectors']:
-                self._logger.debug("Provided detector config: {}".format(detector_config))
-                try:
-                    detector_obj = detectors[detector_config['detector']]
-                except KeyError:
-                    raise KeyError("Tried to create lateral zone with detector '{}' but detector not defined."
-                                   .format(detector_config['detector']))
-                # Set the object attributes from the configuration.
-                for item in config_options[direction]:
+            self._logger.debug("Checking for {} detectors.".format(direction))
+            if direction in config:
+                self._logger.debug("Setting up {} detectors.".format(direction))
+                for detector_config in config[direction]['detectors']:
+                    self._logger.debug("Provided detector config: {}".format(detector_config))
                     try:
-                        setattr(detector_obj, item, detector_config[item])
+                        detector_obj = detectors[detector_config['detector']]
                     except KeyError:
-                        self._logger.debug("Using default value for {}".format(item))
+                        raise KeyError("Tried to create lateral zone with detector '{}' but detector not defined."
+                                       .format(detector_config['detector']))
+                    # Set the object attributes from the configuration.
+                    for item in config_options[direction]:
                         try:
-                            setattr(detector_obj, item, config[direction]['defaults'][item])
+                            setattr(detector_obj, item, detector_config[item])
                         except KeyError:
-                            raise KeyError("Needed default value for {} but not defined!".format(item))
-                # # If we're processing lateral, add the intercept range to the lateral order dict.
-                if direction == 'lateral':
-                    lateral_order[detector_config['detector']] = Quantity(detector_config['intercept'])
-                # Append the object to the appropriate object store.
-                self._detectors[direction][detector_config['detector']] = detector_obj
-        self._logger.debug("Now have lateral order: {}".format(lateral_order))
-        self._lateral_order = sorted(lateral_order, key=lateral_order.get)
-        self._logger.debug("Sorted lateral order: {}".format(self._lateral_order))
+                            self._logger.debug("Using default value for {}".format(item))
+                            try:
+                                setattr(detector_obj, item, config[direction]['defaults'][item])
+                            except KeyError:
+                                raise KeyError("Needed default value for {} but not defined!".format(item))
+                    # # If we're processing lateral, add the intercept range to the lateral order dict.
+                    if direction == 'lateral':
+                        lateral_order[detector_config['detector']] = Quantity(detector_config['intercept'])
+                    # Append the object to the appropriate object store.
+                    self._detectors[direction][detector_config['detector']] = detector_obj
+            else:
+                self._logger.debug("No detectors defined.")
+        # Check for lateral order.
+        if self._lateral_order is not None:
+            self._logger.debug("Now have lateral order: {}".format(lateral_order))
+            self._lateral_order = sorted(lateral_order, key=lateral_order.get)
+            self._logger.debug("Sorted lateral order: {}".format(self._lateral_order))
