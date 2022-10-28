@@ -70,6 +70,7 @@ bay:
   id: bay1  # ID of the bay.
   name: "Bay 1"  # Name of the bay for use in MQTT messages.
   park_time: 2 min  # How long until a stationary vehicle is counted as parked.
+  bay_depth: 276 in  # This should be the wall-to-wall distance. IE: If
   longitudinal:
     defaults:
       offset: 42 in
