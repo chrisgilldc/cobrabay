@@ -1,0 +1,108 @@
+system:
+  units: imperial  # Defaults to 'metric' if set to anything other than 'imperial'.
+  system_name: CobraBay1  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
+  network: True  # Connect to the network at all?
+  homeassistant: True # Integrate with Home Assistant. If yes, will send discovery messages.
+  # Logging definition
+  logging:
+    # Default level for the system. If a specific module doesn't have its own level, this is used.
+    # If not defined, default is 'info'.
+    default_level: info
+    # Valid modules are:
+    # core - the main system.
+    # display - the display system
+    # network - The network system
+# Settings for the display. We presume only one.
+display:
+  matrix:
+    width: 64  # Columns on the Matrix
+    height: 32  # Rows on the Matrix
+    gpio_slowdown: 4  # How much to slow down the matrix to prevent flicker.
+  strobe_speed: 100 ms
+  mqtt_image: True  # Should image updates be sent via MQTT
+  mqtt_update_interval: 5 s  # How often should a new image be spent. Keeps from spamming the server.
+# Define detectors. These are individual sensing units that then get assigned to a bay later.
+detectors:
+  range:  # Key here is the Bay ID, which is used elsewhere. IF you see a mention of 'bay_id', this is it.
+#    # Range sensors have a type of Range. Obvs.
+    type: Range
+#    # Name is used for reporting MQTT, as distinct from the key. This will be prepended with the Bay's Name and
+#    # appended with "Detector". So "Range" here for "Bay 1" will become "Bay 1 Range Detector"
+    name: Range
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x30
+      enable_board: 0
+      enable_pin: 25
+      timing: 200ms
+#  rangeXL:
+#    type: Range
+#    name: RangeXL
+#    sensor:
+#      type: TFMini
+#      i2c_bus: 1
+#      i2c_address: 0x2f
+  front:
+    type: Lateral
+    name: Front
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x33
+      enable_board: 0x58
+      enable_pin: 3
+      distance_mode: medium
+      timing: 200ms
+  middle:
+    type: Lateral
+    name: Middle
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x32
+      enable_board: 0x58
+      enable_pin: 2
+      distance_mode: medium
+      timing: 200ms
+  rear:
+    type: Lateral
+    name: Rear
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x31
+      enable_board: 0x58
+      enable_pin: 1
+      distance_mode: medium
+      timing: 200ms
+bay:
+  active: True
+  id: bay1  # ID of the bay.
+  name: "Bay 1"  # Name of the bay for use in MQTT messages.
+  park_time: 2 min  # How long until a stationary vehicle is counted as parked.
+  bay_depth: 276 in  # This should be the wall-to-wall distance. IE: If
+  longitudinal:
+    defaults:
+      offset: 42 in
+      spread_park: 2 in
+      bay_depth: 276 in
+    # Longitudinal detectors are those the vehicles more towards or away from.
+    detectors:
+#      - detector: rangeXL
+      - detector: range
+  lateral:
+    # Lateral detectors are those that run perpendicular to the path of vehicle's travel.
+    defaults:
+      offset: 24 in
+      spread_ok: 1 in
+      spread_warn: 3 in
+      spread_crit: 5 in
+      side: R
+    detectors:
+      - detector: front
+        intercept: 75 in
+      - detector: middle
+        intercept: 100 in
+      - detector: rear
+        intercept: 125 in

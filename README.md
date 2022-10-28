@@ -3,17 +3,30 @@
 
 ## Installing
 
-### CircuitPython
+### Platform
 
-* Update system to CircuitPython 7.2. This is the version tested on, future versions *should* work but have not been tested.
+This system was originally written for CircuitPython, with the intention of running on microcontrollers (ie: Metro M4). Due to
+memory-management issues, it has been converted to a standard Python application. It has been tested on a Pi 3+ with 
+Raspberry Pi OS Lite 64-bit. Any other Pi with Raspberry Pi OS should work.
+
+### System Configuration
+* Install OS
+* Configure network (Wifi or Ethernet, as appropriate)
+* Enable I2C
+
+
+### Required Libraries
+
+* [paho-mqtt](https://github.com/eclipse/paho.mqtt.python)
+* Packages not available through PIP:
+  * [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix) - Build per instructions.
+  * [TFMini-I2C-Python](https://github.com/madewhatnow/TFmini-I2C-Python) - Copy TFmini_I2C.py into the cobrabay/lib directory.
 
 ### CobraBay
 * Copy 'cobrabay' to _device_/lib/cobrabay
 * Copy 'code.py' to _device_/code.py
 
-### Libraries
-Place the following in _device_/lib/:
-* From the Circuitpython Library Bundle
+Install the following libraries:
   * adafruit_aw9523
   * adafruit_bitmap_font
   * adafruit_display_shapes
@@ -22,9 +35,15 @@ Place the following in _device_/lib/:
   * adafruit_hcsr04
   * adafruit_register
   * adafruit_vl53l1x
-  
-* [adafruit_logging](https://github.com/adafruit/Adafruit_CircuitPython_Logging)
-* [adafruit_minimqtt](https://github.com/adafruit/Adafruit_CircuitPython_MiniMQTT)
+  * paho-mqtt
+
+To install modules:
+```
+pip3 install adafruit-circuitpython-aw9523 adafruit_circuitpython_bitmap_font \
+  adafruit_circuitpython_display_shapes adafruit_circuitpython_display_text \
+  adafruit_circuitpython_hcsr04 adafruit_circuitpython_vl53l1x \
+  paho-mqtt
+```
 
 Optionally, if you want to send to remote syslog:
 * [syslog_handler](https://github.com/chrisgilldc/circuitpython_syslog_handler)
@@ -172,15 +191,14 @@ A pr*ogression of sensors would look like this:*
 | verify | Check occupancy of bay and update status. |
 
 
-
-
-
 # Future Enhancements
 Not-quite-bugs:
 * Get Syslog handler to attach to children.
 
-Features
+Sort of working but not done yet:
 * Home Assistant Discovery
+
+Features
 * Include NTP client so real timestamps can be included
 * Separate configuration into YAML
 * Add ability to load/reload/save configuration via MQTT commands
