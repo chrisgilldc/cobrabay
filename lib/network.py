@@ -190,8 +190,7 @@ class Network:
                     'ha_discovery': {
                         'name': '{0[bay_name]} State',
                         'type': 'sensor',
-                        'entity': '{0[bay_id]}_state',
-                        'value_template': '{{{{ value_json.state }}}}'
+                        'entity': '{0[bay_id]}_state'
                     }
                 },
                 # Which detector is selected for active range use.
