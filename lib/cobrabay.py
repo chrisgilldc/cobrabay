@@ -236,10 +236,10 @@ class CobraBay:
 
             self._display.show_clock()
             # Push out the image to MQTT.
-            # self._outbound_messages.append(
-            #     {'topic_type': 'system',
-            #      'topic': 'display',
-            #      'message': self._display.current, 'repeat': True})
+            self._outbound_messages.append(
+                {'topic_type': 'system',
+                 'topic': 'display',
+                 'message': self._display.current, 'repeat': False})
 
 
     # Start sensors and display to guide parking.
@@ -262,7 +262,7 @@ class CobraBay:
             # Trigger a scan of the bay.
             self._logger.debug("Requesting bay scan.")
             self._bays[bay_id].scan()
-            # Collect the MQTT mesasges from the bay itself.
+            # Collect the MQTT messasges from the bay itself.
             self._logger.debug("Collecting MQTT messages from bay.")
             bay_messages = self._bays[bay_id].mqtt_messages()
             self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
@@ -274,8 +274,8 @@ class CobraBay:
             self._display.show_dock(display_data)
 
             # Put the display image on the MQTT stack.
-            # self._outbound_messages.append(
-            #     { 'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': True })
+            self._outbound_messages.append(
+                { 'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': False })
 
             # Poll the network.
             self._logger.debug("Polling network.")
