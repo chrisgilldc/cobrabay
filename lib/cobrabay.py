@@ -10,10 +10,6 @@ from time import monotonic
 import atexit
 import busio
 import board
-from digitalio import DigitalInOut
-from adafruit_aw9523 import AW9523
-from io import BytesIO
-from pprint import PrettyPrinter
 
 # Import the other CobraBay classes
 from .bay import Bay
@@ -22,7 +18,6 @@ from .display import Display
 from .detector import Lateral, Range
 from .network import Network
 from .systemhw import PiStatus
-from .util import mqtt_message_search
 
 class CobraBay:
     def __init__(self, cmd_opts=None):
@@ -234,12 +229,12 @@ class CobraBay:
             system_state['online'] = network_data['online']
             system_state['mqtt_status'] = network_data['mqtt_status']
 
-            self._display.show_clock()
+            self._display.show("clock")
             # Push out the image to MQTT.
             self._outbound_messages.append(
                 {'topic_type': 'system',
                  'topic': 'display',
-                 'message': self._display.current, 'repeat': False})
+                 'message': self._display.current, 'repeat': True})
 
 
     # Start sensors and display to guide parking.
@@ -253,9 +248,7 @@ class CobraBay:
         # Put the bay into docking mode. The command handler will catch ValueErrors (when the bay isn't ready to dock)
         # and KeyErrors (when the bay_id) is bad
         self._logger.debug("Putting bay in dock mode.")
-        self._bays[bay_id].dock()
-        # Create a buffer to store the image, if/when we get it.
-        image_buffer = BytesIO()
+        self._bays[bay_id].state = 'docking'
 
         # As long as the bay still thinks it's docking, keep displaying!
         while self._bays[bay_id].state == "docking":
@@ -275,11 +268,13 @@ class CobraBay:
 
             # Put the display image on the MQTT stack.
             self._outbound_messages.append(
-                { 'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': False })
+                { 'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': True })
 
             # Poll the network.
             self._logger.debug("Polling network.")
             self._network_handler()
+
+        self._post_action['time'] = monotonic()
 
     # Utility method to put the hardware status on the outbound message queue. This needs to be used from a few places.
     def _mqtt_hw(self):
