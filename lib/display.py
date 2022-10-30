@@ -53,14 +53,10 @@ class Display:
         self._layers['approach'] = self._placard('APPROACH','blue')
         self._layers['error'] = self._placard('ERROR','red')
 
-    # Create layers for the lateral markers based on number of lateral zones. This is done at the start of each
-    # dock/undock since the number of lateral zones might change.
-    def setup_lateral_markers(self,lateral_count):
-        if lateral_count == 0:
-            return
-
-        # Wipe out previous layers, in case we've reduced the count, to make sure nothing lingers.
-        self._layers['lateral'] = dict()
+    # Have a bay register. This creates layers for that bay's lateral.
+    def register_bay(self, bay_id, lateral_order, lateral_names):
+        # Initialize a dict for this bay_id.
+        self._layers[bay_id] = {}
 
         # For convenient reference later.
         w = self._settings['matrix_width']
@@ -68,7 +64,7 @@ class Display:
 
         # Calculate the available pixels for each zones.
         avail_height = self._settings['matrix_height'] - 6  #
-        pixel_lengths = self._parts(avail_height, lateral_count)
+        pixel_lengths = self._parts(avail_height, len(lateral_names))
         self._logger.debug("Split {} pixels for {} lateral zones into: {}".
                            format(avail_height,lateral_count,pixel_lengths))
 
@@ -149,47 +145,59 @@ class Display:
         # If lateral zones exist, add the lateral frame.
         if len(self._layers['lateral']) > 0:
             final_image = Image.alpha_composite(final_image, self._layers['frame_lateral'])
-            w_adjust = 8
+            self._logger.debug("Lateral layers available: {}".format(self._layers['lateral'].keys()))
 
         self._output_image(final_image)
 
     def _strober(self, display_data):
         w = self._settings['matrix_width']
         h = self._settings['matrix_height']
+        # Set up a base image to draw on.
         img = Image.new("RGBA", (w, h), (0,0,0,0))
         draw = ImageDraw.Draw(img)
-        # Calculate where the blockers need to be.
-        available_width = (w-2)/2
-        blocker_width = math.floor(available_width * (1-display_data['range_pct']))
-        self._logger.debug("Strober blocker width: {}".format(blocker_width))
-        # Because of rounding, we can wind up with an entirely closed bar if we're not fully parked.
-        # Thus, fudge the space unless we're okay.
-
-        if display_data['range_quality'] != 'ok' and blocker_width > 28:
-            blocker_width = 28
-        # Draw the blockers.
-        draw.line([(1, h-2),(blocker_width+1, h-2)], fill="white")
-        draw.line([(w-blocker_width-2, h-2), (w-2, h-2)], fill="white")
-        # If we're fully parked the line is full and there's nowhere for the bugs, so don't bother.
-        if blocker_width < 30:
-            left_strobe_start = blocker_width+2+self._running['strobe_offset']
-            left_strobe_stop = left_strobe_start + 3
-            if left_strobe_stop > (w/2)-1:
-                left_strobe_stop = (w/2)-1
-            draw.line([(left_strobe_start, h-2),(left_strobe_stop,h-2)], fill="red")
-            right_strobe_start = w - 2 - blocker_width - self._running['strobe_offset']
-            right_strobe_stop = right_strobe_start - 3
-            if right_strobe_stop < (w/2)+1:
-                right_strobe_stop = (w/2)+1
-            draw.line([(right_strobe_start, h - 2), (right_strobe_stop, h - 2)], fill="red")
-
-        # If time is up, move the strobe bug forward.
-        if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
-            self._running['strobe_offset'] += 1
-            self._running['strobe_timer'] = monotonic_ns()
-            # Don't let the offset push the bugs out to infinity.
-            if self._running['strobe_offset'] > (w/2) - blocker_width:
-                self._running['strobe_offset'] = 0
+        # Back up and emergency distances, we flash the whole bar.
+        if display_data['range_quality'] in ('back-up','emerg'):
+            if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
+                try:
+                    if self._running['strobe_color'] == 'red':
+                        self._running['strobe_color'] = 'black'
+                    elif self._running['strobe_color'] == 'black':
+                        self._running['strobe_color'] = 'red'
+                except KeyError:
+                    self._running['strobe_color'] = 'red'
+                self._running['strobe_timer'] = monotonic_ns()
+            draw.line([(1,h-2),(w-2,h-2)], fill=self._running['strobe_color'])
+        else:
+            # Calculate where the blockers need to be.
+            available_width = (w-2)/2
+            blocker_width = math.floor(available_width * (1-display_data['range_pct']))
+            self._logger.debug("Strober blocker width: {}".format(blocker_width))
+            # Because of rounding, we can wind up with an entirely closed bar if we're not fully parked.
+            # Thus, fudge the space unless we're okay.
+            if display_data['range_quality'] != 'ok' and blocker_width > 28:
+                blocker_width = 28
+            # Draw the blockers.
+            draw.line([(1, h-2),(blocker_width+1, h-2)], fill="white")
+            draw.line([(w-blocker_width-2, h-2), (w-2, h-2)], fill="white")
+            # If we're fully parked the line is full and there's nowhere for the bugs, so don't bother.
+            if blocker_width < 30:
+                left_strobe_start = blocker_width+2+self._running['strobe_offset']
+                left_strobe_stop = left_strobe_start + 3
+                if left_strobe_stop > (w/2)-1:
+                    left_strobe_stop = (w/2)-1
+                draw.line([(left_strobe_start, h-2),(left_strobe_stop,h-2)], fill="red")
+                right_strobe_start = w - 2 - blocker_width - self._running['strobe_offset']
+                right_strobe_stop = right_strobe_start - 3
+                if right_strobe_stop < (w/2)+1:
+                    right_strobe_stop = (w/2)+1
+                draw.line([(right_strobe_start, h - 2), (right_strobe_stop, h - 2)], fill="red")
+            # If time is up, move the strobe bug forward.
+            if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
+                self._running['strobe_offset'] += 1
+                self._running['strobe_timer'] = monotonic_ns()
+                # Don't let the offset push the bugs out to infinity.
+                if self._running['strobe_offset'] > (w/2) - blocker_width:
+                    self._running['strobe_offset'] = 0
         return img
 
     # Methods to create image objects that can then be composited.
@@ -215,7 +223,10 @@ class Display:
 
     # Make a placard to show range.
     def _placard_range(self,input_range,range_quality):
-        if  self._settings['units'] == 'imperial':
+        # Some range quality statuses need a text output, not a distance.
+        if range_quality == 'back-up':
+            range_string = "BACK UP"
+        elif  self._settings['units'] == 'imperial':
             as_inches = input_range.to('in')
             if as_inches.magnitude < 12:
                 range_string = "{}\"".format(round(as_inches.magnitude,1))
@@ -226,12 +237,14 @@ class Display:
         else:
             as_meters = round(input_range.to('m').magnitude,2)
             range_string = "{} m".format(as_meters)
-        if range_quality == 'crit':
+
+        # Determine a color based on quality
+        if range_quality in ('crit','back-up'):
             text_color = 'red'
         elif range_quality =='warn':
             text_color = 'yellow'
         else:
-            text_color = 'white'
+            text_color = 'green'
         # Now we can get it formatted and return it.
         self._logger.debug("Requesting placard with range string {} in color {}".format(range_string, text_color))
         return self._placard(range_string, text_color)
