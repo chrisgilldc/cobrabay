@@ -52,6 +52,8 @@ class CobraBay:
         self._logger.debug("Creating Pi hardware monitor...")
         self._pistatus = PiStatus()
 
+
+
         # Create the network object.
         self._logger.debug("Creating network object...")
         # Create Network object.
@@ -74,15 +76,13 @@ class CobraBay:
         self._logger.debug("Creating bays...")
         # For testing, only one bay, hard-wire it ATM.
         self._bays[self.config['bay']['id']] = Bay(self.config['bay'], self._detectors)
-        self._logger.debug("Sending bay discovery info to Network handler.")
-        self._logger.debug(self._bays[self.config['bay']['id']].discovery_info())
-        self._network.register_bay(self._bays[self.config['bay']['id']].discovery_info())
 
         self._logger.info('CobraBay: Creating display...')
-        # Create Display object
-        # display_config = self.config['display']
-        # display_config['system'] = self.config['system']
         self._display = Display(self._cbconfig)
+
+        # Register the bay with the network and display.
+        self._network.register_bay(self._bays[self.config['bay']['id']].discovery_reg_info)
+        self._display.register_bay(self._bays[self.config['bay']['id']].display_reg_info)
 
         self._logger.info('CobraBay: Initialization complete.')
 
@@ -193,8 +193,8 @@ class CobraBay:
         self._post_action = {}
 
         # Set up the displays lateral layers.
-        self._logger.info('Creating lateral layers.')
-        self._display.setup_lateral_markers(self._bays[bay_id].lateral_count)
+        # self._logger.info('Creating lateral layers.')
+        # self._display.setup_lateral_markers(self._bays[bay_id].lateral_count)
 
         # Put the bay into docking mode. The command handler will catch ValueErrors (when the bay isn't ready to dock)
         # and KeyErrors (when the bay_id) is bad
