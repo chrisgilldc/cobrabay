@@ -3,7 +3,7 @@
 ####
 
 from .sensors import CB_VL53L1X, TFMini
-from pint import UnitRegistry, Quantity
+from pint import UnitRegistry, Quantity, DimensionalityError
 from statistics import mean
 from time import monotonic_ns
 from functools import wraps
@@ -24,7 +24,6 @@ def check_ready(func):
         self._ready = True
         self._when_ready()
     return wrapper
-
 
 # Use this decorator on any method that shouldn't be usable if the detector isn't marked ready. IE: don't let
 # a value be read if
@@ -49,11 +48,42 @@ def use_value_cache(func):
             if time_delta < sensor_timing:  # If not enough time has passed, send back the most recent reading.
                 value = self._history[0][0]
             else:
-                value = self.value
+                value = self._sensor_obj.range
+                # Add value to the history and truncate history to ten records.
+                self._history.insert(0, value)
+                self._history = self._history[:10]
         else:
-            value = self.value
+            value = self._sensor_obj.range
         # Send whichever value it is into the function.
         return func(self, value)
+    return wrapper
+
+# This decorator is used for methods that rely on sensor data. If the sensor data is determined to be stale, it will
+# trigger a new sensor read prior to executing the method.
+def read_if_stale(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        read_sensor = False
+        # If
+        if len(self._history) > 0:
+            # Time difference between now and the most recent read.
+            time_delta = monotonic_ns() - self._history[0][1]
+            if time_delta > 1000000000:  # 1s is too long, read the sensor.
+                read_sensor = True
+        # If we have no history, ie: at startup, go ahead and read.
+        else:
+            read_sensor = True
+
+        # If flag is set, read the sensor and put its value into the history.
+        if read_sensor:
+            value = self._sensor_obj.range
+            self._logger.debug("Triggered sensor reading. Got: {}".format(value))
+            # Add value to the history and truncate history to ten records.
+            self._history.insert(0, (value, monotonic_ns()))
+            self._history = self._history[:10]
+
+        # Send whichever value it is into the function.
+        return func(self)
     return wrapper
 
 class Detector:
@@ -73,13 +103,18 @@ class Detector:
         # List to keep the history of sensor readings. This is used for some methods.
         self._history = []
 
-    # All of the below methods should be overridden and are included here for direction.
-    def _setup_detector(self, settings):
-        raise NotImplementedError
-
-    # value will return the reading from the detector.
+    # Value will return the adjusted reading from the sensor.
+    @property
+    @read_if_stale
     def value(self):
         raise NotImplementedError
+
+    # Assess the quality of the sensor reading.
+    @property
+    @read_if_stale
+    def quality(self):
+        raise NotImplementedError
+
 
     # These properties and methods are common to all detectors.
     @property
@@ -103,6 +138,12 @@ class Detector:
     @property
     def name(self):
         return self._settings['detector_name']
+
+    # Convenience property to let upstream modules check for the detector type. This disconnects
+    # from the class name, because in the future we may have multiple kinds of 'range' or 'lateral' detectors.
+    @property
+    def detector_type(self):
+        return type(self).__name__.lower()
 
     # Utility method to convert into quantities.
     def _convert_value(self, input_value):
@@ -131,10 +172,6 @@ class SingleDetector(Detector):
         else:
             raise ValueError("Detector {} trying to use unknown sensor type {}".format(
                 detector_name, board_options['type']))
-
-    @property
-    def value(self):
-        raise NotImplemented
 
     # Allow adjustment of timing.
     def timing(self, timing_input):
@@ -167,6 +204,7 @@ class SingleDetector(Detector):
 class Range(SingleDetector):
     def __init__(self, detector_id, detector_name, board_options):
         super().__init__(detector_id, detector_name, board_options)
+        self.type = 'range'
         self._logger.info("Initializing Range detector.")
         self._required_settings = ['offset', 'bay_depth', 'spread_park', 'pct_warn', 'pct_crit']
         for setting in self._required_settings:
@@ -175,79 +213,89 @@ class Range(SingleDetector):
         self._settings['pct_crit'] = 5 / 100
         self._settings['pct_warn'] = 10 / 100
 
+    # Return the adjusted reading of the sensor.
     @property
+    @read_if_stale
     def value(self):
-        # Read the sensor and put it at the start of the list, along with a timestamp.
-        value = self._sensor_obj.range
-        self._logger.debug("Sensor returned raw value: {}".format(value))
-        self._history.insert(0, [value, monotonic_ns()])
-        # Make sure the history list is always five elements, so we don't just grow this ridiculously.
-        self._history = self._history[:5]
-        # Return that reading, minus the offset.
-        return self._history[0][0] - self.offset
-
-    # Quality assesses where the vehicle is on their approach relative to the depth of the bay and the stop location.
-    @property
-    @only_if_ready
-    def quality(self):
-        # Get the value once. Will use either cached or uncached
-        value = self.value
-        # You're about to hit the wall!
-        if ( value + self.offset ) < Quantity("2 in"):
-            return 'emerg'
-        # Overshot by too much, back up.
-        elif value < 0 and abs(value) > self.spread_park:
-            return 'back-up'
-        elif abs(value) < self.spread_park:
-            return 'park'
-        elif value <= self._settings['dist_crit']:
-            return 'crit'
-        elif value <= self._settings['dist_warn']:
-            return 'warn'
+        self._logger.debug("Creating adjusted value from latest value: {}".format(self._history[0][0]))
+        # If sensor fails to get a reading, call it unknown.
+        if isinstance(self._history[0][0],str):
+            return "Unknown"
         else:
-            return 'ok'
+            return self._history[0][0] - self.offset
 
+    # Assess the quality of the sensor
     @property
-    @only_if_ready
-    def vector(self):
-        # Only consider readings within the past 10s. This makes sure nothing bogus gets in here for wild readings.
-        readings = []
-        for reading in self._history:
-            if monotonic_ns() - reading[1] <= 10000000000:
-                readings.append(reading)
-        i = 0
-        vectors = []
-        while i < len(readings):
-            try:
-                d = ( self._history[i][0] - self._history[i+1][0] )
-            except IndexError:
-                i +=1
+    @read_if_stale
+    def quality(self):
+        self._logger.debug("Creating quality from latest value: {}".format(self._history[0][0]))
+        if isinstance(self._history[0][0],str):
+                return "Unknown"
+        else:
+            # You're about to hit the wall!
+            if self._history[0][0] < Quantity("2 in"):
+                return 'Emergency!'
+            # Now consider the adjusted values.
+            elif self.value < 0 and abs(self.value) > self.spread_park:
+                return 'Back up'
+            elif abs(self.value) < self.spread_park:
+                return 'Park'
+            elif self.value <= self._settings['dist_crit']:
+                return 'Final'
+            elif self.value <= self._settings['dist_warn']:
+                return 'Base'
             else:
-                t = Quantity(self._history[i+1][1] - self._history[i][1],'nanoseconds').to('seconds')
-                v = d/t
-                vectors.append(v)
-                i += 1
-        net_vector = mean(vectors)
-        if net_vector.magnitude == 0:
-            direction = 'still'
-            speed = net_vector
-        elif net_vector.magnitude > 0:
-            direction = 'forward'
-            speed = net_vector
-        elif net_vector.magnitude < 0:
-            # Make the speed positive, we'll report direction separately.
-            direction = 'reverse'
-            speed = net_vector * -1
-        return {'speed': speed, 'direction': direction}
+                return 'OK'
 
     # Based on readings, is the vehicle in motion?
     @property
-    @only_if_ready
+    @read_if_stale
     def motion(self):
-        if self.vector['speed'] > 0:
-            return True
-        else:
-            return False
+        self._logger.debug("Trying to determine motion for detector: {}".format(self.name))
+        self._logger.debug("Sensor history: {}".format(self._history))
+        return False
+
+    @property
+    @read_if_stale
+    def vector(self):
+        return_dict = { 'speed': Quantity("0 mph"), 'direction': None }
+        return return_dict
+    #     # If the sensor is reading beyond range, speed and direction can't be known, so return immediately.
+    #     if isinstance(self._history[0][0], str):
+    #         return { 'speed': 'unknown', 'direction': 'unknown'}
+    #     # Only consider readings within the past 10s. This makes sure nothing bogus gets in here for wild readings.
+    #     readings = []
+    #     for reading in self._history:
+    #         if monotonic_ns() - reading[1] <= 10000000000:
+    #             readings.append(reading)
+    #     i = 0
+    #     vectors = []
+    #     while i < len(readings):
+    #         try:
+    #             d = ( self._history[i][0] - self._history[i+1][0] )
+    #         # If the index doesn't exist, or we can't subtract, move ahead.
+    #         except IndexError:
+    #             i += 1
+    #         except TypeError:
+    #             i +=1
+    #         else:
+    #             t = Quantity(self._history[i+1][1] - self._history[i][1],'nanoseconds').to('seconds')
+    #             v = d/t
+    #             vectors.append(v)
+    #             i += 1
+    #     net_vector = mean(vectors)
+    #     if net_vector.magnitude == 0:
+    #         direction = 'still'
+    #         speed = net_vector
+    #     elif net_vector.magnitude > 0:
+    #         direction = 'forward'
+    #         speed = net_vector
+    #     elif net_vector.magnitude < 0:
+    #         # Make the speed positive, we'll report direction separately.
+    #         direction = 'reverse'
+    #         speed = net_vector * -1
+    #     return {'speed': speed, 'direction': direction}
+
 
 
     # Gets called when the rangefinder has all settings and is being made ready for use.
@@ -326,41 +374,53 @@ class Lateral(SingleDetector):
     def __init__(self, detector_id, detector_name, board_options):
         super().__init__(detector_id, detector_name, board_options)
         # Initialize required elements as None. This lets us do a readiness check later.
-        self._required_settings = ['offset', 'spread_ok', 'spread_warn', 'spread_crit', 'side']
+        self._required_settings = ['offset', 'spread_ok', 'spread_warn', 'side']
         for setting in self._required_settings:
             self._settings[setting] = None
 
     @property
+    @read_if_stale
     def value(self):
-        # Read the sensor and put it at the start of the list, along with a timestamp.
-        self._history.insert(0, [self._sensor_obj.range, monotonic_ns()])
-        # Make sure the history list is always five elements, so we don't just grow this ridiculously.
-        self._history = self._history[:5]
-        # Return that reading, minus the offset.
-        if self._range_reading > self._settings['intercept']:
-            return 'NI'
-        elif self._history[0][0] < 0:
-            return "UR"
-        elif self._history[0][0] >= Quantity("96 in"):
-            return "BR"
+        self._logger.debug("Creating adjusted value from latest value: {}".format(self._history[0][0]))
+        # Interpretation logic for the sensor value.
+        # First check to see if we've been intercepted or not? IF we haven't, than any sensor reading is bogus.
+        if isinstance(self._range_reading, Quantity):
+            if self._range_reading > self.intercept:
+                # If the vehicle hasn't reached this sensor yet, any reading should be discarded, return
+                # not intercepted instead.
+                return "Not intercepted"
+            else:
+                # We *should* be able to get a reading.
+                if isinstance(self._history[0][0], Quantity):
+                    return self._history[0][0] - self.offset
+                else:
+                    return "Unknown"
         else:
-            return self._history[0][0] - self.offset
+            # If we don't have a range value provided yet, then return unknown.
+            return "Unknown"
 
     @property
-    @only_if_ready
+    @read_if_stale
     def quality(self):
-        value = self.value
+        self._logger.debug("Assessing quality for value: {}".format(self._history[0][0]))
         # Process quality if we get a quantity from the Detector.
-        if isinstance(value, Quantity):
-            if abs(value) <= self.spread_ok:
-                return "ok"
-            elif abs(value) <= self.spread_warn:
-                return "warn"
-            elif abs(value) >= self.spread_crit:
-                return "crit"
-        # Otherwise, return the text value of the detector.
+        if isinstance(self._history[0][0], Quantity):
+            self._logger.debug("Comparing to: \n\t{}\n\t{}".format(
+                self.spread_ok,self.spread_warn ))
+            if self._history[0][0] > Quantity('96 in'):
+                qv = "No object detected"
+            if abs(self._history[0][0]) <= self.spread_ok:
+                qv = "OK"
+            elif abs(self._history[0][0]) <= self.spread_warn:
+                qv = "Warning"
+            elif abs(self._history[0][0]) > self.spread_warn:
+                qv = "Critical"
+            else:
+                qv = "Unknown"
         else:
-            return value
+            qv = "Unknown"
+        self._logger.debug("Quality returning {}".format(qv))
+        return qv
 
     @property
     def ready(self):
@@ -391,7 +451,7 @@ class Lateral(SingleDetector):
     @spread_ok.setter
     @check_ready
     def spread_ok(self, input):
-        self._settings['spread_ok'] = self._convert_value(input)
+        self._settings['spread_ok'] = self._convert_value(input).to('cm')
         # Check to see if the detector is now ready.
 
     @property
@@ -401,17 +461,7 @@ class Lateral(SingleDetector):
     @spread_warn.setter
     @check_ready
     def spread_warn(self, input):
-        self._settings['spread_warn'] = self._convert_value(input)
-        # Check to see if the detector is now ready.
-
-    @property
-    def spread_crit(self):
-        return self._settings['spread_crit']
-
-    @spread_crit.setter
-    @check_ready
-    def spread_crit(self, input):
-        self._settings['spread_crit'] = self._convert_value(input)
+        self._settings['spread_warn'] = self._convert_value(input).to('cm')
         # Check to see if the detector is now ready.
 
     @property
