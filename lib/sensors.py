@@ -184,8 +184,9 @@ class CB_VL53L1X(BaseSensor):
             return self._previous_reading
         else:
             reading = self._sensor_obj.distance
+            # A "none" means the sensor had no response.
             if reading is None:
-                return None
+                return "No reading"
             else:
                 reading = Quantity(reading, self._ureg.centimeter)
                 self._previous_reading = reading
