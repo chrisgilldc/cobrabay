@@ -54,7 +54,10 @@ class Display:
         self._layers['error'] = self._placard('ERROR','red')
 
     # Have a bay register. This creates layers for that bay's lateral.
-    def register_bay(self, bay_id, lateral_order, lateral_names):
+    def register_bay(self, display_reg_info):
+        bay_id = display_reg_info['bay_id']
+        self._logger.debug("Registering bay ID {} to display".format(bay_id))
+        self._logger.debug("Got registration input: {}".format(display_reg_info))
         # Initialize a dict for this bay_id.
         self._layers[bay_id] = {}
 
@@ -64,9 +67,9 @@ class Display:
 
         # Calculate the available pixels for each zones.
         avail_height = self._settings['matrix_height'] - 6  #
-        pixel_lengths = self._parts(avail_height, len(lateral_names))
+        pixel_lengths = self._parts(avail_height, len(display_reg_info['lateral_order']))
         self._logger.debug("Split {} pixels for {} lateral zones into: {}".
-                           format(avail_height,lateral_count,pixel_lengths))
+                           format(avail_height,len(display_reg_info['lateral_order']),pixel_lengths))
 
         status_lookup = (
             ['ok',(0,128,0,0)],
@@ -78,11 +81,11 @@ class Display:
         # Add in the used height of each bar to this variable. Since they're not guaranteed to be the same, we can't
         # just multiply.
         accumulated_height = 0
-        while i < lateral_count:
-            self._logger.debug("Processing lateral zone: {}".format(i+1))
-            self._layers['lateral']['zone_' + str(i+1)] = {}
+        for lateral in display_reg_info['lateral_order']:
+            self._logger.debug("Processing lateral zone: {}".format(lateral))
+            self._layers[bay_id][lateral] = {}
             for side in ('L','R'):
-                self._layers['lateral']['zone_' + str(i + 1)][side] = {}
+                self._layers[bay_id][lateral][side] = {}
                 for status in status_lookup:
                     # Make the image.
                     img = Image.new('RGBA', (w, h), (0,0,0,0))
@@ -97,12 +100,16 @@ class Display:
                     draw.line([(line_w,1 + accumulated_height),(line_w,1 + accumulated_height + pixel_lengths[i])],
                         fill=status[1],width=1)
                     # Put this in the right place in the lookup.
-                    self._layers['lateral']['zone_' + str(i+1)][side][status[0]] = img
+                    self._layers[bay_id][lateral][side][status[0]] = img
+                    # Write for debugging
+                    img.save("/tmp/cobrabay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
+                    del(draw)
+                    del(img)
             # Now add the height of this bar to the accumulated height, to get the correct start for the next time.
             accumulated_height += pixel_lengths[i]
             # Increment to the next zone.
             i += 1
-        print(self._layers['lateral'])
+        self._logger.debug("Created laterals for {}: {}".format(bay_id, self._layers[bay_id]))
 
     # General purpose message displayer
     def show(self,mode,message=None,color="white"):
@@ -142,11 +149,14 @@ class Display:
         # Strober calculate the blocking box and the strobe bugs.
         final_image = Image.alpha_composite(final_image, self._strober(display_data))
 
-        # If lateral zones exist, add the lateral frame.
-        if len(self._layers['lateral']) > 0:
+        # IF lateral data is reported, show it.
+        if len(display_data['lateral']) > 0:
             final_image = Image.alpha_composite(final_image, self._layers['frame_lateral'])
-            self._logger.debug("Lateral layers available: {}".format(self._layers['lateral'].keys()))
-
+            for reading in display_data['lateral']:
+                if reading['quality'] in ('ok','warn','crit'):
+                    selected_layer = self._layers[display_data['bay_id']][reading['name']][reading['side']][reading['quality']]
+                    self._logger.debug("Selected for {} image layer {}".format(reading['name'], selected_layer))
+                    final_image = Image.alpha_composite(final_image, selected_layer)
         self._output_image(final_image)
 
     def _strober(self, display_data):
@@ -156,7 +166,7 @@ class Display:
         img = Image.new("RGBA", (w, h), (0,0,0,0))
         draw = ImageDraw.Draw(img)
         # Back up and emergency distances, we flash the whole bar.
-        if display_data['range_quality'] in ('back-up','emerg'):
+        if display_data['range_quality'] in ('Back up','Emergency!'):
             if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
                 try:
                     if self._running['strobe_color'] == 'red':
@@ -168,9 +178,13 @@ class Display:
                 self._running['strobe_timer'] = monotonic_ns()
             draw.line([(1,h-2),(w-2,h-2)], fill=self._running['strobe_color'])
         else:
-            # Calculate where the blockers need to be.
-            available_width = (w-2)/2
-            blocker_width = math.floor(available_width * (1-display_data['range_pct']))
+            # If we're beyond range, always have the blockers be zero.
+            if display_data['range_quality'] == 'Back up':
+                blocker_width = 0
+            else:
+                # Calculate where the blockers need to be.
+                available_width = (w-2)/2
+                blocker_width = math.floor(available_width * (1-display_data['range_pct']))
             self._logger.debug("Strober blocker width: {}".format(blocker_width))
             # Because of rounding, we can wind up with an entirely closed bar if we're not fully parked.
             # Thus, fudge the space unless we're okay.
@@ -223,10 +237,13 @@ class Display:
 
     # Make a placard to show range.
     def _placard_range(self,input_range,range_quality):
+        self._logger.debug("Creating range placard with range {} and quality {}".format(input_range, range_quality))
         # Some range quality statuses need a text output, not a distance.
-        if range_quality == 'back-up':
+        if range_quality == 'Back up':
             range_string = "BACK UP"
-        elif  self._settings['units'] == 'imperial':
+        elif input_range == 'Beyond range':
+            range_string = "APPROACH"
+        elif self._settings['units'] == 'imperial':
             as_inches = input_range.to('in')
             if as_inches.magnitude < 12:
                 range_string = "{}\"".format(round(as_inches.magnitude,1))
@@ -239,10 +256,12 @@ class Display:
             range_string = "{} m".format(as_meters)
 
         # Determine a color based on quality
-        if range_quality in ('crit','back-up'):
+        if range_quality in ('Critical','Back up'):
             text_color = 'red'
-        elif range_quality =='warn':
+        elif range_quality =='Warning':
             text_color = 'yellow'
+        elif range_quality == 'Beyond range':
+            text_color = 'blue'
         else:
             text_color = 'green'
         # Now we can get it formatted and return it.
