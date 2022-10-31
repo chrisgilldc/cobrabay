@@ -72,9 +72,9 @@ class Display:
                            format(avail_height,len(display_reg_info['lateral_order']),pixel_lengths))
 
         status_lookup = (
-            ['ok',(0,128,0,0)],
-            ['warn',(255,0,0,0)],
-            ['crit',(255,0,0,0)]
+            ['OK',(0,128,0,255)],
+            ['Warning',(255,255,0,255)],
+            ['Critical',(255,0,0,255)]
         )
 
         i = 0
@@ -87,16 +87,18 @@ class Display:
             for side in ('L','R'):
                 self._layers[bay_id][lateral][side] = {}
                 for status in status_lookup:
+                    self._logger.debug("Creating layer for side {}, status {} with color {}.".format(side, status[0], status[1]))
                     # Make the image.
                     img = Image.new('RGBA', (w, h), (0,0,0,0))
                     draw = ImageDraw.Draw(img)
                     # Move the width depending on which side we're on.
                     if side == 'L':
-                        line_w = 1
+                        line_w = 5
                     elif side == 'R':
                         line_w = w - 2  # -2, one because of the border, one because it's 0 indexed.
                     else:
                         raise ValueError("Not a valid side option, this should never happen!")
+
                     draw.line([(line_w,1 + accumulated_height),(line_w,1 + accumulated_height + pixel_lengths[i])],
                         fill=status[1],width=1)
                     # Put this in the right place in the lookup.
@@ -150,12 +152,13 @@ class Display:
         final_image = Image.alpha_composite(final_image, self._strober(display_data))
 
         # IF lateral data is reported, show it.
+        self._logger.debug("Data has lateral entries: {}".format(len(display_data['lateral'])))
         if len(display_data['lateral']) > 0:
             final_image = Image.alpha_composite(final_image, self._layers['frame_lateral'])
             for reading in display_data['lateral']:
-                if reading['quality'] in ('ok','warn','crit'):
+                if reading['quality'] in ('OK','Warning', 'Critical'):
+                    self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(reading['name'], reading['side'], reading['quality']))
                     selected_layer = self._layers[display_data['bay_id']][reading['name']][reading['side']][reading['quality']]
-                    self._logger.debug("Selected for {} image layer {}".format(reading['name'], selected_layer))
                     final_image = Image.alpha_composite(final_image, selected_layer)
         self._output_image(final_image)
 
