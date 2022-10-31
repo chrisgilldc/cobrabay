@@ -27,6 +27,7 @@ class Network:
         self._logger = logging.getLogger("CobraBay").getChild("Network")
         self._logger.setLevel(config.get_loglevel('network'))
         self._logger.info("Network initializing...")
+        self._logger.debug("Network has settings: {}".format(self._settings))
 
         try:
             from secrets import secrets
@@ -193,6 +194,16 @@ class Network:
                         'entity': '{0[bay_id]}_state'
                     }
                 },
+                'bay_laterals': {
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/{0[lateral]/display',
+                    'previous_state': {},
+                    'ha_discovery': {
+                        'name': '{0[bay_name]} {0[lateral]} Display',
+                        'type': 'camera',
+                        'entity': '{0[bay_id]}_{0[lateral]}_display',
+                        'encoding': 'b64'
+                    }
+                },
                 # Which detector is selected for active range use.
                 'bay_range_selected': {
                     'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/range_selected',
@@ -278,14 +289,14 @@ class Network:
         self._logger.info('Network: Initialization complete.')
 
     # Method to register a bay.
-    def register_bay(self, discovery_info):
+    def register_bay(self, discovery_reg_info):
         # We only need the names of things.
-        self._bay_registry[discovery_info['bay_id']] = discovery_info
-        self._logger.debug("Have registered new bay info: {}".format(self._bay_registry[discovery_info['bay_id']]))
+        self._bay_registry[discovery_reg_info['bay_id']] = discovery_reg_info
+        self._logger.debug("Have registered new bay info: {}".format(self._bay_registry[discovery_reg_info['bay_id']]))
         # If Home Assistant is enabled, and we're already connected, run just the Bay discovery.
         if self._mqtt_connected and self._settings['homeassistant']:
-            self._logger.debug("Running HA discovery for bay {}".format(discovery_info['bay_id']))
-            self._ha_discovery_bay(discovery_info['bay_id'])
+            self._logger.debug("Running HA discovery for bay {}".format(discovery_reg_info['bay_id']))
+            self._ha_discovery_bay(discovery_reg_info['bay_id'])
 
     def unregister_bay(self, bay_id):
         try:
@@ -513,6 +524,8 @@ class Network:
         self._logger.debug("HA Discovery for Bay ID {} has been called.".format(bay_id))
         # Get the bay name
         bay_name = self._bay_registry[bay_id]['bay_name']
+        self._logger.debug("Have registry data: {}".format(self._bay_registry[bay_id]))
+        # Create the single entities. There's one of these per bay.
         # Create the single entities. There's one of these per bay.
         # Bay_display discovery is broken for now, so skipping it.
         for entity in ('bay_occupied','bay_state', 'bay_speed', 'bay_motion', 'bay_dock_time'):
