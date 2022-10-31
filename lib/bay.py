@@ -87,7 +87,8 @@ class Bay:
         self.state = 'unoccupied'
 
     # Method to get info to pass to the Network module and register.
-    def discovery_info(self):
+    @property
+    def discovery_reg_info(self):
         # For discovery, the detector hierarchy doesn't matter, so we can flatten it.
         return_dict = {
             'bay_id': self.bay_id,
@@ -98,10 +99,19 @@ class Bay:
             for item in self._detectors[direction]:
                 detector = {
                     'detector_id': item,
-                    'name': self._detectors[direction][item].name
+                    'name': self._detectors[direction][item].name,
+                    'type': self._detectors[direction][item].detector_type
                 }
                 return_dict['detectors'].append(detector)
 
+        return return_dict
+
+    @property
+    def display_reg_info(self):
+        return_dict = {
+            'bay_id': self.bay_id,
+            'lateral_order': self._lateral_order
+        }
         return return_dict
 
     # Bay properties
@@ -141,6 +151,7 @@ class Bay:
 
     # Scans
     def _scan_detectors(self):
+        readings = {}
         self._position = { 'longitudinal': {}, 'lateral': {} }
         self._quality = { 'longitudinal': {}, 'lateral': {} }
         self._logger.debug("Starting detector scan.")
@@ -150,7 +161,12 @@ class Bay:
         for detector in self._detectors['longitudinal']:
             value = self._detectors['longitudinal'][detector].value
             self._logger.debug("Read of longitudinal detector {} returned {}".format(detector, value))
-            self._position['longitudinal'][detector] = self._detectors['longitudinal'][detector].value.to(self._settings['output_unit'])
+
+            if isinstance(value,Quantity):
+                # If we got a proper Quantity, convert to our output unit.
+                self._position['longitudinal'][detector] = value.to(self._settings['output_unit'])
+            else:
+                self._position['longitudinal'][detector] = value
             self._quality['longitudinal'][detector] = self._detectors['longitudinal'][detector].quality
         # Pick a reading for authoritative range.
         # If there's only one longitudinal sensor, we go with that.
@@ -162,7 +178,11 @@ class Bay:
             # Give the lateral detector the current range reading.
             self._detectors['lateral'][detector_name].range_reading = self._position['longitudinal'][self._selected_range]
             # Now we can get the position and quality from the detector.
-            self._position['lateral'][detector_name] = self._detectors['lateral'][detector_name].value.to(self._settings['output_unit'])
+            value = self._detectors['lateral'][detector_name].value
+            if isinstance(value,Quantity):
+                self._position['lateral'][detector_name] = value.to(self._settings['output_unit'])
+            else:
+                self._position['lateral'][detector_name] = value
             self._quality['lateral'][detector_name] = self._detectors['lateral'][detector_name].quality
         # Update the dock timer.
         if self._detectors['longitudinal'][self._selected_range].motion:
@@ -269,13 +289,17 @@ class Bay:
 
     # Send collect data needed to send to the display. This is synactically shorter than the MQTT messages.
     def display_data(self):
-        return_data = {}
+        return_data = { 'bay_id': self._bay_id }
         # Give only the range reading of the selected range sensor. The display will only use one of them.
         return_data['range'] = self._position['longitudinal'][self._selected_range]
         # The range quality band. This is used for color coding.
         return_data['range_quality'] = self._quality['longitudinal'][self._selected_range]
-        # Percentage of the range covered. This is needed to construct the strober, so everyone knows this is a Cylon.
-        return_data['range_pct'] = return_data['range'].to('cm') / self._settings['adjusted_depth'].to('cm')
+        # Percentage of range covered. This is used to construct the strober.
+        # If it's not a Quantity, just return zero.
+        if isinstance(return_data['range'], Quantity):
+            return_data['range_pct'] = return_data['range'].to('cm') / self._settings['adjusted_depth'].to('cm')
+        else:
+            return_data['range_pct'] = 0
         # List for lateral state.
         return_data['lateral'] = []
         self._logger.debug("Using lateral order: {}".format(self._lateral_order))
@@ -285,6 +309,7 @@ class Bay:
         if self._lateral_order is not None:
             for lateral_detector in self._lateral_order:
                 return_data['lateral'].append({
+                    'name': lateral_detector,
                     'quality': self._quality['lateral'][lateral_detector],
                     'side': self._detectors['lateral'][lateral_detector].side }
                 )
@@ -353,7 +378,7 @@ class Bay:
         lateral_order = {}
         config_options = {
             'longitudinal': ('offset', 'bay_depth', 'spread_park'),
-            'lateral': ('offset', 'spread_ok', 'spread_warn', 'spread_crit', 'side', 'intercept')
+            'lateral': ('offset', 'spread_ok', 'spread_warn', 'side', 'intercept')
         }
         for direction in self._detectors.keys():
             self._logger.debug("Checking for {} detectors.".format(direction))
@@ -384,7 +409,7 @@ class Bay:
             else:
                 self._logger.debug("No detectors defined.")
         # Check for lateral order.
-        if self._lateral_order is not None:
+        if lateral_order is not None:
             self._logger.debug("Now have lateral order: {}".format(lateral_order))
             self._lateral_order = sorted(lateral_order, key=lateral_order.get)
             self._logger.debug("Sorted lateral order: {}".format(self._lateral_order))
