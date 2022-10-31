@@ -16,17 +16,25 @@ class Convertomatic:
     def convert(self, input):
         if isinstance(input, Quantity):
             # Check for various dimensionalities and convert as appropriate.
+            # Distance
             if input.check('[length]'):
                 # self._logger.debug("Quantity is a length.")
                 if self._unit_system == "imperial":
                     output = input.to("in")
                 else:
                     output = input.to("cm")
+            # Temperature
             elif input.check('[temperature]'):
                 if self._unit_system == "imperial":
                     output = input.to("degF")
                 else:
                     output = input.to("degC")
+            # Speed, ie: length over time
+            elif input.check('[velocity]'):
+                if self._unit_system == "imperial":
+                    output = input.to("mph")
+                else:
+                    output = input.to("kph")
             # Bytes don't have a dimensionality, so we check the unit name.
             elif str(input.units) == 'byte':
                 output = input.to("Mbyte")
