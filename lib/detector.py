@@ -402,18 +402,18 @@ class Lateral(SingleDetector):
     @property
     @read_if_stale
     def quality(self):
-        self._logger.debug("Assessing quality for value: {}".format(self._history[0][0]))
+        self._logger.debug("Assessing quality for value: {}".format(self.value))
         # Process quality if we get a quantity from the Detector.
-        if isinstance(self._history[0][0], Quantity):
+        if isinstance(self.value, Quantity):
             self._logger.debug("Comparing to: \n\t{}\n\t{}".format(
                 self.spread_ok,self.spread_warn ))
-            if self._history[0][0] > Quantity('96 in'):
+            if self.value > Quantity('96 in'):
                 qv = "No object detected"
-            if abs(self._history[0][0]) <= self.spread_ok:
+            if abs(self.value) <= self.spread_ok:
                 qv = "OK"
-            elif abs(self._history[0][0]) <= self.spread_warn:
+            elif abs(self.value) <= self.spread_warn:
                 qv = "Warning"
-            elif abs(self._history[0][0]) > self.spread_warn:
+            elif abs(self.value) > self.spread_warn:
                 qv = "Critical"
             else:
                 qv = "Unknown"
