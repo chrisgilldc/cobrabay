@@ -67,20 +67,6 @@ class Bay:
         # Mark self as ready.
         self._state = 'ready'
 
-    # # Imperative commands
-    # def dock(self):
-    #     self._logger.debug("Received dock command.")
-    #     if self.state in ('docking','undocking'):
-    #         raise ValueError("Cannot dock, already {}".format(self.state))
-    #     elif self.state == 'unavailable':
-    #         raise ValueError("Cannot dock, bay is unavailable")
-    #     else:
-    #         # Do the things to do when docking.
-    #         self.state = 'docking'
-    #
-    # def undock(self):
-    #     pass
-
     # Abort gets called when we want to cancel a docking.
     def abort(self):
         # Return the bay to a ready state.
