@@ -48,7 +48,7 @@ class CBConfig():
         try:
             validated_yaml = self._validate(staging_yaml)
         except:
-            self._logger.warning("Could not validate config file. Will not load.")
+            self._logger.exception("Could not validate config file. Will not load.")
         else:
             self._logger.info("Config file validated. Loading.")
             self._logger.debug(validated_yaml)
@@ -85,7 +85,7 @@ class CBConfig():
     # Main validator.
     def _validate(self,staging_yaml):
         # Check for the main sections.
-        for section in ('system','display','detectors','bay'):
+        for section in ('system','display','detectors','bays'):
             if section not in staging_yaml.keys():
                 raise KeyError("Required section {} not in config file.".format(section))
         return staging_yaml
@@ -103,28 +103,38 @@ class CBConfig():
             self._logger.error("No logging section in config, using INFO as default.")
             return "INFO"
         else:
+            # Is the name a bay?
+            if module in self._config['bays'].keys():
+                try:
+                    # Does the bay have its own log level defined?
+                    requested_level = self._config['bays'][module]['log_level']
+                except KeyError:
+                    # Nope. Change our module name to 'bays' and proceed with standard testing.
+                    module = 'bays'
             try:
-                result = logging.getLevelName(self._config['system']['logging']['default_level'])
-            except KeyError:
-                # If default_level wasn't defined (which is strange!), return info as default.
-                self._logger.error("No default logging level defined externally, using INFO")
-                return "INFO"
-            if module in self._config['system']['logging']:
+                # Does the module have its own logging level defined?
                 requested_level = self._config['system']['logging'][module].lower()
-                if requested_level == "debug":
-                    return "DEBUG"
-                elif requested_level == "info":
+            except KeyError:
+                try:
+                    # No, use the system default level?
+                    requested_level = self._config['system']['logging']['default_level'].lower()
+                except KeyError:
+                    # That's not defined either!? Default to INFO.
                     return "INFO"
-                elif requested_level == "warning":
-                    return "WARNING"
-                elif requested_level == "error":
-                    return "ERROR"
-                elif requested_level == "critical":
-                    return "CRITICAL"
-                else:
-                    self._logger.error("Module {} had unknown level {}. Using INFO instead.".format(module,requested_level))
-                    return "INFO"
+
+            # Ensure the requested log level if valid.
+            if requested_level == "debug":
+                return "DEBUG"
+            elif requested_level == "info":
+                return "INFO"
+            elif requested_level == "warning":
+                return "WARNING"
+            elif requested_level == "error":
+                return "ERROR"
+            elif requested_level == "critical":
+                return "CRITICAL"
             else:
+                self._logger.error("Module {} had unknown level {}. Using INFO instead.".format(module,requested_level))
                 return "INFO"
 
     # Return a settings dict to be used for the Display module.
@@ -157,6 +167,48 @@ class CBConfig():
             config_dict['homeassistant'] = self._config['system']['homeassistant']
         except KeyError:
             config_dict['homeassistant'] = False
+        return config_dict
 
+    def bay(self, bay_id):
+        self._logger.info("Received config generate request for: {}".format(bay_id))
+        if bay_id not in self._config['bays']:
+            raise KeyError("No configuration defined for {}".format(bay_id))
+        # Initialize the config dict. Include the bay ID, and default to metric.
+        config_dict = {
+            'bay_id': bay_id,
+            'unit_system': 'metric',
+            'output_unit': 'm'
+        }
+        # If Imperial is defined, set that.
+        try:
+            if self._config['system']['units'].lower() == 'imperial':
+                config_dict['unit_system'] = 'imperial'
+                config_dict['output_unit'] = 'in'
+        except KeyError:
+            pass
+
+        # Set a 'friendly' name for use in HA discovery. If not defined, use the Bay ID.
+        try:
+            config_dict['bay_name'] = self._config['bays'][bay_id]['name']
+        except KeyError:
+            config_dict['bay_name'] = self._config['bays'][bay_id]['bay_id']
+
+        # How long there should be no motion until we consider the bay to be parked. Convert to seconds and take out
+        # magnitude.
+        config_dict['park_time'] = Quantity(self._config['bays'][bay_id]['park_time']).to('second').magnitude
+        # Actual bay depth.
+        config_dict['bay_depth'] = Quantity(self._config['bays'][bay_id]['bay_depth']).to('cm')
+        # Adjust the bay depth by the offset.
+        config_dict['adjusted_depth'] = Quantity(config_dict['bay_depth']) - Quantity(
+            self._config['bays'][bay_id]['longitudinal']['defaults']['offset']).to('cm')
+
+        # Bring over the directional configs. These will get processed within the bay module.
+        config_dict['longitudinal'] = self._config['bays'][bay_id]['longitudinal']
+        config_dict['lateral'] = self._config['bays'][bay_id]['lateral']
 
         return config_dict
+
+    # Properties!
+    @property
+    def bay_list(self):
+        return self._config['bays'].keys()

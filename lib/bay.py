@@ -13,39 +13,27 @@ from .detector import CB_VL53L1X
 import logging
 
 class Bay:
-    def __init__(self,config,detectors):
+    def __init__(self, bay_id, config, detectors):
+        # Get our settings.
+        self._settings = config.bay(bay_id)
+        # Create a logger.
+        self._logger = logging.getLogger("CobraBay").getChild(self.bay_id)
+        self._logger.setLevel(config.get_loglevel(bay_id))
+
         # Initialize variables.
         self._position = {}
         self._quality = {}
-        self._settings = {}
         self._lateral_order = None
         self._detectors = None
-        # Extract the bay ID from the config.
-        self.bay_id = config['id']
-        # Get the Name. If no name defined, use the bay ID.
-        try:
-            self.bay_name = config['name']
-        except KeyError:
-            self.bay_name = self.bay_id
-        # Create a logger.
-        self._logger = logging.getLogger("CobraBay").getChild(self.bay_id)
-        self._logger.setLevel(logging.DEBUG)
+
         # Log our initialization.
         self._logger.info("Bay '{}' initializing...".format(self.bay_id))
         self._logger.debug("Bay received config: {}".format(config))
         # Create a unit registry.
         self._ureg = UnitRegistry
-        # Set the unit system. Default to Metric. If units is in the config and is imperial, change it to imperial.
-        self._settings['unit_system'] = 'metric'
-        self._settings['output_unit'] = 'm'
-        if 'units' in config:
-            if config['units'].lower() == 'imperial':
-                self._settings['unit_system'] = 'imperial'
-                self._settings['output_unit'] = 'in'
 
         # Set up the detectors.
-        self._setup_detectors(config,detectors)
-        self._logger.debug(self._detectors)
+        self._setup_detectors(detectors)
         self._logger.debug("Detectors configured:")
         self._logger.debug("\tLongitudinal - ")
         for detector in self._detectors['longitudinal']:
@@ -54,12 +42,9 @@ class Bay:
         for detector in self._detectors['lateral'].keys():
             self._logger.debug("\t\t{} - {}".format(detector, hex(self._detectors['lateral'][detector].i2c_address)))
 
-        # Sensor to door distance.
-        self._settings['depth'] = Quantity(config['bay_depth']).to('cm')
-        self._settings['adjusted_depth'] = Quantity(config['bay_depth']) - Quantity(config['longitudinal']['defaults']['offset']).to('cm')
         # Dock timer.
         self._dock_timer = {
-            'allowed': Quantity(config['park_time']).to('seconds').magnitude,
+            'allowed': self._settings['park_time'],
             'mark': None
         }
         self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
@@ -275,7 +260,7 @@ class Bay:
 
     # Send collect data needed to send to the display. This is synactically shorter than the MQTT messages.
     def display_data(self):
-        return_data = { 'bay_id': self._bay_id }
+        return_data = { 'bay_id': self.bay_id }
         # Give only the range reading of the selected range sensor. The display will only use one of them.
         return_data['range'] = self._position['longitudinal'][self._selected_range]
         # The range quality band. This is used for color coding.
@@ -347,15 +332,23 @@ class Bay:
 
     @property
     def bay_id(self):
-        return self._bay_id
+        return self._settings['bay_id']
 
     @bay_id.setter
-    def bay_id(self,input):
-        self._bay_id = input
+    def bay_id(self, input):
+        self._settings['bay_id'] = input
+
+    @property
+    def bay_name(self):
+        return self._settings['bay_name']
+
+    @bay_name.setter
+    def bay_name(self, input):
+        self._settings['bay_name'] = input
 
     # Method to set up the detectors for the bay. This applies bay-specific options to the individual detectors, which
     # are initialized by the main routine.
-    def _setup_detectors(self,config,detectors):
+    def _setup_detectors(self, detectors):
         # Initialize the detector dicts.
         self._detectors = {
             'longitudinal': {},
@@ -368,9 +361,9 @@ class Bay:
         }
         for direction in self._detectors.keys():
             self._logger.debug("Checking for {} detectors.".format(direction))
-            if direction in config:
+            if direction in self._settings:
                 self._logger.debug("Setting up {} detectors.".format(direction))
-                for detector_config in config[direction]['detectors']:
+                for detector_config in self._settings[direction]['detectors']:
                     self._logger.debug("Provided detector config: {}".format(detector_config))
                     try:
                         detector_obj = detectors[detector_config['detector']]
@@ -384,7 +377,7 @@ class Bay:
                         except KeyError:
                             self._logger.debug("Using default value for {}".format(item))
                             try:
-                                setattr(detector_obj, item, config[direction]['defaults'][item])
+                                setattr(detector_obj, item, self._settings[direction]['defaults'][item])
                             except KeyError:
                                 raise KeyError("Needed default value for {} but not defined!".format(item))
                     # # If we're processing lateral, add the intercept range to the lateral order dict.

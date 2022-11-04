@@ -42,6 +42,7 @@ class CobraBay:
 
         # Create a config object.
         self._cbconfig = CBConfig(reset_sensors=True)
+
         # Reset our own level based on the configuration.
         self._logger.setLevel(self._cbconfig.get_loglevel("core"))
 
@@ -51,8 +52,6 @@ class CobraBay:
         # Create the object for checking hardware status.
         self._logger.debug("Creating Pi hardware monitor...")
         self._pistatus = PiStatus()
-
-
 
         # Create the network object.
         self._logger.debug("Creating network object...")
@@ -75,14 +74,18 @@ class CobraBay:
         self._bays = {}
         self._logger.debug("Creating bays...")
         # For testing, only one bay, hard-wire it ATM.
-        self._bays[self.config['bay']['id']] = Bay(self.config['bay'], self._detectors)
+        # Create bays.
+        for bay_id in self._cbconfig.bay_list:
+            self._logger.info("Bay ID: {}".format(bay_id))
+            self._bays[bay_id] = Bay(bay_id, self._cbconfig, self._detectors)
 
         self._logger.info('CobraBay: Creating display...')
         self._display = Display(self._cbconfig)
 
         # Register the bay with the network and display.
-        self._network.register_bay(self._bays[self.config['bay']['id']].discovery_reg_info)
-        self._display.register_bay(self._bays[self.config['bay']['id']].display_reg_info)
+        for bay_id in self._bays:
+            self._network.register_bay(self._bays[bay_id].discovery_reg_info)
+            self._display.register_bay(self._bays[bay_id].display_reg_info)
 
         self._logger.info('CobraBay: Initialization complete.')
 
