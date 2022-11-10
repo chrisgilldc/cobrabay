@@ -60,6 +60,9 @@ class Display:
         self._logger.debug("Got registration input: {}".format(display_reg_info))
         # Initialize a dict for this bay_id.
         self._layers[bay_id] = {}
+        # If no lateral detectors are defined, do nothing else.
+        if len(display_reg_info['lateral_order']) == 0:
+            return None
 
         # For convenient reference later.
         w = self._settings['matrix_width']
@@ -138,12 +141,13 @@ class Display:
         w = self._settings['matrix_width']
         h = self._settings['matrix_height']
         # Make a base image, black background.
-        base_image = Image.new("RGBA", (w, h), (0,0,0,255))
+        final_image = Image.new("RGBA", (w, h), (0,0,0,255))
         ## Center area, the range number.
         # Pull out the range and range quality to make the center placard.
         self._logger.debug("Creating range placard with range: {}".format(display_data['range']))
+        # Only add the layer if it's a workable value.
         range_layer = self._placard_range(display_data['range'], display_data['range_quality'])
-        final_image = Image.alpha_composite(base_image, range_layer)
+        final_image = Image.alpha_composite(final_image, range_layer)
 
         ## Bottom strobe box.
         # Frame is a pre-baked box.
