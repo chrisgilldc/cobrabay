@@ -5,36 +5,22 @@
 import logging
 import weakref
 from time import monotonic, sleep
-
 import board
 import busio
 from adafruit_aw9523 import AW9523
 from adafruit_vl53l1x import VL53L1X as af_VL53L1X
 from pint import Quantity
 from pint import UnitRegistry
-from .TFmini_I2C import TFminiI2C
-from smbus2 import SMBus, i2c_msg
-from .util import scan_i2c
-import sys
+from .tfmp import TFMP
+from pathlib import Path
 
 
 class BaseSensor:
-    def __init__(self, board_options):
-        # Check for the Base I2C Sensors
-        required = ('i2c_bus', 'i2c_address')
+    def __init__(self, sensor_options, required):
+        self._settings = {}
         for item in required:
-            if item not in board_options:
-                raise ValueError("Required board_option '{}' missing.".format(item))
-        # Create a logger
-        self._name = "{}-{}-{}".format(type(self).__name__, board_options['i2c_bus'], hex(board_options['i2c_address']))
-        self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
-        self._logger.info("Initializing sensor...")
-
-        # Set the I2C bus and I2C Address
-        self._logger.debug("Setting I2C Properties...")
-        self.i2c_bus = board_options['i2c_bus']
-        self.i2c_address = board_options['i2c_address']
-        self._logger.debug("Now have I2C Bus {} and Address {}".format(self.i2c_bus, hex(self.i2c_address)))
+            if item not in sensor_options:
+                raise ValueError("Required sensor_option '{}' missing.".format(item))
 
         # Create a unit registry for the object.
         self._ureg = UnitRegistry()
@@ -45,6 +31,31 @@ class BaseSensor:
 
         # Sensor should call this init and then extend with its own options.
         # super().__init__(board_options)
+
+    @property
+    def range(self):
+        raise NotImplementedError("Range should be overridden by specific sensor class.")
+
+
+class I2CSensor(BaseSensor):
+    def __init__(self, sensor_options):
+        required = ('i2c_bus', 'i2c_address')
+        try:
+            super().__init__(sensor_options, required)
+        except ValueError:
+            raise
+        # Check for the Base I2C Sensors
+        # Create a logger
+        self._name = "{}-{}-{}".format(type(self).__name__, sensor_options['i2c_bus'],
+                                       hex(sensor_options['i2c_address']))
+        self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
+        self._logger.info("Initializing sensor...")
+
+        # Set the I2C bus and I2C Address
+        self._logger.debug("Setting I2C Properties...")
+        self.i2c_bus = sensor_options['i2c_bus']
+        self.i2c_address = sensor_options['i2c_address']
+        self._logger.debug("Now have I2C Bus {} and Address {}".format(self.i2c_bus, hex(self.i2c_address)))
 
     # Global properties. Since all supported sensors are I2C at the moment, these can be global.
     @property
@@ -71,25 +82,60 @@ class BaseSensor:
         else:
             self._i2c_address = i2c_address
 
+
+class SerialSensor(BaseSensor):
+    def __init__(self, sensor_options):
+        required = ('port', 'baud')
+        try:
+            super().__init__(sensor_options, required)
+        except ValueError:
+            raise
+        # Create a logger
+        self._name = "{}-{}".format(type(self).__name__, sensor_options['port'])
+        self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
+        self._logger.info("Initializing sensor...")
+        self.serial_port = sensor_options['port']
+        self.baud_rate = sensor_options['baud']
+
     @property
-    def range(self):
-        raise NotImplementedError("Range should be overridden by specific sensor class.")
+    def serial_port(self):
+        return self._settings['serial_port']
+
+    @serial_port.setter
+    def serial_port(self, target_port):
+        port_path = Path(target_port)
+        # Check if this path as given as "/dev/XXX". If not, redo with that.
+        if not port_path.is_absolute():
+            port_path = Path("/dev/" + target_port)
+        # Make sure the path is a device we can access.
+        if port_path.is_char_device():
+            self._settings['serial_port'] = str(port_path)
+        else:
+            raise ValueError("{} is not an accessible character device.".format(str(port_path)))
+
+    @property
+    def baud_rate(self):
+        return self._settings['baud_rate']
+
+    @baud_rate.setter
+    def baud_rate(self, target_rate):
+        self._settings['baud_rate'] = target_rate
 
 
-class CB_VL53L1X(BaseSensor):
+class CB_VL53L1X(I2CSensor):
     _i2c_address: int
     _i2c_bus: int
 
     instances = weakref.WeakSet()
 
-    def __init__(self, board_options):
+    def __init__(self, sensor_options):
         # Call super.
-        super().__init__(board_options)
+        super().__init__(sensor_options)
         # Check for additional required options.
         required = ['i2c_bus', 'i2c_address', 'enable_board', 'enable_pin']
         # Store the options.
         for item in required:
-            if item not in board_options:
+            if item not in sensor_options:
                 raise ValueError("Required board_option '{}' missing".format(item))
 
         # Define the enable pin.
@@ -112,17 +158,17 @@ class CB_VL53L1X(BaseSensor):
             raise
 
         # Set the properties
-        self.enable_board = board_options['enable_board']
-        self.enable_pin = board_options['enable_pin']
-        self.i2c_bus = board_options['i2c_bus']
-        self.i2c_address = board_options['i2c_address']
+        self.enable_board = sensor_options['enable_board']
+        self.enable_pin = sensor_options['enable_pin']
+        self.i2c_bus = sensor_options['i2c_bus']
+        self.i2c_address = sensor_options['i2c_address']
         # Enable self.
         self.enable()
 
         # Start ranging.
         self._sensor_obj.start_ranging()
         # Set the timing.
-        self.measurement_time = Quantity(board_options['timing']).to('microseconds').magnitude
+        self.measurement_time = Quantity(sensor_options['timing']).to('microseconds').magnitude
         self.distance_mode = 'long'
         self._previous_reading = self._sensor_obj.distance
         self._logger.debug("Test reading: {}".format(self._previous_reading))
@@ -249,20 +295,17 @@ class CB_VL53L1X(BaseSensor):
         self.stop_ranging()
 
 
-class TFMini(BaseSensor):
-    def __init__(self, board_options):
-        super().__init__(board_options)
+class TFMini(SerialSensor):
+    def __init__(self, sensor_options):
+        super().__init__(sensor_options)
         self._performance = {
             'max_range': Quantity('12m'),
             'min_range': Quantity('0.3m')
         }
 
         # Create the sensor object.
-        self._logger.debug("Creating TFMini object on bus {}, address {}".format(self.i2c_bus, hex(self.i2c_address)))
-        self._sensor_obj = TFminiI2C(self.i2c_bus, self.i2c_address)
-        self._sensor_obj.setUnit(0x01)  # Make sure we're set to centimeters.
-        self._sensor_obj.reset()
-        sleep(0.5)
+        self._logger.debug("Creating TFMini object on serial port {}".format(self.serial_port))
+        self._sensor_obj = TFMP(self.serial_port, self.baud_rate)
         self._logger.debug("Test reading: {}".format(self.range))
 
     # This sensor doesn't need an enable, do nothing.
@@ -275,39 +318,29 @@ class TFMini(BaseSensor):
 
     @property
     def range(self):
-        if monotonic() - self._previous_timestamp < 0.2:
+        # TFMini is always ranging, so no need to pace it.
+        reading = self._clustered_read() # Do a clustered read to ensure stability.
+        self._logger.debug("TFmini read values: {}".format(reading))
+        # Check the status to see if we got a value, or some kind of non-OK state.
+        if reading.status == "OK":
+            self._previous_reading = reading.distance
+            self._previous_timestamp = monotonic()
             return self._previous_reading
         else:
-            reading = self._clustered_read()
-            # reading = self._sensor_obj.readAll()
-            self._logger.debug("TFmini read values: {}".format(reading))
-            if reading[1] == 65535 and reading[2] < 100:
-                # Insufficient reflection strength means the sensor isn't hitting anything, therefore,
-                # door is open and bay is clear.
-                return "Door Open"
-            elif reading[1] == 65534 and ( reading[2] == 65535 or reading[2] == -1):
-                # No reading because the sensor is washed out.
-                return "Signal Saturation"
-            elif reading[1] == 65532:
-                # Ambient lights are too bright
-                return "Ambient Saturation"
-            else:
-                self._previous_reading = Quantity(reading[1], self._ureg.centimeter)
-                self._previous_timestamp = monotonic()
-                return self._previous_reading
+            return reading.status
 
-    # The TFMini can sometimes return wonky, bullshit answers. Chuck those.
+    # When this was tested in I2C mode, the TFMini could return unstable answers, even at rest. Unsure if
+    # this is still true in serial mode, keeping this clustering method for the moment.
     def _clustered_read(self):
         stable_count = 0
         i = 0
-        previous_read = self._sensor_obj.readAll()
+        previous_read = self._sensor_obj.data()
         start = monotonic()
-        while stable_count < 3:
-            reading = self._sensor_obj.readAll()
-            if reading[1] == previous_read[1]:
+        while stable_count < 5:
+            reading = self._sensor_obj.data()
+            if reading.distance == previous_read.distance:
                 stable_count += 1
             previous_read = reading
             i += 1
-        self._logger.debug("Took {} cycles in {}s to get stable reading.".format(i, monotonic() - start))
+        self._logger.debug("Took {} cycles in {}s to get stable reading of {}.".format(i, round(monotonic() - start,2), previous_read))
         return previous_read
-
