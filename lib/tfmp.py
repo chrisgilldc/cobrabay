@@ -262,7 +262,8 @@ class TFMP:
         self._data_stream.close()
 
     # Utility method to calculate checksums.
-    def _checksum(self, frames):
+    @staticmethod
+    def _checksum(frames):
         # Checksum starts at 0.
         chksum = 0
         #  Add together all bytes but the last.
