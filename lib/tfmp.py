@@ -120,7 +120,7 @@ class TFMP:
         temp = (temp >> 3) - 256
 
         # Check for unusual states and flag those.
-        if dist == -1:
+        if dist == -1 or flux < 100:
             status = "Weak"
         elif flux == -1:
             status = "Saturation"
