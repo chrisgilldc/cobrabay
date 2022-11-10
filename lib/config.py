@@ -1,19 +1,11 @@
 ####
 # Cobra Bay - Config Loader
 ####
-import board
-import busio
 import logging
 import yaml
 from pathlib import Path
 from pprint import PrettyPrinter
-from time import sleep
-
-from adafruit_aw9523 import AW9523
-from digitalio import DigitalInOut
-from adafruit_vl53l1x import VL53L1X
 from pint import Quantity
-
 
 class CBConfig():
     def __init__(self, config_file=None, reset_sensors=False):
@@ -204,7 +196,12 @@ class CBConfig():
 
         # Bring over the directional configs. These will get processed within the bay module.
         config_dict['longitudinal'] = self._config['bays'][bay_id]['longitudinal']
-        config_dict['lateral'] = self._config['bays'][bay_id]['lateral']
+
+        # It's possible to run the system without lateral detectors. Allow this.
+        try:
+            config_dict['lateral'] = self._config['bays'][bay_id]['lateral']
+        except KeyError:
+            pass
 
         return config_dict
 
