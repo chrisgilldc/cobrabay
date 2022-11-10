@@ -29,11 +29,17 @@ class Network:
         self._logger.info("Network initializing...")
         self._logger.debug("Network has settings: {}".format(self._settings))
 
+        # Sub-logger for just MQTT
+        self._logger_mqtt = logging.getLogger("CobraBay").getChild("MQTT")
+        self._logger_mqtt.setLevel(config.get_loglevel('mqtt'))
+        if self._logger_mqtt.level != self._logger.level:
+            self._logger.info("MQTT Logging level set to {}".format(self._logger_mqtt.level))
+
         try:
             from secrets import secrets
             self.secrets = secrets
         except ImportError:
-            self._logger.error('Network: No secrets.py file, cannot get connection details.')
+            self._logger.error('No secrets file, cannot get connection details.')
             raise
 
         # Create a convertomatic instance.
@@ -88,7 +94,7 @@ class Network:
         # Connect callback.
         self._mqtt_client.on_connect = self._on_connect
         # Disconnect callback
-        self._mqtt_client.on_disconnect = self._on_disconnect()
+        self._mqtt_client.on_disconnect = self._on_disconnect
 
         # Define topic reference.
         self._topics = {
@@ -169,6 +175,7 @@ class Network:
                         'name': '{} Display'.format(self._settings['system_name']),
                         'type': 'camera',
                         'entity': '{}_display'.format(self._settings['system_name'].lower()),
+                        'icon': 'mdi:monitor',
                         'encoding': 'b64'
                     }
                 },
@@ -320,19 +327,19 @@ class Network:
 
     # Device Command callback
     def _cb_device_command(self, client, userdata, message):
-        self._logger.debug("Received device command message: {}".format(message.payload))
+        self._logger_mqtt.debug("Received device command message: {}".format(message.payload))
         # Try to decode the JSON.
         try:
             message = json_loads(message.payload)
         except:
-            self._logger.error(
-                "Network: Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
+            self._logger_mqtt.error(
+                "Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
             # Ignore the error itself, plow through.
             return False
 
         # Proceed on valid commands.
         if 'cmd' not in message:
-            self._logger.error("Network: MQTT message for topic {} does not contain a 'cmd' directive".format(topic))
+            self._logger_mqtt.error("MQTT message for topic {} does not contain a 'cmd' directive".format(topic))
         elif message['cmd'] == 'rediscover':
             # Rerun Home Assistant discovery
             self._ha_discovery()
@@ -344,12 +351,12 @@ class Network:
         elif message['cmd'] == 'rescan_sensors':
             self._upward_commands.append({'type': 'device', 'cmd': 'rescan_sensors'})
         else:
-            self._logger.info("Network: Received unknown MQTT device command '{}'".format(message['cmd']))
+            self._logger.info("Received unknown MQTT device command '{}'".format(message['cmd']))
 
     # Bay Command callback
     def _cb_bay_command(self, client, userdata, message):
-        self._logger.debug("Received bay command message: {}".format(message.payload))
-        self._logger.debug("Incoming topic: {}".format(message.topic))
+        self._logger_mqtt.debug("Received bay command message: {}".format(message.payload))
+        self._logger_mqtt.debug("Incoming topic: {}".format(message.topic))
 
         # Pull out the bay ID.
         bay_id = message.topic.split('/')[-2]
@@ -359,20 +366,20 @@ class Network:
         try:
             message = json_loads(message.payload)
         except:
-            self._logger.error("Network: Could not decode JSON from MQTT message '{}' on topic '{}'"
+            self._logger_mqtt.error("Could not decode JSON from MQTT message '{}' on topic '{}'"
                                .format(message.topic, message.payload))
             # Ignore the message and return, as if we never got int.
             return
 
         # Proceed on valid commands.
         if 'cmd' not in message:
-            self._logger.error(
-                "Network: MQTT message for topic {} does not contain a cmd directive".format(message.topic))
+            self._logger_mqtt.error(
+                "MQTT message for topic {} does not contain a cmd directive".format(message.topic))
         elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify', 'reset'):
             # If it's a valid bay command, pass it upward.
             self._upward_commands.append({'type': 'bay', 'bay_id': bay_id, 'cmd': message['cmd']})
         else:
-            self._logger.info("Network: Received unknown MQTT bay command '{}'".format(message['cmd']))
+            self._logger.info("Received unknown MQTT bay command '{}'".format(message['cmd']))
 
     # Message publishing method
     def _pub_message(self, topic_type, topic, message, repeat=False, topic_mappings=None):
@@ -434,7 +441,7 @@ class Network:
     def poll(self, outbound_messages=None):
         # Send all the messages outbound.
         for message in outbound_messages:
-            self._logger.debug("Publishing MQTT message: {}".format(message))
+            self._logger_mqtt.debug("Publishing MQTT message: {}".format(message))
             self._pub_message(**message)
         # Check for any incoming commands.
         self._mqtt_client.loop()
@@ -514,6 +521,7 @@ class Network:
         for item in self._topics['system']:
             # Create items that have HA Discovery, and are enabled. Enabled/disabled is really 100% for development.
             if 'ha_discovery' in self._topics['system'][item]:
+                self._logger.debug("Performing HA discovery for: {}".format(item))
                 self._ha_create(topic_type='system', topic_name=item)
 
         for bay in self._bay_registry:
@@ -552,9 +560,14 @@ class Network:
         # provided and strings have replacement, they'll get replaced, ie: for bay items.
         self._logger.debug("State topic:")
         self._logger.debug(self._topics[topic_type][topic_name]['topic'])
+        # Camera uses 'topic', while everything else uses 'state_topic'.
+        if self._topics[topic_type][topic_name]['ha_discovery']['type'] == 'camera':
+            topic_key = 'topic'
+        else:
+            topic_key = 'state_topic'
         try:
             config_dict = {
-                'state_topic': self._topics[topic_type][topic_name]['topic'].format(fields),
+                topic_key: self._topics[topic_type][topic_name]['topic'].format(fields),
                 'type': self._topics[topic_type][topic_name]['ha_discovery']['type'],  ## Type shouldn't ever be templated.
                 'name': self._topics[topic_type][topic_name]['ha_discovery']['name'].format(fields),
                 'object_id': self._topics[topic_type][topic_name]['ha_discovery']['entity'].format(fields)
@@ -598,8 +611,9 @@ class Network:
                    self._client_id,
                    config_dict['object_id'])
         # Send it!
-        self._logger.debug("Publishing HA discovery to topic {}\n\t{}".format(config_topic, config_dict))
-        self._mqtt_client.publish(config_topic, json_dumps(config_dict))
+        ha_json = json_dumps(config_dict)
+        self._logger.debug("Publishing HA discovery to topic {}\n\t{}".format(config_topic, ha_json))
+        self._mqtt_client.publish(config_topic, ha_json)
 
     # Helper method to determine the correct unit of measure to use. When we have reported sensor units, we use
     # this method to ensure the correct unit is being put in.
