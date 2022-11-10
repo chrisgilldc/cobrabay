@@ -264,12 +264,16 @@ class Range(SingleDetector):
     def quality(self):
         self._logger.debug("Creating quality from latest value: {}".format(self._history[0][0]))
         if isinstance(self._history[0][0], str):
-            return "Unknown"
+            # A weak reading from the sensor almost certainly means the door is open and nothing is blocking.
+            if self._history[0][0] == "Weak":
+                return "Door open"
+            else:
+                return "Unknown"
         else:
             # You're about to hit the wall!
             if self._history[0][0] < Quantity("2 in"):
                 return 'Emergency!'
-            elif ( self.bay_depth * 0.90 ) <= self._self._history[0][0]:
+            elif ( self.bay_depth * 0.90 ) <= self._history[0][0]:
                 return 'No object'
             # Now consider the adjusted values.
             elif self.value < 0 and abs(self.value) > self.spread_park:
