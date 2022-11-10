@@ -19,6 +19,7 @@ from .detector import Lateral, Range
 from .network import Network
 from .systemhw import PiStatus
 
+
 class CobraBay:
     def __init__(self, cmd_opts=None):
         # Register the exit handler.
@@ -188,9 +189,8 @@ class CobraBay:
                  'topic': 'display',
                  'message': self._display.current, 'repeat': True})
 
-
     # Start sensors and display to guide parking.
-    def _dock(self,bay_id):
+    def _dock(self, bay_id):
         self._logger.info('Beginning dock.')
         # Wipe the post_action dict.
         self._post_action = {}
@@ -222,7 +222,7 @@ class CobraBay:
 
             # Put the display image on the MQTT stack.
             self._outbound_messages.append(
-                { 'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': True })
+                {'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': True})
 
             # Poll the network.
             self._logger.debug("Polling network.")
@@ -235,11 +235,14 @@ class CobraBay:
         self._outbound_messages.append(
             {'topic_type': 'system', 'topic': 'cpu_pct', 'message': self._pistatus.status('cpu_pct'), 'repeat': False})
         self._outbound_messages.append(
-            {'topic_type': 'system', 'topic': 'cpu_temp', 'message': self._pistatus.status('cpu_temp'), 'repeat': False})
+            {'topic_type': 'system', 'topic': 'cpu_temp', 'message': self._pistatus.status('cpu_temp'),
+             'repeat': False})
         self._outbound_messages.append(
-            {'topic_type': 'system', 'topic': 'mem_info', 'message': self._pistatus.status('mem_info'), 'repeat': False})
+            {'topic_type': 'system', 'topic': 'mem_info', 'message': self._pistatus.status('mem_info'),
+             'repeat': False})
         self._outbound_messages.append(
-            {'topic_type': 'system', 'topic': 'undervoltage', 'message': self._pistatus.status('undervoltage'), 'repeat': False}
+            {'topic_type': 'system', 'topic': 'undervoltage', 'message': self._pistatus.status('undervoltage'),
+             'repeat': False}
         )
 
     def undock(self):
@@ -255,23 +258,23 @@ class CobraBay:
             self._display.display_generic(system_state, message=message, message_color=message_color)
         return
 
-    def verify(self):
-        # Sweep the sensors once.
-        sensor_data = self._sensors.sweep()
-        # Calculate the bay state.
-        try:
-            self._bay.verify(sensor_data)
-        except OSError as e:
-            self._logger.debug("Bay is unavailable, cannot verify.")
-            return
-
-        # Append the bay state to the outbound message queue.
-        self._outbound_messages.append(dict(typetopic='bay_raw_sensors', message=sensor_data, repeat=True))
-        self._outbound_messages.append(dict(topic='bay_sensors', message=self._bay.sensors, repeat=True))
-        self._outbound_messages.append(dict(topic='bay_motion', message=self._bay.motion, repeat=True))
-        self._outbound_messages.append(dict(topic='bay_alignment', message=self._bay.alignment, repeat=True))
-        self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=True))
-        self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=True))
+    # def verify(self):
+    #     # Sweep the sensors once.
+    #     sensor_data = self._sensors.sweep()
+    #     # Calculate the bay state.
+    #     try:
+    #         self._bay.verify(sensor_data)
+    #     except OSError as e:
+    #         self._logger.debug("Bay is unavailable, cannot verify.")
+    #         return
+    #
+    #     # Append the bay state to the outbound message queue.
+    #     self._outbound_messages.append(dict(typetopic='bay_raw_sensors', message=sensor_data, repeat=True))
+    #     self._outbound_messages.append(dict(topic='bay_sensors', message=self._bay.sensors, repeat=True))
+    #     self._outbound_messages.append(dict(topic='bay_motion', message=self._bay.motion, repeat=True))
+    #     self._outbound_messages.append(dict(topic='bay_alignment', message=self._bay.alignment, repeat=True))
+    #     self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=True))
+    #     self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=True))
 
     # Process to stop the docking or undocking process, shut down the sensors and return to the idle state.
     # def complete_dock_undock(self):
@@ -327,7 +330,7 @@ class CobraBay:
                 return_dict[detector_id] = \
                     Range(detector_id,
                           self.config['detectors'][detector_id]['name'],
-                          board_options = self.config['detectors'][detector_id]['sensor'])
+                          self.config['detectors'][detector_id]['sensor'])
                 # This probably isn't needed anymore, let's try it without.
                 # try:
                 #     return_dict[detector_id].timing(self.config['detectors'][detector_id]['timing'])
@@ -337,5 +340,5 @@ class CobraBay:
                 return_dict[detector_id] = \
                     Lateral(detector_id,
                             self.config['detectors'][detector_id]['name'],
-                            board_options = self.config['detectors'][detector_id]['sensor'])
+                            sensor_options=self.config['detectors'][detector_id]['sensor'])
         return return_dict
