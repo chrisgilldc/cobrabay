@@ -12,3 +12,4 @@ pillow~=9.2.0
 PyYAML~=6.0
 gpiozero~=1.6.2
 rpi_bad_power
+pyserial~=3.5
