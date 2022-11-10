@@ -250,7 +250,6 @@ class TFMP:
             if time.time() > serial_timeout:
                 raise serial.SerialTimeoutException("Sensor did not return header or serial data within one second.")
 
-        print("Got frames back: {}".format(frames))
         # If we haven't raised an exception, checksum the data.
         if not self._checksum(frames):
             raise IOError("Sensor checksum error")
