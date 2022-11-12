@@ -20,8 +20,8 @@ class Bay:
         # Initialize variables.
         self._position = {}
         self._quality = {}
-        self._lateral_order = None
-        self._detectors = None
+        self._lateral_order = {}
+        self._detectors = {}
         self._state = None
         self._occupied = None
 
@@ -35,9 +35,9 @@ class Bay:
         self._setup_detectors(detectors)
         self._logger.debug("Detectors configured:")
         self._logger.debug("\tLongitudinal - ")
-        for detector in self._detectors['longitudinal']:
-            self._logger.debug("\t\t{} - {}".
-                               format(detector, self._detectors['longitudinal'][detector].sensor_interface.addr))
+        for detector in self._detectors['longitudinal'].keys():
+            self._logger.debug("\t\t{} - {}".format(detector,
+                                                self._detectors['longitudinal'][detector].sensor_interface.addr))
         for detector in self._detectors['lateral'].keys():
             self._logger.debug("\t\t{} - {}".
                                format(detector, self._detectors['lateral'][detector].sensor_interface.addr))
@@ -51,9 +51,9 @@ class Bay:
         # Set our initial state.
         self._scan_detectors()
         if self._check_occupancy():
-            self.state = 'occupied'
+            self._occupied = 'Occupied'
         else:
-            self.state = 'unoccupied'
+            self._occupied = 'Unoccupied'
 
         self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
 
@@ -62,9 +62,9 @@ class Bay:
         # Scan the detectors once
         self._scan_detectors()
         if self._check_occupancy():
-            self.state = 'occupied'
+            self._occupied = 'Occupied'
         else:
-            self.state = 'unoccupied'
+            self._occupied= 'Unoccupied'
 
     # Method to get info to pass to the Network module and register.
     @property
@@ -134,14 +134,15 @@ class Bay:
                 self._logger.debug("Motion found, resetting dock timer.")
                 self._dock_timer['mark'] = time.monotonic()
             else:
-                self._logger.debug("No motion found, checking for dock timer expiry.")
-                # No motion, check for completion
-                if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
-                    self._logger.debug("Motion timer expired. Doing an occupancy check.")
-                    if self._check_occupancy():
-                        self._occupied = True
-                    else:
-                        self._occupied = False
+                if self._detectors['longitudinal'].motion is not None:
+                    self._logger.debug("No motion found, checking for dock timer expiry.")
+                    # No motion, check for completion
+                    if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
+                        self._logger.debug("Motion timer expired. Doing an occupancy check.")
+                        if self._check_occupancy():
+                            self._occupied = True
+                        else:
+                            self._occupied = False
 
     # Tells the detectors to update.
     def _scan_detectors(self):
@@ -150,18 +151,21 @@ class Bay:
         self._logger.debug("Starting detector scan.")
         self._logger.debug("Have detectors: {}".format(self._detectors))
         # Longitudinal offset.
-        self._logger.debug("Checking longitudinal detectors.")
-        for detector in self._detectors['longitudinal']:
-            value = self._detectors['longitudinal'][detector].value
-            self._logger.debug("Read of longitudinal detector {} returned {}".format(detector, value))
+        self._logger.debug("Checking longitudinal detector.")
+        for detector_name in self._detectors['longitudinal']:
+            value = self._detectors['longitudinal'][detector_name].value
+            self._logger.debug("Read of longitudinal detector {} returned {}".format(
+                self._detectors['longitudinal'][detector_name].name, value))
             if isinstance(value, Quantity):
                 # If we got a proper Quantity, convert to our output unit.
-                self._position['longitudinal'] = value.to(self._settings['output_unit'])
+                self._position['longitudinal'][detector_name] = value.to(self._settings['output_unit'])
             else:
-                self._position['longitudinal'] = value
-            self._quality['longitudinal'] = self._detectors['longitudinal'][detector].quality
-        # Pick a reading for authoritative range.
-        # If there's only one longitudinal sensor, we go with that.
+                self._position['longitudinal'][detector_name] = value
+            self._quality['longitudinal'][detector_name] = self._detectors['longitudinal'][detector_name].quality
+        # Choose a detector to be the official range.
+        # Currently only support one range detector, so this is easy!
+        self._selected_longitudinal = list(self._position['longitudinal'].keys())[0]
+
         for detector_name in self._detectors['lateral']:
             self._logger.debug("Checking {}".format(detector_name))
             # Give the lateral detector the current range reading.
@@ -201,6 +205,17 @@ class Bay:
         # If for some reason we drop through to here, assume we're not occupied.
         return False
 
+    # Method to check the range sensor for motion.
+    def monitor(self):
+        vector = self._detectors['longitudinal'][self._selected_longitudinal].vector
+        # If there's motion, change state.
+        if vector['direction'] == 'forward':
+            self.state = 'docking'
+        elif vector['direction'] == 'reverse':
+            self.state = 'undocking'
+        elif self._detectors['longitudinal'][self._selected_longitudinal].value == 'Weak':
+            self.state = 'docking'
+
     @property
     def state(self):
         """
@@ -213,34 +228,42 @@ class Bay:
         return self._state
 
     @state.setter
-    def state(self, input):
-        self._logger.debug("State change requested to {} from {}".format(input, self._state))
+    def state(self, m_input):
+        self._logger.debug("State change requested to {} from {}".format(m_input, self._state))
         # Trap invalid bay states.
-        if input not in ('ready', 'docking', 'undocking', 'unavailable'):
-            raise ValueError("{} is not a valid bay state.".format(input))
-        self._logger.debug("Old state: {}, new state: {}".format(self._state, input))
-        if input in ('docking', 'undocking') and self._state not in ('docking', 'undocking'):
-            self._logger.debug("Entering state: {}".format(input))
+        if m_input not in ('ready', 'docking', 'undocking', 'unavailable'):
+            raise ValueError("{} is not a valid bay state.".format(m_input))
+        self._logger.debug("Old state: {}, new state: {}".format(self._state, m_input))
+        if m_input in ('docking', 'undocking') and self._state not in ('docking', 'undocking'):
+            self._logger.debug("Entering state: {}".format(m_input))
             self._logger.debug("Start time: {}".format(monotonic()))
             self._logger.debug("Detectors: {}".format(self._detectors))
             # When entering docking or undocking state, start ranging on the sensors.
             self._detector_state('activate')
             # Set the start time.
             self._dock_timer['mark'] = monotonic()
-        if input not in ('docking', 'undocking') and self._state in ('docking', 'undocking'):
+        if m_input not in ('docking', 'undocking') and self._state in ('docking', 'undocking'):
             self._logger.debug("Entering state: {}".format(input))
             # Deactivate the detectors.
             self._detector_state('deactivate')
             # Reset some variables.
             self._dock_timer['mark'] = None
         # Now store the state.
-        self._state = input
+        self._state = m_input
 
     # MQTT status methods. These generate payloads the core network handler can send upward.
     def mqtt_messages(self, verify=False):
         # Initialize the outbound message list.
+        # Always include the bay state and bay occupancy.
         outbound_messages = [{'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False,
                               'topic_mappings': {'bay_id': self.bay_id}}]  # topic, message, repeat, topic_mappings
+        outbound_messages.append(
+            {'topic_type': 'bay',
+             'topic': 'bay_occupied',
+             'message': self.occupied,
+             'repeat': False,
+             'topic_mappings': {'bay_id': self.bay_id}}
+        )
         # State message.
         # Only generate positioning messages if
         # 1) we're  docking or undocking or
@@ -260,23 +283,17 @@ class Bay:
                  'repeat': False,
                  'topic_mappings': {'bay_id': self.bay_id}}
             )
-            outbound_messages.append(
-                {'topic_type': 'bay',
-                 'topic': 'bay_occupied',
-                 'message': self.occupied,
-                 'repeat': False,
-                 'topic_mappings': {'bay_id': self.bay_id}}
-            )
+
             outbound_messages.append(
                 {'topic_type': 'bay',
                  'topic': 'bay_speed',
-                 'message': self._detectors['longitudinal'].vector,
+                 'message': self._detectors['longitudinal'][self._selected_longitudinal].vector,
                  'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
             )
             outbound_messages.append(
                 {'topic_type': 'bay',
                  'topic': 'bay_motion',
-                 'message': self._detectors['longitudinal'].motion,
+                 'message': self._detectors['longitudinal'][self._selected_longitudinal].motion,
                  'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
             ),
             outbound_messages.append(
