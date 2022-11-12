@@ -23,7 +23,7 @@ class Bay:
         self._lateral_order = {}
         self._detectors = {}
         self._state = None
-        self._occupied = None
+        self._occupancy = None
 
         # Log our initialization.
         self._logger.info("Bay '{}' initializing...".format(self.bay_id))
@@ -51,20 +51,21 @@ class Bay:
         # Set our initial state.
         self._scan_detectors()
         if self._check_occupancy():
-            self._occupied = 'Occupied'
+            self._occupancy = 'Occupied'
         else:
-            self._occupied = 'Unoccupied'
+            self._occupancy = 'Unoccupied'
 
         self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
+        self.state = "Ready"
 
     # Abort gets called when we want to cancel a docking.
     def abort(self):
         # Scan the detectors once
         self._scan_detectors()
         if self._check_occupancy():
-            self._occupied = 'Occupied'
+            self._occupancy = 'Occupied'
         else:
-            self._occupied= 'Unoccupied'
+            self._occupancy= 'Unoccupied'
 
     # Method to get info to pass to the Network module and register.
     @property
@@ -104,7 +105,7 @@ class Bay:
         :returns: bay occupancy state
         :rtype: String
         """
-        return self._occupied
+        return self._occupancy
 
     # How good is the parking job?
     @property
@@ -140,9 +141,9 @@ class Bay:
                     if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
                         self._logger.debug("Motion timer expired. Doing an occupancy check.")
                         if self._check_occupancy():
-                            self._occupied = True
+                            self._occupancy = True
                         else:
-                            self._occupied = False
+                            self._occupancy = False
 
     # Tells the detectors to update.
     def _scan_detectors(self):
@@ -231,10 +232,10 @@ class Bay:
     def state(self, m_input):
         self._logger.debug("State change requested to {} from {}".format(m_input, self._state))
         # Trap invalid bay states.
-        if m_input not in ('ready', 'docking', 'undocking', 'unavailable'):
+        if m_input.lower() not in ('ready', 'docking', 'undocking', 'unavailable'):
             raise ValueError("{} is not a valid bay state.".format(m_input))
         self._logger.debug("Old state: {}, new state: {}".format(self._state, m_input))
-        if m_input in ('docking', 'undocking') and self._state not in ('docking', 'undocking'):
+        if m_input.lower() in ('docking', 'undocking') and self._state not in ('docking', 'undocking'):
             self._logger.debug("Entering state: {}".format(m_input))
             self._logger.debug("Start time: {}".format(monotonic()))
             self._logger.debug("Detectors: {}".format(self._detectors))
@@ -242,7 +243,7 @@ class Bay:
             self._detector_state('activate')
             # Set the start time.
             self._dock_timer['mark'] = monotonic()
-        if m_input not in ('docking', 'undocking') and self._state in ('docking', 'undocking'):
+        if m_input.lower() not in ('docking', 'undocking') and self._state in ('docking', 'undocking'):
             self._logger.debug("Entering state: {}".format(input))
             # Deactivate the detectors.
             self._detector_state('deactivate')
@@ -255,15 +256,13 @@ class Bay:
     def mqtt_messages(self, verify=False):
         # Initialize the outbound message list.
         # Always include the bay state and bay occupancy.
-        outbound_messages = [{'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False,
-                              'topic_mappings': {'bay_id': self.bay_id}}]  # topic, message, repeat, topic_mappings
-        outbound_messages.append(
-            {'topic_type': 'bay',
-             'topic': 'bay_occupied',
-             'message': self.occupied,
-             'repeat': False,
-             'topic_mappings': {'bay_id': self.bay_id}}
-        )
+        outbound_messages = [
+            # Bay state.
+            {'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False,
+             'topic_mappings': {'bay_id': self.bay_id}},
+            # Bay occupancy.
+            {'topic_type': 'bay', 'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False,
+             'topic_mappings': {'bay_id': self.bay_id}}]
         # State message.
         # Only generate positioning messages if
         # 1) we're  docking or undocking or
@@ -303,6 +302,7 @@ class Bay:
                  'repeat': True,
                  'topic_mappings': {'bay_id': self.bay_id}}
             )
+        self._logger.debug("Have compiled outbound messages. {}".format(outbound_messages))
         return outbound_messages
 
     # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
