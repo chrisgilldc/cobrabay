@@ -182,7 +182,7 @@ class Network:
             },
             'bay': {
                 'bay_occupied': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/state',
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/occupancy',
                     'previous_state': 'Unknown',
                     'ha_discovery': {
                         'name': '{0[bay_name]} Occupied',
