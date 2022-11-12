@@ -302,44 +302,38 @@ class Range(SingleDetector):
     @property
     @read_if_stale
     def vector(self):
-        return_dict = {'speed': Quantity("0 mph"), 'direction': None}
-        return return_dict
+        # If the current reading is Weak, the door is probably open so we can't tell.
+        if self._history[0][0] == "Weak":
+            return {'speed': "Unknown", 'direction': "Unknown"}
 
-    #     # If the sensor is reading beyond range, speed and direction can't be known, so return immediately.
-    #     if isinstance(self._history[0][0], str):
-    #         return { 'speed': 'unknown', 'direction': 'unknown'}
-    #     # Only consider readings within the past 10s. This makes sure nothing bogus gets in here for wild readings.
-    #     readings = []
-    #     for reading in self._history:
-    #         if monotonic_ns() - reading[1] <= 10000000000:
-    #             readings.append(reading)
-    #     i = 0
-    #     vectors = []
-    #     while i < len(readings):
-    #         try:
-    #             d = ( self._history[i][0] - self._history[i+1][0] )
-    #         # If the index doesn't exist, or we can't subtract, move ahead.
-    #         except IndexError:
-    #             i += 1
-    #         except TypeError:
-    #             i +=1
-    #         else:
-    #             t = Quantity(self._history[i+1][1] - self._history[i][1],'nanoseconds').to('seconds')
-    #             v = d/t
-    #             vectors.append(v)
-    #             i += 1
-    #     net_vector = mean(vectors)
-    #     if net_vector.magnitude == 0:
-    #         direction = 'still'
-    #         speed = net_vector
-    #     elif net_vector.magnitude > 0:
-    #         direction = 'forward'
-    #         speed = net_vector
-    #     elif net_vector.magnitude < 0:
-    #         # Make the speed positive, we'll report direction separately.
-    #         direction = 'reverse'
-    #         speed = net_vector * -1
-    #     return {'speed': speed, 'direction': direction}
+        # If the sensor is reading beyond range, speed and direction can't be known, so return immediately.
+        last_element = len(self._history)-1
+        self._logger.debug("First history: {}".format(self._history[0]))
+        self._logger.debug("Last history: {}".format(self._history[last_element]))
+        try:
+            net_dist = self._history[0][0] - self._history[last_element][0]
+            net_time = Quantity(self._history[0][1] - self._history[last_element][1], 'nanoseconds').to('seconds')
+        except:
+            raise
+        self._logger.debug("Vector has net distance {} and net time {}".format(net_dist, net_time))
+        try:
+            speed = (net_dist / net_time).to('kph')
+        except ZeroDivisionError:
+            # If we divide by zero (ie: no net time)"
+            return {'speed': "Unknown", 'direction': "Unknown"}
+
+        # Decide if we're moving. Right now, we allow variance of up to 3 cm (1.5cm in either direction) to account
+        # for sensor wobble.
+        if net_dist > Quantity("1.5 cm"):
+            direction = 'forward'
+        elif net_dist < Quantity("-1.5 cm"):
+            # Make the speed positive, we'll report direction separately.
+            direction = 'reverse'
+            speed = speed * -1
+        else:
+            direction = 'still'
+            speed = Quantity("0 kph")
+        return {'speed': speed, 'direction': direction}
 
     # Gets called when the rangefinder has all settings and is being made ready for use.
     def _when_ready(self):
