@@ -175,6 +175,14 @@ class CobraBay:
         while True:
             ## Messages from the bay.
             for bay in self._bays:
+                # Monitor and check for a state change into docking or undocking.
+                self._bays[bay].monitor()
+                if self._bays[bay].state == 'Docking':
+                    self._logger.info("Entering docking mode due to movement.")
+                    self._dock(bay)
+                # elif self._bays[bay].state == 'Undocking':
+                #     self._logger.info("Entering undocking mode due to movement.")
+                #     self._undock()
                 self._outbound_messages = self._outbound_messages + self._bays[bay].mqtt_messages()
             # Do a network poll, this method handles all the default outbound messages and any incoming commands.
             network_data = self._network_handler()
@@ -188,6 +196,8 @@ class CobraBay:
                 {'topic_type': 'system',
                  'topic': 'display',
                  'message': self._display.current, 'repeat': True})
+            # Have the bay monitor range, for movement.
+
 
     # Start sensors and display to guide parking.
     def _dock(self, bay_id):
