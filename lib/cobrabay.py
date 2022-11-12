@@ -180,6 +180,7 @@ class CobraBay:
                 if self._bays[bay].state == 'Docking':
                     self._logger.info("Entering docking mode due to movement.")
                     self._dock(bay)
+                # Since undocking isn't fully developed, don't do this right now. But it's in here as a stud.
                 # elif self._bays[bay].state == 'Undocking':
                 #     self._logger.info("Entering undocking mode due to movement.")
                 #     self._undock()
