@@ -3,19 +3,16 @@ system:
   system_name: CobraBay1  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
   network: True  # Connect to the network at all?
   homeassistant: True # Integrate with Home Assistant. If yes, will send discovery messages.
+  monitor_range: False # Notes here.
   # Logging definition
   logging:
     # Default level for the system. If a specific module doesn't have its own level, this is used.
-    # If not defined, default is 'info'.
-    default_level: info
-    # Valid modules are:
-    # core - the main system.
-    # bay - Bay
-    # display - the display system
-    # network - The network system
-    # display: debug
-    # network: debug
-
+    # Uses the standard logging level: critical, error, warning, info, debug.
+    # If not defined, default is 'warning'
+    # Can set core modules: bay, display, network
+    # Can also set 'mqtt' to debug to dump all inbound and outbound mqtt messages. This is independent from 'network'.
+    default_level: warning
+    bay1: debug
 # Settings for the display. We presume only one.
 display:
   matrix:
@@ -34,19 +31,9 @@ detectors:
 #    # appended with "Detector". So "Range" here for "Bay 1" will become "Bay 1 Range Detector"
     name: Range
     sensor:
-      type: VL53L1X
-      i2c_bus: 1
-      i2c_address: 0x30
-      enable_board: 0
-      enable_pin: 25
-      timing: 200ms
-#  rangeXL:
-#    type: Range
-#    name: RangeXL
-#    sensor:
-#      type: TFMini
-#      i2c_bus: 1
-#      i2c_address: 0x2f
+      type: TFMini
+      port: serial0  # System will automatically prefix /dev if not included.
+      baud: 115200
   front:
     type: Lateral
     name: Front
@@ -95,21 +82,6 @@ bays:
         bay_depth: 276in
       detectors:
         - detector: range
-
-  #  active: True
-  #  id: bay1  # ID of the bay.
-  #  name: "Bay 1"  # Name of the bay for use in MQTT messages.
-  #  park_time: 2 min  # How long until a stationary vehicle is counted as parked.
-  #  bay_depth: 276 in  # This should be the wall-to-wall distance. IE: If
-  #  longitudinal:
-  #    defaults:
-  #      offset: 42 in
-  #      spread_park: 2 in
-  #      bay_depth: 276 in
-  #    # Longitudinal detectors are those the vehicles more towards or away from.
-  #    detectors:
-  ##      - detector: rangeXL
-  #      - detector: range
     lateral:
       # Lateral detectors are those that run perpendicular to the path of vehicle's travel.
       defaults:
