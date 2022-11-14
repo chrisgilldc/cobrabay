@@ -65,7 +65,8 @@ class CobraBay:
         # Queue for outbound messages.
         self._outbound_messages = []
         # Queue the startup message.
-        self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'online'})
+        self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'Online'})
+
 
         self._logger.debug("Creating detectors...")
         # Create the detectors
@@ -88,6 +89,15 @@ class CobraBay:
             self._network.register_bay(self._bays[bay_id].discovery_reg_info)
             self._display.register_bay(self._bays[bay_id].display_reg_info)
 
+        # Collect messages from the bays. We do a verify here.
+        for bay_id in self._bays:
+            self._outbound_messages = self._outbound_messages + self._bays[bay_id].mqtt_messages(verify=True)
+
+        # Poll to dispatch the message queue
+        self._logger.debug("Initial message queue: {}".format(self._outbound_messages))
+        self._network.poll(self._outbound_messages)
+        # Flush the queue.
+        self._outbound_messages = []
         self._logger.info('CobraBay: Initialization complete.')
 
     # Command processor.
