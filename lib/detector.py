@@ -17,7 +17,7 @@ def check_ready(func):
         # Call the function.
         func(self, *args, **kwargs)
         # Now check for readiness and set ready if we are.
-        for setting in self._required_settings:
+        for setting in self._settings['required']:
             if self._settings[setting] is None:
                 self._ready = False
                 return
@@ -101,17 +101,16 @@ def read_if_stale(func):
 
 
 class Detector:
-    def __init__(self, detector_id, detector_name):
+    def __init__(self, config_obj, detector_id):
+        # Request the settings dict from the config object.
+        self._settings = config_obj.detector(detector_id)
         # Create a logger.
-        self._logger = logging.getLogger("CobraBay").getChild("Detector").getChild(detector_name)
+        self._logger = logging.getLogger("CobraBay").getChild("Detector").getChild(self._settings['name'])
+        self._logger.setLevel(config_obj.get_loglevel(detector_id,mod_type='detector'))
         # A unit registry
         self._ureg = UnitRegistry()
         # Is the detector ready for use?
         self._ready = False
-        # Settings for the detector. Starts as an empty dict.
-        self._settings = {'detector_id': detector_id, 'detector_name': detector_name}
-        # What settings are required before the detector can be used? Must be set by the subclass.
-        self._required_settings = None
         # Measurement offset. We start this at zero, even though that's probably ridiculous!
         self._settings['offset'] = Quantity("0 cm")
         # List to keep the history of sensor readings. This is used for some methods.
@@ -146,11 +145,11 @@ class Detector:
 
     @property
     def id(self):
-        return self._settings['detector_id']
+        return self._settings['id']
 
     @property
     def name(self):
-        return self._settings['detector_name']
+        return self._settings['name']
 
     # Convenience property to let upstream modules check for the detector type. This disconnects
     # from the class name, because in the future we may have multiple kinds of 'range' or 'lateral' detectors.
@@ -178,17 +177,17 @@ class Detector:
 # Single Detectors add wrappers around a single sensor. Sensor arrays are not currently supported, but may be in the
 # future.
 class SingleDetector(Detector):
-    def __init__(self, detector_id, detector_name, sensor_options):
-        super().__init__(detector_id, detector_name)
-        self._logger.debug("Creating sensor object using options: {}".format(sensor_options))
-        if sensor_options['type'] == 'VL53L1X':
+    def __init__(self, config_obj, detector_id):
+        super().__init__(config_obj, detector_id)
+        self._logger.debug("Creating sensor object using options: {}".format(self._settings['sensor']))
+        if self._settings['sensor']['type'] == 'VL53L1X':
             # Create the sensor object using provided settings.
-            self._sensor_obj = CB_VL53L1X(sensor_options)
-        elif sensor_options['type'] == 'TFMini':
-            self._sensor_obj = TFMini(sensor_options)
+            self._sensor_obj = CB_VL53L1X(self._settings['sensor'])
+        elif self._settings['sensor']['type'] == 'TFMini':
+            self._sensor_obj = TFMini(self._settings['sensor'])
         else:
             raise ValueError("Detector {} trying to use unknown sensor type {}".format(
-                detector_name, sensor_options['type']))
+                self._settings['name'], self._settings['sensor']['type']))
 
     # Allow adjustment of timing.
     def timing(self, timing_input):
@@ -232,14 +231,10 @@ class SingleDetector(Detector):
 
 
 class Range(SingleDetector):
-    def __init__(self, detector_id, detector_name, sensor_options):
-        super().__init__(detector_id, detector_name, sensor_options)
-        self.type = 'range'
+    def __init__(self, config_obj, detector_id):
+        super().__init__(config_obj, detector_id)
         self._logger.info("Initializing Range detector.")
-        self._required_settings = ['offset', 'bay_depth', 'spread_park', 'pct_warn', 'pct_crit']
-        for setting in self._required_settings:
-            self._settings[setting] = None
-        # Default the warn and critical percentages.
+
         self._settings['pct_crit'] = 5 / 100
         self._settings['pct_warn'] = 10 / 100
 
@@ -409,12 +404,9 @@ class Range(SingleDetector):
 
 # Detector for lateral position
 class Lateral(SingleDetector):
-    def __init__(self, detector_id, detector_name, sensor_options):
-        super().__init__(detector_id, detector_name, sensor_options)
+    def __init__(self, config_obj, detector_id):
+        super().__init__(config_obj, detector_id)
         # Initialize required elements as None. This lets us do a readiness check later.
-        self._required_settings = ['offset', 'spread_ok', 'spread_warn', 'side']
-        for setting in self._required_settings:
-            self._settings[setting] = None
         self._range_reading = None
 
     @property
