@@ -7,6 +7,7 @@ from pathlib import Path
 from pprint import PrettyPrinter
 from pint import Quantity
 
+
 class CBConfig():
     def __init__(self, config_file=None, reset_sensors=False):
         self._logger = logging.getLogger("CobraBay").getChild("Config")
@@ -20,7 +21,7 @@ class CBConfig():
             Path.cwd().joinpath('config.yaml')
         ]
         if config_file is not None:
-            search_paths.insert(0,Path(config_file))
+            search_paths.insert(0, Path(config_file))
 
         for path in search_paths:
             try:
@@ -32,7 +33,7 @@ class CBConfig():
         # Load the config file. This does validation as well!
         self.load_config()
 
-    def load_config(self,reset_sensors=False):
+    def load_config(self, reset_sensors=False):
         pp = PrettyPrinter()
         # Open the current config file and suck it into a staging variable.
         staging_yaml = self._open_yaml(self._config_file)
@@ -55,11 +56,11 @@ class CBConfig():
             return str(self._config_file)
 
     @config_file.setter
-    def config_file(self,input):
+    def config_file(self, input):
         # IF a string, convert to a path.
-        if isinstance(input,str):
+        if isinstance(input, str):
             input = Path(input)
-        if not isinstance(input,Path):
+        if not isinstance(input, Path):
             # If it's not a Path now, we can't use this.
             raise TypeError("Config file must be either a string or a Path object.")
         if not input.is_file():
@@ -71,13 +72,13 @@ class CBConfig():
     @staticmethod
     def _open_yaml(config_path):
         with open(config_path, 'r') as config_file_handle:
-                config_yaml = yaml.safe_load(config_file_handle)
+            config_yaml = yaml.safe_load(config_file_handle)
         return config_yaml
 
     # Main validator.
-    def _validate(self,staging_yaml):
+    def _validate(self, staging_yaml):
         # Check for the main sections.
-        for section in ('system','display','detectors','bays'):
+        for section in ('system', 'display', 'detectors', 'bays'):
             if section not in staging_yaml.keys():
                 raise KeyError("Required section {} not in config file.".format(section))
         return staging_yaml
@@ -89,30 +90,33 @@ class CBConfig():
         pass
 
     # Method to let modules get their proper logging levels.
-    def get_loglevel(self, module):
+    def get_loglevel(self, mod_id, mod_type=None):
         if 'logging' not in self._config['system']:
             # If there's no logging section at all, return info.
             self._logger.error("No logging section in config, using INFO as default.")
-            return "INFO"
+            return "WARNING"
         else:
-            # Is the name a bay?
-            if module in self._config['bays'].keys():
+            # For bays and detectors, check for log settings of *specific instances* before checking for the overall module.
+            if mod_type == 'bay':
                 try:
-                    # Does the bay have its own log level defined?
-                    requested_level = self._config['bays'][module]['log_level']
+                    requested_level = self._config['system']['logging']['bays'][mod_id].lower()
                 except KeyError:
-                    # Nope. Change our module name to 'bays' and proceed with standard testing.
-                    module = 'bays'
+                    mod_id = 'bays'
+            elif mod_type == 'detector':
+                try:
+                    requested_level = self._config['system']['logging']['detectors'][mod_id].lower()
+                except KeyError:
+                    mod_id = 'detectors'
+            # Check for module-level setting.
             try:
-                # Does the module have its own logging level defined?
-                requested_level = self._config['system']['logging'][module].lower()
+                requested_level = self._config['system']['logging'][mod_id].lower()
             except KeyError:
                 try:
-                    # No, use the system default level?
+                    # No module-level logging, use the system default level.
                     requested_level = self._config['system']['logging']['default_level'].lower()
                 except KeyError:
-                    # That's not defined either!? Default to INFO.
-                    return "INFO"
+                    # Not defined either, default to Warning.
+                    requested_level = "WARNING"
 
             # Ensure the requested log level if valid.
             if requested_level == "debug":
@@ -126,8 +130,9 @@ class CBConfig():
             elif requested_level == "critical":
                 return "CRITICAL"
             else:
-                self._logger.error("Module {} had unknown level {}. Using INFO instead.".format(module,requested_level))
-                return "INFO"
+                self._logger.error(
+                    "Module {} had unknown level {}. Using WARNING instead.".format(mod_id, requested_level))
+                return "WARNING"
 
     # Return a settings dict to be used for the Display module.
     def display(self):
@@ -205,7 +210,45 @@ class CBConfig():
 
         return config_dict
 
+    # Config dict for a detector.
+    def detector(self, detector_id):
+        self._logger.info("Received config generate request for: {}".format(detector_id))
+        if detector_id not in self._config['detectors']:
+            raise KeyError("No configuration defined for detector '{}'".format(detector_id))
+        # Assemble the config dict
+        config_dict = {
+            'id': detector_id,
+            'name': self._config['detectors'][detector_id]['name'],
+            'sensor': self._config['detectors'][detector_id]['sensor']
+        }
+        # Initialize required setting values so they exist. This is required so readiness can be checked.
+        # If they're defined in the config, great, use those values, otherwise initialize as None.
+
+        if self._config['detectors'][detector_id]['type'].lower() == 'range':
+            required_settings = ['offset', 'bay_depth', 'spread_park', 'pct_warn', 'pct_crit']
+        elif self._config['detectors'][detector_id]['type'].lower() == 'lateral':
+            required_settings = ['offset', 'spread_ok', 'spread_warn', 'side']
+        else:
+            raise ValueError("Detector {} has unknown type.".format(detector_id))
+
+        # The required settings list is stored in settings itself, so it can be used by the check_ready decorator.
+        config_dict['required'] = required_settings
+
+        for required_setting in required_settings:
+            try:
+                config_dict[required_setting] = self._config['detectors'][detector_id][required_setting]
+            except KeyError:
+                config_dict[required_setting] = None
+
+
+        self._logger.debug("Returning config: {}".format(config_dict))
+        return config_dict
+
     # Properties!
     @property
     def bay_list(self):
         return self._config['bays'].keys()
+
+    @property
+    def detector_list(self):
+        return self._config['detectors'].keys()
