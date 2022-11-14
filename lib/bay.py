@@ -295,10 +295,14 @@ class Bay:
                  'message': self._detectors['longitudinal'][self._selected_longitudinal].motion,
                  'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
             ),
+            if self._dock_timer['mark'] is None:
+                message = 'offline'
+            else:
+                message = self._dock_timer['allowed'] - (monotonic() - self._dock_timer['mark'])
             outbound_messages.append(
                 {'topic_type': 'bay',
                  'topic': 'bay_dock_time',
-                 'message': self._dock_timer['allowed'] - (monotonic() - self._dock_timer['mark']),
+                 'message': message,
                  'repeat': True,
                  'topic_mappings': {'bay_id': self.bay_id}}
             )
