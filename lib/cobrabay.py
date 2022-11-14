@@ -348,18 +348,12 @@ class CobraBay:
         for detector_id in self.config['detectors']:
             self._logger.info("Creating detector: {}".format(detector_id))
             if self.config['detectors'][detector_id]['type'] == 'Range':
-                return_dict[detector_id] = \
-                    Range(detector_id,
-                          self.config['detectors'][detector_id]['name'],
-                          self.config['detectors'][detector_id]['sensor'])
+                return_dict[detector_id] = Range(self._cbconfig, detector_id)
                 # This probably isn't needed anymore, let's try it without.
                 # try:
                 #     return_dict[detector_id].timing(self.config['detectors'][detector_id]['timing'])
                 # except KeyError:
                 #     return_dict[detector_id].timing('200 ms')
             if self.config['detectors'][detector_id]['type'] == 'Lateral':
-                return_dict[detector_id] = \
-                    Lateral(detector_id,
-                            self.config['detectors'][detector_id]['name'],
-                            sensor_options=self.config['detectors'][detector_id]['sensor'])
+                return_dict[detector_id] = Lateral(self._cbconfig, detector_id)
         return return_dict
