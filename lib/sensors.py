@@ -49,6 +49,7 @@ class I2CSensor(BaseSensor):
         self._name = "{}-{}-{}".format(type(self).__name__, sensor_options['i2c_bus'],
                                        hex(sensor_options['i2c_address']))
         self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
+        self._logger.setLevel("WARNING")
         self._logger.info("Initializing sensor...")
 
         # Set the I2C bus and I2C Address
@@ -94,6 +95,7 @@ class SerialSensor(BaseSensor):
         self._name = "{}-{}".format(type(self).__name__, sensor_options['port'])
         self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
         self._logger.info("Initializing sensor...")
+        self._logger.setLevel("WARNING")
         self.serial_port = sensor_options['port']
         self.baud_rate = sensor_options['baud']
 
