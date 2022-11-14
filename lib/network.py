@@ -5,12 +5,8 @@
 ####
 
 import logging
-import pprint
 from json import dumps as json_dumps
 from json import loads as json_loads
-# from math import floor
-from pint import Quantity
-import time
 
 from getmac import get_mac_address
 from paho.mqtt.client import Client
@@ -108,8 +104,8 @@ class Network:
                         'type': 'binary_sensor',
                         'entity': '{}_connectivity'.format(self._settings['system_name'].lower()),
                         'device_class': 'connectivity',
-                        'payload_on': 'online',
-                        'payload_off': 'offline'
+                        'payload_on': 'Online',
+                        'payload_off': 'Offline'
                     }
                 },
                 'cpu_pct': {
@@ -176,7 +172,7 @@ class Network:
                         'type': 'camera',
                         'entity': '{}_display'.format(self._settings['system_name'].lower()),
                         'icon': 'mdi:monitor',
-                        'encoding': 'b64'
+                        'image_encoding': 'b64'
                     }
                 },
             },
@@ -459,7 +455,7 @@ class Network:
         self._logger.info("Creating last will.")
         self._mqtt_client.will_set(
             self._topics['system']['device_connectivity']['topic'],
-            payload='offline', qos=0, retain=True)
+            payload='Offline', qos=0, retain=True)
         try:
             self._mqtt_client.connect(host=self._mqtt_host, port=self._mqtt_port)
         except Exception as e:
@@ -534,8 +530,6 @@ class Network:
         bay_name = self._bay_registry[bay_id]['bay_name']
         self._logger.debug("Have registry data: {}".format(self._bay_registry[bay_id]))
         # Create the single entities. There's one of these per bay.
-        # Create the single entities. There's one of these per bay.
-        # Bay_display discovery is broken for now, so skipping it.
         for entity in ('bay_occupied','bay_state', 'bay_speed', 'bay_motion', 'bay_dock_time'):
             self._ha_create(topic_type='bay',
                             topic_name=entity,
@@ -640,7 +634,11 @@ class Network:
 
     # Quick helper methods to send online/offline messages correctly.
     def _send_online(self):
-        self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'], payload='online',retain=True)
+        self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'],
+                                  payload=self._topics['system']['device_connectivity']['ha_discovery']['payload_on'],
+                                  retain=True)
 
     def _send_offline(self):
-        self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'], payload='offline',retain=True)
+        self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'],
+                                  payload=self._topics['system']['device_connectivity']['ha_discovery']['payload_on'],
+                                  retain=True)
