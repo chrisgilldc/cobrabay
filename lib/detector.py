@@ -1,6 +1,7 @@
 ####
 # CobraBay Detector
 ####
+import pint.errors
 
 from .sensors import CB_VL53L1X, TFMini, I2CSensor, SerialSensor
 from pint import UnitRegistry, Quantity, DimensionalityError
@@ -308,8 +309,9 @@ class Range(SingleDetector):
         try:
             net_dist = self._history[0][0] - self._history[last_element][0]
             net_time = Quantity(self._history[0][1] - self._history[last_element][1], 'nanoseconds').to('seconds')
-        except:
-            raise
+        except pint.errors.DimensionalityError:
+            # If we're trying to subtract a non-Quantity value, then return unknown for these.
+            return {'speed': "Unknown", 'direction': "Unknown"}
         self._logger.debug("Vector has net distance {} and net time {}".format(net_dist, net_time))
         try:
             speed = (net_dist / net_time).to('kph')
