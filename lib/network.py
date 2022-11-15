@@ -576,7 +576,7 @@ class Network:
 
         optional_params = (
             'device_class',
-            'encoding',
+            'image_encoding',
             'icon',
             'json_attributes_topic',
             'unit_of_measurement',
