@@ -5,7 +5,6 @@ import pint.errors
 
 from .sensors import CB_VL53L1X, TFMini, I2CSensor, SerialSensor
 from pint import UnitRegistry, Quantity, DimensionalityError
-from statistics import mean
 from time import monotonic_ns
 from functools import wraps
 import logging
@@ -229,13 +228,10 @@ class SingleDetector(Detector):
         return None
 
 # Detector that measures range progress.
-
-
 class Range(SingleDetector):
     def __init__(self, config_obj, detector_id):
         super().__init__(config_obj, detector_id)
         self._logger.info("Initializing Range detector.")
-
         self._settings['pct_crit'] = 5 / 100
         self._settings['pct_warn'] = 10 / 100
 
@@ -259,6 +255,7 @@ class Range(SingleDetector):
     @read_if_stale
     def quality(self):
         self._logger.debug("Creating quality from latest value: {}".format(self._history[0][0]))
+        self._logger.debug("90% of bay depth is: {}".format(self._settings['bay_depth'] * .9))
         if isinstance(self._history[0][0], str):
             # A weak reading from the sensor almost certainly means the door is open and nothing is blocking.
             if self._history[0][0] == "Weak":
@@ -269,7 +266,8 @@ class Range(SingleDetector):
             # You're about to hit the wall!
             if self._history[0][0] < Quantity("2 in"):
                 return 'Emergency!'
-            elif ( self.bay_depth * 0.90 ) <= self._history[0][0]:
+            elif ( self._settings['bay_depth'] * 0.90 ) <= self._history[0][0]:
+                self._logger.debug("Reading is less than 90% of bay depth ({})".format(self._settings['bay_depth'] * .9))
                 return 'No object'
             # Now consider the adjusted values.
             elif self.value < 0 and abs(self.value) > self.spread_park:
@@ -408,28 +406,15 @@ class Range(SingleDetector):
 class Lateral(SingleDetector):
     def __init__(self, config_obj, detector_id):
         super().__init__(config_obj, detector_id)
-        # Initialize required elements as None. This lets us do a readiness check later.
         self._range_reading = None
 
     @property
     @read_if_stale
     def value(self):
-        self._logger.debug("Creating adjusted value from latest value: {}".format(self._history[0][0]))
-        # Interpretation logic for the sensor value.
-        # First check to see if we've been intercepted or not? IF we haven't, than any sensor reading is bogus.
-        if isinstance(self._range_reading, Quantity):
-            if self._range_reading > self.intercept:
-                # If the vehicle hasn't reached this sensor yet, any reading should be discarded, return
-                # not intercepted instead.
-                return "Not intercepted"
-            else:
-                # We *should* be able to get a reading.
-                if isinstance(self._history[0][0], Quantity):
-                    return self._history[0][0] - self.offset
-                else:
-                    return "Unknown"
+        self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
+        if isinstance(self._history[0][0], Quantity):
+            return self._history[0][0] - self.offset
         else:
-            # If we don't have a range value provided yet, then return unknown.
             return "Unknown"
 
     @property
