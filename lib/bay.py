@@ -42,6 +42,9 @@ class Bay:
             self._logger.debug("\t\t{} - {}".
                                format(detector, self._detectors['lateral'][detector].sensor_interface.addr))
 
+        # Activate detectors.
+        self._detector_state('activate')
+
         # Dock timer.
         self._dock_timer = {
             'allowed': self._settings['park_time'],
@@ -124,28 +127,29 @@ class Bay:
 
     # Public method to scan detectors.
     def scan(self):
+        self._logger.debug("Running detector scan.")
         # Scan the detectors and get fresh data.
         self._scan_detectors()
-
-        # If we're in a dock/undock state, check for motion and if necessary reset the parking clock.
-        if self.state in ('docking', 'undocking'):
-            # Update the dock timer.
-            if self._detectors['longitudinal'].motion:
-                # If motion is detected, update the time mark to the current time.
-                self._logger.debug("Motion found, resetting dock timer.")
-                self._dock_timer['mark'] = time.monotonic()
-            else:
-                if self._detectors['longitudinal'].motion is not None:
-                    self._logger.debug("No motion found, checking for dock timer expiry.")
-                    # No motion, check for completion
-                    if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
-                        self._logger.debug("Motion timer expired. Doing an occupancy check.")
-                        if self._check_occupancy():
-                            self._occupancy = True
-                        else:
-                            self._occupancy = False
+        self._logger.debug("Evaluating for timer expiration.")
+        # Update the dock timer.
+        if self._detectors['longitudinal'][self._selected_longitudinal].motion:
+            # If motion is detected, update the time mark to the current time.
+            self._logger.debug("Motion found, resetting dock timer.")
+            self._dock_timer['mark'] = time.monotonic()
+        else:
+            self._logger.debug("No motion found, checking for dock timer expiry.")
+            # No motion, check for completion
+            if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
+                self._logger.debug("Motion timer expired. Doing an occupancy check.")
+                if self._check_occupancy():
+                    self._occupancy = True
+                else:
+                    self._occupancy = False
+                # Set self back to ready.
+                self.state = 'Ready'
 
     # Tells the detectors to update.
+    # Note, this does NOT trigger timer operations.
     def _scan_detectors(self):
         self._position = {'longitudinal': {}, 'lateral': {}}
         self._quality = {'longitudinal': {}, 'lateral': {}}
@@ -239,14 +243,10 @@ class Bay:
             self._logger.debug("Entering state: {}".format(m_input))
             self._logger.debug("Start time: {}".format(monotonic()))
             self._logger.debug("Detectors: {}".format(self._detectors))
-            # When entering docking or undocking state, start ranging on the sensors.
-            self._detector_state('activate')
             # Set the start time.
             self._dock_timer['mark'] = monotonic()
         if m_input.lower() not in ('docking', 'undocking') and self._state in ('docking', 'undocking'):
             self._logger.debug("Entering state: {}".format(input))
-            # Deactivate the detectors.
-            self._detector_state('deactivate')
             # Reset some variables.
             self._dock_timer['mark'] = None
         # Now store the state.
@@ -312,8 +312,8 @@ class Bay:
     # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
     def display_data(self):
         return_data = {'bay_id': self.bay_id}
-        # Give only the range reading of the selected range sensor. The display will only use one of them.
-        return_data['range'] = self._position['longitudinal']
+        # Give only the range reading of the selected range sensor. The display can only use one of them.
+        return_data['range'] = self._position['longitudinal'][self._selected_longitudinal]
         # The range quality band. This is used for color coding.
         return_data['range_quality'] = self._quality['longitudinal']
         # Percentage of range covered. This is used to construct the strobe.
@@ -341,7 +341,7 @@ class Bay:
     def shutdown(self):
         self._logger.error("Beginning shutdown...")
         self._logger.error("Shutting off detectors...")
-        self._shutdown_detectors(self._detectors)
+        self._detector_state('deactivate')
         self._logger.error("Shutdown complete. Exiting.")
 
     # Traverse the detectors dict, activate everything that needs activating.
@@ -361,24 +361,24 @@ class Bay:
                     else:
                         raise RuntimeError("Detector activation reached impossible state.")
 
-    # Traverse the detectors and make sure they're all stopped.
-    def _shutdown_detectors(self, detectors):
-        if isinstance(detectors, list):
-            for i in range(len(detectors)):
-                # Call nested lists iteratively.
-                if isinstance(detectors[i], list) or isinstance(detectors[i], dict):
-                    self._shutdown_detectors(detectors[i])
-                # If it's a Detector, it has shutdown, call it.
-                elif isinstance(detectors[i], Detector):
-                    detectors[i].shutdown()
-        elif isinstance(detectors, dict):
-            for item in detectors:
-                # Call nested lists and dicts iteratively.
-                if isinstance(detectors[item], list) or isinstance(detectors[item], dict):
-                    self._shutdown_detectors(detectors[item])
-                # If it's a Detector, it has shutdown, call it.
-                elif isinstance(detectors[item], Detector):
-                    detectors[item].shutdown()
+    # # Traverse the detectors and make sure they're all stopped.
+    # def _shutdown_detectors(self, detectors):
+    #     if isinstance(detectors, list):
+    #         for i in range(len(detectors)):
+    #             # Call nested lists iteratively.
+    #             if isinstance(detectors[i], list) or isinstance(detectors[i], dict):
+    #                 self._shutdown_detectors(detectors[i])
+    #             # If it's a Detector, it has shutdown, call it.
+    #             elif isinstance(detectors[i], Detector):
+    #                 detectors[i].shutdown()
+    #     elif isinstance(detectors, dict):
+    #         for item in detectors:
+    #             # Call nested lists and dicts iteratively.
+    #             if isinstance(detectors[item], list) or isinstance(detectors[item], dict):
+    #                 self._shutdown_detectors(detectors[item])
+    #             # If it's a Detector, it has shutdown, call it.
+    #             elif isinstance(detectors[item], Detector):
+    #                 detectors[item].shutdown()
 
     @property
     def bay_id(self):
