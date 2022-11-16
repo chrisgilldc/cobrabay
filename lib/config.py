@@ -102,10 +102,14 @@ class CBConfig():
                     requested_level = self._config['system']['logging']['bays'][mod_id].lower()
                 except KeyError:
                     mod_id = 'bays'
+                except TypeError:
+                    mod_id = 'bays'
             elif mod_type == 'detector':
                 try:
                     requested_level = self._config['system']['logging']['detectors'][mod_id].lower()
                 except KeyError:
+                    mod_id = 'detectors'
+                except TypeError:
                     mod_id = 'detectors'
             # Check for module-level setting.
             try:
