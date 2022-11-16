@@ -256,7 +256,7 @@ class Display:
                 range_string = "{}\"".format(round(as_inches.magnitude,1))
             else:
                 feet = int(as_inches.to(ureg.inch).magnitude // 12)
-                inches = round(as_inches.to(ureg.inch).magnitude % 12,0)
+                inches = round(as_inches.to(ureg.inch).magnitude % 12)
                 range_string = "{}'{}\"".format(feet,inches)
         else:
             as_meters = round(input_range.to('m').magnitude,2)
