@@ -107,64 +107,29 @@ class CobraBay:
         for command in command_stack:
             self._logger.debug("Considering command: {}".format(command))
             if command['type'] == 'bay':
-                # Some commands can only run when we're *not* actively docking or undocking.
-                if self._bays[command['bay_id']] not in ('docking', 'undocking'):
-                    if 'dock' in command['cmd']:
-                        self._logger.debug("Got dock command for Bay ID {}".format(command['bay_id']))
-                        self._logger.debug("Available bays: {}".format(self._bays.keys()))
-                        # try:
+                # Dock
+                if command['cmd'] == 'dock':
+                    # Only dock from ready.
+                    if self._bays[command['bay_id']].state not in ('Ready'):
+                        self._logger.debug("Dock requested for bay '{}', but bay is not Ready (is in state: '{}'".
+                            format(command['bay_id'], self._bays[command['bay_id']].state))
+                    else:
+                        # Start shift to the docking loop.
                         self._dock(command['bay_id'])
-                        # except ValueError:
-                        #     self._logger.info("Bay command 'dock' was refused.")
-                    if 'undock' in command['cmd']:
-                        try:
-                            self._undock(command['bay_id'])
-                        except ValueError:
-                            self._logger.info("Bay command 'undock' was refused.")
-                        except KeyError:
-                            self._logger.info("Receved command 'dock' for unknown bay '{}'".format(command['bay_id']))
-                    # Don't allow a verify when we're actually doing a motion.
-                    if 'verify' in command['cmd']:
-                        self._bays[command['bay_id']].verify()
-                    if 'abort' in command['cmd']:
+                # Undock
+
+                # Abort
+                elif command['cmd'] == 'abort':
+                    # Can't abort if we're not doing anything.
+                    if self._bays[command['bay_id']].state not in ('Docking', 'Undocking'):
+                        self._logger.debug("Abort requested when not docking or undocking. Doing nothing.")
+                    else:
+                        self._logger.debug("Aborting bay {}".format(command['bay_id']))
+                        # Call the abort method on the bay.
                         self._bays[command['bay_id']].abort()
-                    # if 'reset' in command['cmd']:
-                    #     self._logger.info("Resetting bay per command.")
-                    #     self._bay.reset()
-                    #     print("Bay state after reset: {}".format(self._bay.state))
             if command['type'] == 'device':
-                # Don't allow a display sensor request to override an active motion
-                if 'display_sensor' in command['cmd']:
-                    if 'options' in command:
-                        # Make sure all the options exist.
-                        options = command['options']
-                        try:
-                            sensor = options['sensor']
-
-                        except:
-                            self._logger.info("Got 'display_sensor' command but incorrect options: {}".
-                                              format(command['options']))
-                            return
-                        try:
-                            timeout = float(options['timeout'])
-                        except KeyError:
-                            timeout = float(360)
-
-                        # Make sure the sensor really exists.
-                        if sensor not in self._sensors.sensor_state().keys():
-                            self._logger.info(
-                                "Got 'display_sensor' command but sensor {} does not exist.".format(sensor))
-                            return
-
-                        # Default to 1h if larger than 1h.
-                        if float(timeout) > 3600:
-                            timeout = float(3600)
-                        self._logger.info("Starting sensor display mode for: {}".format(sensor))
-                        self._display_sensor = {
-                            'sensor': sensor,
-                            'timeout': timeout,
-                            'start': monotonic()
-                        }
+                # There are no device commands for now.
+                pass
 
     def _network_handler(self):
         # Add hardware status messages.
@@ -187,28 +152,25 @@ class CobraBay:
             for bay in self._bays:
                 # Monitor and check for a state change into docking or undocking.
                 self._bays[bay].monitor()
-                if self._bays[bay].state == 'Docking':
-                    self._logger.info("Entering docking mode due to movement.")
-                    self._dock(bay)
                 # Since undocking isn't fully developed, don't do this right now. But it's in here as a stud.
                 # elif self._bays[bay].state == 'Undocking':
                 #     self._logger.info("Entering undocking mode due to movement.")
                 #     self._undock()
                 self._outbound_messages = self._outbound_messages + self._bays[bay].mqtt_messages()
+                if self._bays[bay].state == 'Docking':
+                    self._logger.info("Entering docking mode due to movement.")
+                    self._dock(bay)
             # Do a network poll, this method handles all the default outbound messages and any incoming commands.
             network_data = self._network_handler()
             # Update the network components of the system state.
-            system_state['online'] = network_data['online']
-            system_state['mqtt_status'] = network_data['mqtt_status']
-
+            #system_state['online'] = network_data['online']
+            #system_state['mqtt_status'] = network_data['mqtt_status']
             self._display.show("clock")
             # Push out the image to MQTT.
             self._outbound_messages.append(
                 {'topic_type': 'system',
                  'topic': 'display',
                  'message': self._display.current, 'repeat': True})
-            # Have the bay monitor range, for movement.
-
 
     # Start sensors and display to guide parking.
     def _dock(self, bay_id):
@@ -223,10 +185,10 @@ class CobraBay:
         # Put the bay into docking mode. The command handler will catch ValueErrors (when the bay isn't ready to dock)
         # and KeyErrors (when the bay_id) is bad
         self._logger.debug("Putting bay in dock mode.")
-        self._bays[bay_id].state = 'docking'
+        self._bays[bay_id].state = 'Docking'
 
         # As long as the bay still thinks it's docking, keep displaying!
-        while self._bays[bay_id].state == "docking":
+        while self._bays[bay_id].state == "Docking":
             # Trigger a scan of the bay.
             self._logger.debug("Requesting bay scan.")
             self._bays[bay_id].scan()
