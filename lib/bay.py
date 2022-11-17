@@ -53,22 +53,17 @@ class Bay:
 
         # Set our initial state.
         self._scan_detectors()
-        if self._check_occupancy():
-            self._occupancy = 'Occupied'
-        else:
-            self._occupancy = 'Unoccupied'
+        self._update_occupancy()
 
         self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
         self.state = "Ready"
 
     # Abort gets called when we want to cancel a docking.
     def abort(self):
-        # Scan the detectors once
-        self._scan_detectors()
-        if self._check_occupancy():
-            self._occupancy = 'Occupied'
-        else:
-            self._occupancy= 'Unoccupied'
+        # Return state to ready.
+        self.state = 'Ready'
+        self._update_occupancy()
+
 
     # Method to get info to pass to the Network module and register.
     @property
@@ -140,11 +135,8 @@ class Bay:
             self._logger.debug("No motion found, checking for dock timer expiry.")
             # No motion, check for completion
             if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
-                self._logger.debug("Motion timer expired. Doing an occupancy check.")
-                if self._check_occupancy():
-                    self._occupancy = True
-                else:
-                    self._occupancy = False
+                self._logger.debug("Motion timer expired. Updating occupancy and going back to Ready.")
+                self._update_occupancy()
                 # Set self back to ready.
                 self.state = 'Ready'
 
@@ -210,16 +202,26 @@ class Bay:
         # If for some reason we drop through to here, assume we're not occupied.
         return False
 
+    # Method to update the occupancy status on the object.
+    # This is separate from check_occupancy because sometimes we want to use the result of the check in logic.
+    def _update_occupancy(self):
+        if self._check_occupancy():
+            self._occupancy = 'Occupied'
+        else:
+            self._occupancy = 'Unoccupied'
+
     # Method to check the range sensor for motion.
     def monitor(self):
         vector = self._detectors['longitudinal'][self._selected_longitudinal].vector
         # If there's motion, change state.
         if vector['direction'] == 'forward':
-            self.state = 'docking'
+            self.state = 'Docking'
         elif vector['direction'] == 'reverse':
-            self.state = 'undocking'
+            self.state = 'Undocking'
         elif self._detectors['longitudinal'][self._selected_longitudinal].value == 'Weak':
-            self.state = 'docking'
+            # A weak return means we're almost certainly looking through an open garage door,
+            # ie: somebody is about to park.
+            self.state = 'Docking'
 
     @property
     def state(self):
@@ -236,16 +238,18 @@ class Bay:
     def state(self, m_input):
         self._logger.debug("State change requested to {} from {}".format(m_input, self._state))
         # Trap invalid bay states.
-        if m_input.lower() not in ('ready', 'docking', 'undocking', 'unavailable'):
+        if m_input not in ('Ready', 'Docking', 'Undocking', 'Unavailable'):
             raise ValueError("{} is not a valid bay state.".format(m_input))
         self._logger.debug("Old state: {}, new state: {}".format(self._state, m_input))
-        if m_input.lower() in ('docking', 'undocking') and self._state not in ('docking', 'undocking'):
+        # From a non-moving state to a moving state.
+        if m_input in ('Docking', 'Undocking') and self._state not in ('Docking', 'Undocking'):
             self._logger.debug("Entering state: {}".format(m_input))
             self._logger.debug("Start time: {}".format(monotonic()))
             self._logger.debug("Detectors: {}".format(self._detectors))
             # Set the start time.
             self._dock_timer['mark'] = monotonic()
-        if m_input.lower() not in ('docking', 'undocking') and self._state in ('docking', 'undocking'):
+        # From a moving state to a non-moving state.
+        if m_input.lower() not in ('Ready','Unavailable') and self._state in ('Docking', 'Undocking'):
             self._logger.debug("Entering state: {}".format(input))
             # Reset some variables.
             self._dock_timer['mark'] = None
@@ -267,7 +271,7 @@ class Bay:
         # Only generate positioning messages if
         # 1) we're  docking or undocking or
         # 2) a verify has been explicitly requested.
-        if verify or self.state in ('docking', 'undocking'):
+        if verify or self.state in ('Docking', 'Undocking'):
             outbound_messages.append(
                 {'topic_type': 'bay',
                  'topic': 'bay_position',
@@ -306,7 +310,6 @@ class Bay:
                  'repeat': True,
                  'topic_mappings': {'bay_id': self.bay_id}}
             )
-        self._logger.debug("Have compiled outbound messages. {}".format(outbound_messages))
         return outbound_messages
 
     # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
