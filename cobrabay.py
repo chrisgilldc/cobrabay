@@ -2,21 +2,14 @@
 # CobraBay - Command line invoker
 ####
 
-import sys
-import logging
-from logging.handlers import SysLogHandler
-import lib.cobrabay as cobrabay
 
-# # Find a default 'config.py' file.
-# try:
-#     from config import config
-#     config = config
-# except ImportError:
-#     print("Core: No config.py file! Have to have a config to load!")
-#     sys.exit()
+import lib.cobrabay as cobrabay
+from pid import PidFile
+
 
 # Initialize the object.
 cb = cobrabay.CobraBay()
 
 # Start the main operating loop.
+#with PidFile('CobraBay'):
 cb.run()
