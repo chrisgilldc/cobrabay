@@ -6,12 +6,16 @@ system:
   monitor_range: False # Notes here.
   # Logging definition
   logging:
-    # Default level for the system. If a specific module doesn't have its own level, this is used.
-    # Uses the standard logging level: critical, error, warning, info, debug.
-    # If not defined, default is 'warning'
-    # Can set core modules: bay, display, network
-    # Can also set 'mqtt' to debug to dump all inbound and outbound mqtt messages. This is independent from 'network'.
+    # Default level for the system. If not included, will default to WARNING.
     default_level: warning
+    # Major components can have logging levels set separately. These are:
+    # bays - All bays
+    # core
+    # detectors - All detectors
+    # display - The display
+    # network - The network
+    # Individual detectors and bays can also be set by including their names.
+    core: debug
     bay1: debug
 # Settings for the display. We presume only one.
 display:
@@ -34,6 +38,7 @@ detectors:
       type: TFMini
       port: serial0  # System will automatically prefix /dev if not included.
       baud: 115200
+      error_margin: "2 cm"  # Amount of distance this sensor can vary and still be counted as 'still'
   front:
     type: Lateral
     name: Front
@@ -72,14 +77,13 @@ bays:
     bay_id: bay1
     name: "Bay 1"
     log_level: debug
-    park_time: 60s
+    park_time: 15s
     bay_depth: 276in
-    # log_level: XXX - Can set a
     longitudinal:
       defaults:
         offset: 42 in
         spread_park: 2in
-        bay_depth: 276in
+        bay_depth: 237in
       detectors:
         - detector: range
     lateral:
