@@ -215,11 +215,11 @@ class Bay:
         vector = self._detectors['longitudinal'][self._selected_longitudinal].vector
         # If there's motion, change state.
         if vector['direction'] == 'forward':
-            self.state = 'docking'
+            self.state = 'Docking'
         elif vector['direction'] == 'reverse':
-            self.state = 'undocking'
+            self.state = 'Undocking'
         elif self._detectors['longitudinal'][self._selected_longitudinal].value == 'Weak':
-            self.state = 'docking'
+            self.state = 'Docking'
 
     @property
     def state(self):
@@ -236,17 +236,19 @@ class Bay:
     def state(self, m_input):
         self._logger.debug("State change requested to {} from {}".format(m_input, self._state))
         # Trap invalid bay states.
-        if m_input.lower() not in ('ready', 'docking', 'undocking', 'unavailable'):
+        if m_input not in ('Ready', 'Docking', 'Undocking', 'Unavailable'):
             raise ValueError("{} is not a valid bay state.".format(m_input))
         self._logger.debug("Old state: {}, new state: {}".format(self._state, m_input))
-        if m_input.lower() in ('docking', 'undocking') and self._state not in ('docking', 'undocking'):
+        if m_input == self._state:
+            self._logger.debug("Requested state {} is also current state. No action.".format(m_input))
+            return
+        if m_input in ('Docking', 'Undocking') and self._state not in ('Docking', 'Undocking'):
             self._logger.debug("Entering state: {}".format(m_input))
-            self._logger.debug("Start time: {}".format(monotonic()))
-            self._logger.debug("Detectors: {}".format(self._detectors))
-            # Set the start time.
             self._dock_timer['mark'] = monotonic()
-        if m_input.lower() not in ('docking', 'undocking') and self._state in ('docking', 'undocking'):
-            self._logger.debug("Entering state: {}".format(input))
+            self._logger.debug("Start time: {}".format(self._dock_timer['mark']))
+            self._logger.debug("Detectors: {}".format(self._detectors))
+        if m_input not in ('Docking', 'Undocking') and self._state in ('Docking', 'Undocking'):
+            self._logger.debug("Entering state: {}".format(m_input))
             # Reset some variables.
             self._dock_timer['mark'] = None
         # Now store the state.
@@ -263,49 +265,44 @@ class Bay:
             # Bay occupancy.
             {'topic_type': 'bay', 'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False,
              'topic_mappings': {'bay_id': self.bay_id}}]
-        # State message.
-        # Only generate positioning messages if
-        # 1) we're  docking or undocking or
-        # 2) a verify has been explicitly requested.
-        if verify or self.state in ('docking', 'undocking'):
-            outbound_messages.append(
-                {'topic_type': 'bay',
-                 'topic': 'bay_position',
-                 'message': self.position,
-                 'repeat': False,
-                 'topic_mappings': {'bay_id': self.bay_id}}
-            )
-            outbound_messages.append(
-                {'topic_type': 'bay',
-                 'topic': 'bay_quality',
-                 'message': self.quality,
-                 'repeat': False,
-                 'topic_mappings': {'bay_id': self.bay_id}}
+        outbound_messages.append(
+            {'topic_type': 'bay',
+             'topic': 'bay_position',
+             'message': self.position,
+             'repeat': False,
+             'topic_mappings': {'bay_id': self.bay_id}}
+        )
+        outbound_messages.append(
+            {'topic_type': 'bay',
+             'topic': 'bay_quality',
+             'message': self.quality,
+             'repeat': False,
+             'topic_mappings': {'bay_id': self.bay_id}}
+        )
+        outbound_messages.append(
+            {'topic_type': 'bay',
+             'topic': 'bay_speed',
+             'message': self._detectors['longitudinal'][self._selected_longitudinal].vector,
+             'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
+        )
+        outbound_messages.append(
+            {'topic_type': 'bay',
+             'topic': 'bay_motion',
+             'message': self._detectors['longitudinal'][self._selected_longitudinal].motion,
+             'repeat': True, 'topic_mappings': {'bay_id': self.bay_id}}
             )
 
-            outbound_messages.append(
-                {'topic_type': 'bay',
-                 'topic': 'bay_speed',
-                 'message': self._detectors['longitudinal'][self._selected_longitudinal].vector,
-                 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
-            )
-            outbound_messages.append(
-                {'topic_type': 'bay',
-                 'topic': 'bay_motion',
-                 'message': self._detectors['longitudinal'][self._selected_longitudinal].motion,
-                 'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
-            ),
-            if self._dock_timer['mark'] is None:
-                message = 'offline'
-            else:
-                message = self._dock_timer['allowed'] - (monotonic() - self._dock_timer['mark'])
-            outbound_messages.append(
-                {'topic_type': 'bay',
-                 'topic': 'bay_dock_time',
-                 'message': message,
-                 'repeat': True,
-                 'topic_mappings': {'bay_id': self.bay_id}}
-            )
+        if self._dock_timer['mark'] is None:
+            message = 'offline'
+        else:
+            message = self._dock_timer['allowed'] - (monotonic() - self._dock_timer['mark'])
+        outbound_messages.append(
+            {'topic_type': 'bay',
+             'topic': 'bay_dock_time',
+             'message': message,
+             'repeat': True,
+             'topic_mappings': {'bay_id': self.bay_id}}
+        )
         self._logger.debug("Have compiled outbound messages. {}".format(outbound_messages))
         return outbound_messages
 

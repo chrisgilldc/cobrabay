@@ -179,9 +179,7 @@ class CobraBay:
 
     # Main operating loop.
     def run(self):
-        self._logger.info('CobraBay: Starting main operating loop.')
         # This loop runs while the system is idle. Process commands, increment various timers.
-        system_state = {'signal_strength': 0, 'mqtt_status': False}
         while True:
             ## Messages from the bay.
             for bay in self._bays:
@@ -190,6 +188,7 @@ class CobraBay:
                 if self._bays[bay].state == 'Docking':
                     self._logger.info("Entering docking mode due to movement.")
                     self._dock(bay)
+                    break ## Exit this cycle
                 # Since undocking isn't fully developed, don't do this right now. But it's in here as a stud.
                 # elif self._bays[bay].state == 'Undocking':
                 #     self._logger.info("Entering undocking mode due to movement.")
@@ -198,8 +197,8 @@ class CobraBay:
             # Do a network poll, this method handles all the default outbound messages and any incoming commands.
             network_data = self._network_handler()
             # Update the network components of the system state.
-            system_state['online'] = network_data['online']
-            system_state['mqtt_status'] = network_data['mqtt_status']
+            # system_state['online'] = network_data['online']
+            # system_state['mqtt_status'] = network_data['mqtt_status']
 
             self._display.show("clock")
             # Push out the image to MQTT.
@@ -223,10 +222,10 @@ class CobraBay:
         # Put the bay into docking mode. The command handler will catch ValueErrors (when the bay isn't ready to dock)
         # and KeyErrors (when the bay_id) is bad
         self._logger.debug("Putting bay in dock mode.")
-        self._bays[bay_id].state = 'docking'
+        self._bays[bay_id].state = 'Docking'
 
         # As long as the bay still thinks it's docking, keep displaying!
-        while self._bays[bay_id].state == "docking":
+        while self._bays[bay_id].state == "Docking":
             # Trigger a scan of the bay.
             self._logger.debug("Requesting bay scan.")
             self._bays[bay_id].scan()
