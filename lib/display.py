@@ -146,7 +146,11 @@ class Display:
         # Pull out the range and range quality to make the center placard.
         self._logger.debug("Creating range placard with range: {}".format(display_data['range']))
         # Only add the layer if it's a workable value.
-        range_layer = self._placard_range(display_data['range'], display_data['range_quality'])
+        range_layer = self._placard_range(
+            display_data['range'],
+            display_data['range_quality'],
+            display_data['bay_state']
+        )
         final_image = Image.alpha_composite(final_image, range_layer)
 
         ## Bottom strobe box.
@@ -243,11 +247,16 @@ class Display:
         return img
 
     # Make a placard to show range.
-    def _placard_range(self,input_range,range_quality):
+    def _placard_range(self,input_range,range_quality,bay_state):
         self._logger.debug("Creating range placard with range {} and quality {}".format(input_range, range_quality))
         # Some range quality statuses need a text output, not a distance.
         if range_quality == 'Back up':
             range_string = "BACK UP"
+        elif range_quality == 'Door open':
+            if bay_state == 'Docking':
+                range_string = "APPROACH"
+            elif bay_state == 'Undocking':
+                range_string = "CLEAR!"
         elif input_range == 'Beyond range':
             range_string = "APPROACH"
         elif self._settings['units'] == 'imperial':
@@ -267,7 +276,7 @@ class Display:
             text_color = 'red'
         elif range_quality =='Warning':
             text_color = 'yellow'
-        elif range_quality == 'Beyond range':
+        elif range_quality in ('Beyond range', 'Door open'):
             text_color = 'blue'
         else:
             text_color = 'green'
