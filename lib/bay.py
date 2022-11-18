@@ -308,11 +308,9 @@ class Bay:
 
     # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
     def display_data(self):
-        return_data = {'bay_id': self.bay_id}
-        # Give only the range reading of the selected range sensor. The display can only use one of them.
-        return_data['range'] = self._position['longitudinal'][self._selected_longitudinal]
-        # The range quality band. This is used for color coding.
-        return_data['range_quality'] = self._quality['longitudinal']
+        return_data = {'bay_id': self.bay_id, 'bay_state': self.state,
+                       'range': self._position['longitudinal'][self._selected_longitudinal],
+                       'range_quality': self._quality['longitudinal'][self._selected_longitudinal]}
         # Percentage of range covered. This is used to construct the strobe.
         # If it's not a Quantity, just return zero.
         if isinstance(return_data['range'], Quantity):
