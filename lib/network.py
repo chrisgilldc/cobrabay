@@ -185,7 +185,9 @@ class Network:
                         'type': 'binary_sensor',
                         'entity': '{0[bay_id]}_occupied',
                         'class': 'occupancy',
-                        'value_template': "{{% if value_json.state == 'occupied' %}} ON {{% else %}} OFF {{% endif %}}"
+                        'payload_on': 'Occupied',
+                        'payload_off': 'Unoccupied',
+                        'payload_not_available': 'Unknown'
                     }
                 },
                 'bay_state': {
@@ -205,16 +207,6 @@ class Network:
                         'type': 'camera',
                         'entity': '{0[bay_id]}_{0[lateral]}_display',
                         'encoding': 'b64'
-                    }
-                },
-                # Which detector is selected for active range use.
-                'bay_range_selected': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/range_selected',
-                    'previous_state': None,
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} Selected Range Detector',
-                        'type': 'sensor',
-                        'entity': '{0[bay_id]}_range_selected'
                     }
                 },
                 # Adjusted readings from the sensors.
@@ -244,7 +236,7 @@ class Network:
                     }
                 },
                 'bay_motion': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/motion',
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/vector',
                     'previous_state': 'Unknown',
                     'enabled': True,
                     'ha_discovery': {
@@ -252,8 +244,7 @@ class Network:
                         'type': 'binary_sensor',
                         'entity': '{0[bay_id]}_motion',
                         'class': 'motion',
-                        'payload_on': 'True',
-                        'payload_off': 'False'
+                        'value_template': "{{% if value_json.state != 'still' %}} ON {{% else %}} OFF {{% endif %}}"
                     }
                 },
                 'bay_speed': {
