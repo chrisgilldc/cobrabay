@@ -221,13 +221,20 @@ class CBConfig():
         self._logger.debug("Assembled Lateral defaults: {}".format(defaults['lateral']))
 
         config_dict['detectors'] = {}
-        config_dict['detector_intercepts'] = {}
+        config_dict['detectors'] = {
+            'selected_range': None,
+            'settings': {},
+            'intercepts': {},
+            'longitudinal': [],
+            'lateral': []
+
+        }
         # Create the actual detector configurations.
         for direction in ('longitudinal', 'lateral'):
             for detector in self._config['bays'][bay_id][direction]['detectors']:
-                # Build the detector config for this detector. Check the config file for overrides first, then use defaults. If we can't do either, then raise an error.
+                # Build the detector config for this detector. Check the config file for overrides first, then use
+                # defaults. If we can't do either, then raise an error.
                 detector_config = {}
-
                 for config_item in detector_options[direction]:
                     try:
                         detector_config[config_item] = detector[config_item]
@@ -239,18 +246,26 @@ class CBConfig():
                             # Couldn't find this either. That's a problem!
                             raise
                 self._logger.debug("Assembled detector config: {}".format(detector_config))
-                config_dict['detectors'][detector['detector']] = detector_config
+                # Store the settings.
+                config_dict['detectors']['settings'][detector['detector']] = detector_config
+                # Save the name in the right place.
+                if direction == 'longitudinal':
+                    config_dict['detectors']['longitudinal'].append(detector['detector'])
 
                 # Lateral detectors have an intercept distance.
                 if direction == 'lateral':
+                    config_dict['detectors']['lateral'].append(detector['detector'])
                     try:
-                        config_dict['detector_intercepts'][detector['detector']] = Quantity(detector['intercept'])
+                        config_dict['detectors']['intercepts'][detector['detector']] = Quantity(detector['intercept'])
                     except KeyError as ke:
                         raise Exception('Lateral detector {} does not have intercept distance defined!'
                                         .format(detector['detector'])) from ke
 
-
-
+            # Pick a range sensor to use as 'primary'.
+            if config_dict['detectors']['selected_range'] is None:
+                # If there's only one longitudinal detector, that's the one to use for range.
+                if len(config_dict['detectors']['longitudinal']) == 1:
+                    config_dict['detectors']['selected_range'] = config_dict['detectors']['longitudinal'][0]
         return config_dict
 
     # Config dict for a detector.
