@@ -248,18 +248,6 @@ class Network:
                         'icon': 'mdi:traffic-light'
                     }
                 },
-                'bay_motion': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/vector',
-                    'previous_state': 'Unknown',
-                    'enabled': True,
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} Motion',
-                        'type': 'binary_sensor',
-                        'entity': '{0[bay_id]}_motion',
-                        'class': 'motion',
-                        'value_template': "{{% if value_json.state != 'still' %}} ON {{% else %}} OFF {{% endif %}}"
-                    }
-                },
                 'bay_speed': {
                     'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/vector',
                     'previous_state': None,
@@ -272,6 +260,20 @@ class Network:
                         'unit_of_measurement': self._uom('speed')
                     }
                 },
+                # Motion binary sensor. Keys off the 'direction' value in the Vector topic.
+                'bay_motion': {
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/vector',
+                    'previous_state': 'Unknown',
+                    'enabled': True,
+                    'ha_discovery': {
+                        'name': '{0[bay_name]} Motion',
+                        'type': 'binary_sensor',
+                        'entity': '{0[bay_id]}_motion',
+                        'class': 'motion',
+                        'value_template': "{{% if value_json.direction in ('forward','reverse') %}} ON {{% else %}} OFF {{% endif %}}"
+                    }
+                },
+
                 'bay_dock_time': {
                     'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/dock_time',
                     'previous_state': None,

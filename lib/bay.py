@@ -293,11 +293,6 @@ class Bay:
                               'topic': 'bay_speed',
                               'message': self._detectors[self._settings['detectors']['selected_range']].vector,
                               'repeat': True,
-                              'topic_mappings': {'bay_id': self.bay_id}},
-                             {'topic_type': 'bay',
-                              'topic': 'bay_motion',
-                              'message': self._detectors[self._settings['detectors']['selected_range']].motion,
-                              'repeat': True,
                               'topic_mappings': {'bay_id': self.bay_id}}]
         # Positions for all the detectors.
         for detector in self._detectors:
