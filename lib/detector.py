@@ -417,6 +417,16 @@ class Lateral(SingleDetector):
         else:
             return "Unknown"
 
+    # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
+    @property
+    @read_if_stale
+    def value_raw(self):
+        self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
+        if isinstance(self._history[0][0], Quantity):
+            return self._history[0][0]
+        else:
+            return "Unknown"
+
     @property
     @read_if_stale
     def quality(self):
