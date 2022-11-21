@@ -53,22 +53,13 @@ class Bay:
 
         # Set our initial state.
         self._scan_detectors()
-        if self._check_occupancy():
-            self._occupancy = 'Occupied'
-        else:
-            self._occupancy = 'Unoccupied'
 
         self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
         self.state = "Ready"
 
     # Abort gets called when we want to cancel a docking.
     def abort(self):
-        # Scan the detectors once
-        self._scan_detectors()
-        if self._check_occupancy():
-            self._occupancy = 'Occupied'
-        else:
-            self._occupancy= 'Unoccupied'
+        self.state = "Ready"
 
     # Method to get info to pass to the Network module and register.
     @property
@@ -108,7 +99,10 @@ class Bay:
         :returns: bay occupancy state
         :rtype: String
         """
-        return self._occupancy
+        if self._check_occupancy():
+            return 'Occupied'
+        else:
+            return 'Unoccupied'
 
     # How good is the parking job?
     @property
@@ -140,11 +134,6 @@ class Bay:
             self._logger.debug("No motion found, checking for dock timer expiry.")
             # No motion, check for completion
             if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
-                self._logger.debug("Motion timer expired. Doing an occupancy check.")
-                if self._check_occupancy():
-                    self._occupancy = True
-                else:
-                    self._occupancy = False
                 # Set self back to ready.
                 self.state = 'Ready'
 
@@ -258,40 +247,33 @@ class Bay:
     def mqtt_messages(self, verify=False):
         # Initialize the outbound message list.
         # Always include the bay state and bay occupancy.
-        outbound_messages = [
-            # Bay state.
-            {'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False,
-             'topic_mappings': {'bay_id': self.bay_id}},
-            # Bay occupancy.
-            {'topic_type': 'bay', 'topic': 'bay_occupied', 'message': self.occupied, 'repeat': False,
-             'topic_mappings': {'bay_id': self.bay_id}}]
-        outbound_messages.append(
-            {'topic_type': 'bay',
-             'topic': 'bay_position',
-             'message': self.position,
-             'repeat': False,
-             'topic_mappings': {'bay_id': self.bay_id}}
-        )
-        outbound_messages.append(
-            {'topic_type': 'bay',
-             'topic': 'bay_quality',
-             'message': self.quality,
-             'repeat': False,
-             'topic_mappings': {'bay_id': self.bay_id}}
-        )
-        outbound_messages.append(
-            {'topic_type': 'bay',
-             'topic': 'bay_speed',
-             'message': self._detectors['longitudinal'][self._selected_longitudinal].vector,
-             'repeat': False, 'topic_mappings': {'bay_id': self.bay_id}}
-        )
-        outbound_messages.append(
-            {'topic_type': 'bay',
-             'topic': 'bay_motion',
-             'message': self._detectors['longitudinal'][self._selected_longitudinal].motion,
-             'repeat': True, 'topic_mappings': {'bay_id': self.bay_id}}
-            )
-
+        outbound_messages = [{'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False,
+                              'topic_mappings': {'bay_id': self.bay_id}},
+                             {'topic_type': 'bay',
+                              'topic': 'bay_occupied',
+                              'message': self.occupied,
+                              'repeat': True,
+                              'topic_mappings': {'bay_id': self.bay_id}},
+                             {'topic_type': 'bay',
+                              'topic': 'bay_position',
+                              'message': self.position,
+                              'repeat': True,
+                              'topic_mappings': {'bay_id': self.bay_id}},
+                             {'topic_type': 'bay',
+                              'topic': 'bay_quality',
+                              'message': self.quality,
+                              'repeat': True,
+                              'topic_mappings': {'bay_id': self.bay_id}},
+                             {'topic_type': 'bay',
+                              'topic': 'bay_speed',
+                              'message': self._detectors['longitudinal'][self._selected_longitudinal].vector,
+                              'repeat': True,
+                              'topic_mappings': {'bay_id': self.bay_id}},
+                             {'topic_type': 'bay',
+                              'topic': 'bay_motion',
+                              'message': self._detectors['longitudinal'][self._selected_longitudinal].motion,
+                              'repeat': True,
+                              'topic_mappings': {'bay_id': self.bay_id}}]
         if self._dock_timer['mark'] is None:
             message = 'offline'
         else:
