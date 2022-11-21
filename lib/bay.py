@@ -201,20 +201,23 @@ class Bay:
         if self._quality[self._settings['detectors']['selected_range']] in ('No object', 'Door open'):
             # If the detector can hit the garage door, or the door is open, then clearly nothing is in the way, so
             # the bay is vacant.
-            self._logger.debug("Longitudinal quality is {}, not occupied.".format(self._quality[self._settings['detectors']['selected_range']]))
+            self._logger.debug("Longitudinal quality is {}, not occupied.".
+                               format(self._quality[self._settings['detectors']['selected_range']]))
             return False
         if self._quality[self._settings['detectors']['selected_range']] in ('Emergency!', 'Back up', 'Park', 'Final', 'Base'):
             # If the detector is giving us any of the 'close enough' qualities, there's something being found that
             # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
             # the sensors or whatnot
-            self._logger.debug("Longitudinal quality is {}, could be occupied.".format(self._quality['longitudinal']))
+            self._logger.debug("Longitudinal quality is {}, could be occupied.".
+                               format(self._quality[self._settings['detectors']['selected_range']]))
             lat_score = 0
+            max_score = len(self._settings['detectors']['lateral'])
             for detector in self._settings['detectors']['lateral']:
-                if self._quality['lateral'][detector] in ('OK', 'Warning', 'Critical'):
+                if self._quality[detector] in ('OK', 'Warning', 'Critical'):
                     # No matter how badly parked the vehicle is, it's still *there*
                     lat_score += 1
-            self._logger.debug("Achieved lateral score {} of {}".format(lat_score, len(self._quality['lateral'])))
-            if lat_score == len(self._settings['detectors']['lateral']):
+            self._logger.debug("Achieved lateral score {} of {}".format(lat_score, max_score))
+            if lat_score == max_score:
                 # All sensors have found something more or less in the right place, so yes, we're occupied!
                 return True
         # If for some reason we drop through to here, assume we're not occupied.
@@ -276,11 +279,11 @@ class Bay:
                               'message': self.occupied,
                               'repeat': True,
                               'topic_mappings': {'bay_id': self.bay_id}},
-                             {'topic_type': 'bay',
-                              'topic': 'bay_position',
-                              'message': self.position,
-                              'repeat': True,
-                              'topic_mappings': {'bay_id': self.bay_id}},
+                             # {'topic_type': 'bay',
+                             #  'topic': 'bay_position',
+                             #  'message': self.position,
+                             #  'repeat': True,
+                             #  'topic_mappings': {'bay_id': self.bay_id}},
                              {'topic_type': 'bay',
                               'topic': 'bay_quality',
                               'message': self.quality,
@@ -296,6 +299,19 @@ class Bay:
                               'message': self._detectors[self._settings['detectors']['selected_range']].motion,
                               'repeat': True,
                               'topic_mappings': {'bay_id': self.bay_id}}]
+        # Positions for all the detectors.
+        for detector in self._detectors:
+            outbound_messages.append(
+                {'topic_type': 'bay',
+                 'topic': 'bay_position',
+                 'message': {
+                     'adjusted_reading': self._detectors[detector].value,
+                     'raw_reading': self._detectors[detector].value_raw
+                    },
+                 'repeat': False,
+                 'topic_mappings': {'bay_id': self.bay_id, 'detector_id': self._detectors[detector].id }
+                 }
+            )
 
         if self._dock_timer['mark'] is None:
             message = 'offline'
@@ -407,49 +423,3 @@ class Bay:
                     "Setting property {} to {}".format(item, self._settings['detectors']['settings'][dc][item]))
                 setattr(self._detectors[dc], item, self._settings['detectors']['settings'][dc][item])
 
-    # # Method to set up the detectors for the bay. This applies bay-specific options to the individual detectors, which
-    # # are initialized by the main routine.
-    # def _setup_detectors_old(self, detectors):
-    #     # Initialize the detector dicts.
-    #     self._detectors = {
-    #         'longitudinal': {},
-    #         'lateral': {}
-    #     }
-    #     lateral_order = {}
-    #     config_options = {
-    #         'longitudinal': ('offset', 'bay_depth', 'spread_park'),
-    #         'lateral': ('offset', 'spread_ok', 'spread_warn', 'side', 'intercept')
-    #     }
-    #     for direction in self._detectors.keys():
-    #         self._logger.debug("Checking for {} detectors.".format(direction))
-    #         if direction in self._settings:
-    #             self._logger.debug("Setting up {} detectors.".format(direction))
-    #             for detector_config in self._settings[direction]['detectors']:
-    #                 self._logger.debug("Provided detector config: {}".format(detector_config))
-    #                 try:
-    #                     detector_obj = detectors[detector_config['detector']]
-    #                 except KeyError:
-    #                     raise KeyError("Tried to create lateral zone with detector '{}' but detector not defined."
-    #                                    .format(detector_config['detector']))
-    #                 # Set the object attributes from the configuration.
-    #                 for item in config_options[direction]:
-    #                     try:
-    #                         setattr(detector_obj, item, detector_config[item])
-    #                     except KeyError:
-    #                         self._logger.debug("Using default value for {}".format(item))
-    #                         try:
-    #                             setattr(detector_obj, item, self._settings[direction]['defaults'][item])
-    #                         except KeyError:
-    #                             raise KeyError("Needed default value for {} but not defined!".format(item))
-    #                 # # If we're processing lateral, add the intercept range to the lateral order dict.
-    #                 if direction == 'lateral':
-    #                     lateral_order[detector_config['detector']] = Quantity(detector_config['intercept'])
-    #                 # Append the object to the appropriate object store.
-    #                 self._detectors[direction][detector_config['detector']] = detector_obj
-    #         else:
-    #             self._logger.debug("No detectors defined.")
-    #     # Check for lateral order.
-    #     if lateral_order is not None:
-    #         self._logger.debug("Now have lateral order: {}".format(lateral_order))
-    #         self._lateral_order = sorted(lateral_order, key=lateral_order.get)
-    #         self._logger.debug("Sorted lateral order: {}".format(self._lateral_order))

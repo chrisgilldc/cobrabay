@@ -250,6 +250,21 @@ class Range(SingleDetector):
         else:
             return "Error"
 
+    # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
+    @property
+    @read_if_stale
+    def value_raw(self):
+        self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
+        if isinstance(self._history[0][0], Quantity):
+            return self._history[0][0]
+        elif self._history[0][0] is None:
+            return "Unknown"
+        elif isinstance(self._history[0][0], str):
+            if self._history[0][0] == 'No reading':
+                return "No reading"
+        else:
+            return "Error"
+
     # Assess the quality of the sensor
     @property
     @read_if_stale

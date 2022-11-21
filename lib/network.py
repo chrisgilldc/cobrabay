@@ -210,16 +210,29 @@ class Network:
                     }
                 },
                 # Adjusted readings from the sensors.
+                # 'bay_position': {
+                #     'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/position',
+                #     'previous_state': None,
+                #     'ha_discovery': {
+                #         'name': '{0[bay_name]} Detector Position: {0[detector_name]}',
+                #         'type': 'sensor',
+                #         'entity': '{0[bay_id]}_position_{0[detector_id]}',
+                #         'value_template': '{{{{ value_json.{0[detector_id]} }}}}',
+                #         'unit_of_measurement': self._uom('length'),
+                #         'icon': 'mdi:ruler'
+                #     }
+                # },
                 'bay_position': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/position',
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/{0[detector_id]}',
                     'previous_state': None,
                     'ha_discovery': {
                         'name': '{0[bay_name]} Detector Position: {0[detector_name]}',
                         'type': 'sensor',
                         'entity': '{0[bay_id]}_position_{0[detector_id]}',
-                        'value_template': '{{{{ value_json.{0[detector_id]} }}}}',
+                        'value_template': '{{{{ value_json.adjusted_reading }}}}',
                         'unit_of_measurement': self._uom('length'),
-                        'icon': 'mdi:ruler'
+                        'icon': 'mdi:ruler',
+                        'json_attributes_topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/{0[detector_id]}'
                     }
                 },
                 # How good the parking job is.
@@ -320,13 +333,13 @@ class Network:
             message = json_loads(message.payload)
         except:
             self._logger_mqtt.error(
-                "Could not decode JSON from MQTT message '{}' on topic '{}'".format(topic, raw_message))
+                "Could not decode JSON from MQTT message '{}' on topic '{}'".format(message.topic, message))
             # Ignore the error itself, plow through.
             return False
 
         # Proceed on valid commands.
         if 'cmd' not in message:
-            self._logger_mqtt.error("MQTT message for topic {} does not contain a 'cmd' directive".format(topic))
+            self._logger_mqtt.error("MQTT message for topic {} does not contain a 'cmd' directive".format(message.topic))
         elif message['cmd'] == 'rediscover':
             # Rerun Home Assistant discovery
             self._ha_discovery()
