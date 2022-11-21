@@ -2,15 +2,17 @@
 # Cobra Bay - The Bay!
 ####
 import time
-from .detector import Detector
+from .detector import Detector, Lateral, Range
 from pint import UnitRegistry, Quantity
 from time import monotonic
 from .detector import CB_VL53L1X
 import logging
+import pprint
 
 
 class Bay:
     def __init__(self, bay_id, config, detectors):
+        pp = pprint.PrettyPrinter()
         # Get our settings.
         self._settings = config.bay(bay_id)
         # Create a logger.
@@ -28,19 +30,18 @@ class Bay:
         # Log our initialization.
         self._logger.info("Bay '{}' initializing...".format(self.bay_id))
         self._logger.debug("Bay received config: {}".format(config))
+        pp.pprint(self._settings)
         # Create a unit registry.
         self._ureg = UnitRegistry
 
-        # Set up the detectors.
-        self._setup_detectors(detectors)
+        # Store the detector objects
+        self._detectors = detectors
+        # Apply our configurations to the detectors.
+        self._setup_detectors()
         self._logger.debug("Detectors configured:")
-        self._logger.debug("\tLongitudinal - ")
-        for detector in self._detectors['longitudinal'].keys():
+        for detector in self._detectors.keys():
             self._logger.debug("\t\t{} - {}".format(detector,
-                                                self._detectors['longitudinal'][detector].sensor_interface.addr))
-        for detector in self._detectors['lateral'].keys():
-            self._logger.debug("\t\t{} - {}".
-                               format(detector, self._detectors['lateral'][detector].sensor_interface.addr))
+                                                self._detectors[detector].sensor_interface.addr))
 
         # Activate detectors.
         self._detector_state('activate')
@@ -70,14 +71,13 @@ class Bay:
             'bay_name': self.bay_name,
             'detectors': []
         }
-        for direction in self._detectors:
-            for item in self._detectors[direction]:
-                detector = {
-                    'detector_id': item,
-                    'name': self._detectors[direction][item].name,
-                    'type': self._detectors[direction][item].detector_type
-                }
-                return_dict['detectors'].append(detector)
+        for item in self._detectors:
+            detector = {
+                'detector_id': item,
+                'name': self._detectors[item].name,
+                'type': self._detectors[item].detector_type
+            }
+            return_dict['detectors'].append(detector)
 
         return return_dict
 
@@ -144,33 +144,20 @@ class Bay:
         self._quality = {'longitudinal': {}, 'lateral': {}}
         self._logger.debug("Starting detector scan.")
         self._logger.debug("Have detectors: {}".format(self._detectors))
-        # Longitudinal offset.
-        self._logger.debug("Checking longitudinal detector.")
-        for detector_name in self._detectors['longitudinal']:
-            value = self._detectors['longitudinal'][detector_name].value
-            self._logger.debug("Read of longitudinal detector {} returned {}".format(
-                self._detectors['longitudinal'][detector_name].name, value))
-            if isinstance(value, Quantity):
-                # If we got a proper Quantity, convert to our output unit.
-                self._position['longitudinal'][detector_name] = value.to(self._settings['output_unit'])
-            else:
-                self._position['longitudinal'][detector_name] = value
-            self._quality['longitudinal'][detector_name] = self._detectors['longitudinal'][detector_name].quality
-        # Choose a detector to be the official range.
-        # Currently only support one range detector, so this is easy!
-        self._selected_longitudinal = list(self._position['longitudinal'].keys())[0]
+        # Staging dicts.
+        value = {}
+        quality = {}
+        # Check all the detectors.
+        for detector_name in self._detectors:
+            value[detector_name] = self._detectors[detector_name].value
+            quality[detector_name] = self._detectors[detector_name].quality
+            self._logger.debug("Read of detector {} returned value '{}' and quality '{}'".
+                               format(self._detectors[detector_name].name, value[detector_name], quality[detector_name]))
 
-        for detector_name in self._detectors['lateral']:
-            self._logger.debug("Checking {}".format(detector_name))
-            # Give the lateral detector the current range reading.
-            self._detectors['lateral'][detector_name].range_reading = self._position['longitudinal']
-            # Now we can get the position and quality from the detector.
-            value = self._detectors['lateral'][detector_name].value
-            if isinstance(value, Quantity):
-                self._position['lateral'][detector_name] = value.to(self._settings['output_unit'])
-            else:
-                self._position['lateral'][detector_name] = value
-            self._quality['lateral'][detector_name] = self._detectors['lateral'][detector_name].quality
+        # Check all the lateral detectors for interception
+        for lateral_name in filter(lambda detector: isinstance(detector, Lateral), self._detectors):
+            self._logger.debug("Checking intercept for lateral: {}".format(lateral_name))
+
 
     # Method to check occupancy.
     def _check_occupancy(self):
@@ -266,12 +253,12 @@ class Bay:
                               'topic_mappings': {'bay_id': self.bay_id}},
                              {'topic_type': 'bay',
                               'topic': 'bay_speed',
-                              'message': self._detectors['longitudinal'][self._selected_longitudinal].vector,
+                              'message': self._detectors[self._selected_longitudinal].vector,
                               'repeat': True,
                               'topic_mappings': {'bay_id': self.bay_id}},
                              {'topic_type': 'bay',
                               'topic': 'bay_motion',
-                              'message': self._detectors['longitudinal'][self._selected_longitudinal].motion,
+                              'message': self._detectors[self._selected_longitudinal].motion,
                               'repeat': True,
                               'topic_mappings': {'bay_id': self.bay_id}}]
         if self._dock_timer['mark'] is None:
@@ -327,16 +314,15 @@ class Bay:
             raise ValueError("Bay can only set detector states to 'activate', or 'deactivate'")
         self._logger.debug("Traversing detectors to {}".format(mode))
         # Traverse the dict looking for detectors that need activation.
-        for direction in ('longitudinal', 'lateral'):
-            for detector in self._detectors[direction]:
-                self._logger.debug("Changing detector {}".format(detector))
-                if isinstance(self._detectors[direction][detector], CB_VL53L1X):
-                    if mode == 'activate':
-                        self._detectors[direction][detector].activate()
-                    elif mode == 'deactivate':
-                        self._detectors[direction][detector].deactivate()
-                    else:
-                        raise RuntimeError("Detector activation reached impossible state.")
+        for detector in self._detectors:
+            self._logger.debug("Changing detector {}".format(detector))
+            if isinstance(self._detectors[detector], CB_VL53L1X):
+                if mode == 'activate':
+                    self._detectors[detector].activate()
+                elif mode == 'deactivate':
+                    self._detectors[detector].deactivate()
+                else:
+                    raise RuntimeError("Detector activation reached impossible state.")
 
     # # Traverse the detectors and make sure they're all stopped.
     # def _shutdown_detectors(self, detectors):
@@ -373,49 +359,62 @@ class Bay:
     def bay_name(self, input):
         self._settings['bay_name'] = input
 
-    # Method to set up the detectors for the bay. This applies bay-specific options to the individual detectors, which
-    # are initialized by the main routine.
-    def _setup_detectors(self, detectors):
-        # Initialize the detector dicts.
-        self._detectors = {
-            'longitudinal': {},
-            'lateral': {}
-        }
-        lateral_order = {}
-        config_options = {
-            'longitudinal': ('offset', 'bay_depth', 'spread_park'),
-            'lateral': ('offset', 'spread_ok', 'spread_warn', 'side', 'intercept')
-        }
-        for direction in self._detectors.keys():
-            self._logger.debug("Checking for {} detectors.".format(direction))
-            if direction in self._settings:
-                self._logger.debug("Setting up {} detectors.".format(direction))
-                for detector_config in self._settings[direction]['detectors']:
-                    self._logger.debug("Provided detector config: {}".format(detector_config))
-                    try:
-                        detector_obj = detectors[detector_config['detector']]
-                    except KeyError:
-                        raise KeyError("Tried to create lateral zone with detector '{}' but detector not defined."
-                                       .format(detector_config['detector']))
-                    # Set the object attributes from the configuration.
-                    for item in config_options[direction]:
-                        try:
-                            setattr(detector_obj, item, detector_config[item])
-                        except KeyError:
-                            self._logger.debug("Using default value for {}".format(item))
-                            try:
-                                setattr(detector_obj, item, self._settings[direction]['defaults'][item])
-                            except KeyError:
-                                raise KeyError("Needed default value for {} but not defined!".format(item))
-                    # # If we're processing lateral, add the intercept range to the lateral order dict.
-                    if direction == 'lateral':
-                        lateral_order[detector_config['detector']] = Quantity(detector_config['intercept'])
-                    # Append the object to the appropriate object store.
-                    self._detectors[direction][detector_config['detector']] = detector_obj
-            else:
-                self._logger.debug("No detectors defined.")
-        # Check for lateral order.
-        if lateral_order is not None:
-            self._logger.debug("Now have lateral order: {}".format(lateral_order))
-            self._lateral_order = sorted(lateral_order, key=lateral_order.get)
-            self._logger.debug("Sorted lateral order: {}".format(self._lateral_order))
+    # Apply specific config options to the detectors.
+    def _setup_detectors(self):
+        # For each detector we use, apply its properties.
+        self._logger.debug("Detectors: {}".format(self._detectors.keys()))
+        for dc in self._settings['detectors'].keys():
+            self._logger.debug("Configuring detector {}".format(dc))
+            self._logger.debug("Settings: {}".format(self._settings['detectors'][dc]))
+            for item in self._settings['detectors'][dc]:
+                self._logger.debug("Setting property {} to {}".format(item, self._settings['detectors'][dc][item]))
+                setattr(self._detectors[dc], item, self._settings['detectors'][dc][item])
+
+
+
+    # # Method to set up the detectors for the bay. This applies bay-specific options to the individual detectors, which
+    # # are initialized by the main routine.
+    # def _setup_detectors_old(self, detectors):
+    #     # Initialize the detector dicts.
+    #     self._detectors = {
+    #         'longitudinal': {},
+    #         'lateral': {}
+    #     }
+    #     lateral_order = {}
+    #     config_options = {
+    #         'longitudinal': ('offset', 'bay_depth', 'spread_park'),
+    #         'lateral': ('offset', 'spread_ok', 'spread_warn', 'side', 'intercept')
+    #     }
+    #     for direction in self._detectors.keys():
+    #         self._logger.debug("Checking for {} detectors.".format(direction))
+    #         if direction in self._settings:
+    #             self._logger.debug("Setting up {} detectors.".format(direction))
+    #             for detector_config in self._settings[direction]['detectors']:
+    #                 self._logger.debug("Provided detector config: {}".format(detector_config))
+    #                 try:
+    #                     detector_obj = detectors[detector_config['detector']]
+    #                 except KeyError:
+    #                     raise KeyError("Tried to create lateral zone with detector '{}' but detector not defined."
+    #                                    .format(detector_config['detector']))
+    #                 # Set the object attributes from the configuration.
+    #                 for item in config_options[direction]:
+    #                     try:
+    #                         setattr(detector_obj, item, detector_config[item])
+    #                     except KeyError:
+    #                         self._logger.debug("Using default value for {}".format(item))
+    #                         try:
+    #                             setattr(detector_obj, item, self._settings[direction]['defaults'][item])
+    #                         except KeyError:
+    #                             raise KeyError("Needed default value for {} but not defined!".format(item))
+    #                 # # If we're processing lateral, add the intercept range to the lateral order dict.
+    #                 if direction == 'lateral':
+    #                     lateral_order[detector_config['detector']] = Quantity(detector_config['intercept'])
+    #                 # Append the object to the appropriate object store.
+    #                 self._detectors[direction][detector_config['detector']] = detector_obj
+    #         else:
+    #             self._logger.debug("No detectors defined.")
+    #     # Check for lateral order.
+    #     if lateral_order is not None:
+    #         self._logger.debug("Now have lateral order: {}".format(lateral_order))
+    #         self._lateral_order = sorted(lateral_order, key=lateral_order.get)
+    #         self._logger.debug("Sorted lateral order: {}".format(self._lateral_order))
