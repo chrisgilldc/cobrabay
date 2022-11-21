@@ -8,6 +8,30 @@ from time import monotonic
 from .detector import CB_VL53L1X
 import logging
 import pprint
+from functools import wraps
+
+
+# Scan the detectors if we're asked for a property that needs a fresh can and we haven't scanned recently enough.
+def scan_if_stale(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        time_delta = time.monotonic() - self._previous_scan_ts
+        if time_delta > 1:  # 1s is too long, read the sensor.
+            do_scan = True
+            self._logger.debug("Stale, do scan.")
+        else:
+            do_scan = False
+            self._logger.debug("Not stale, no scan needed.")
+
+        # If flag is set, read the sensor and put its value into the history.
+        if do_scan:
+            self._scan_detectors()
+            self._previous_scan_ts = time.monotonic()
+
+        # Send whichever value it is into the function.
+        return func(self)
+
+    return wrapper
 
 
 class Bay:
@@ -24,6 +48,7 @@ class Bay:
         self._quality = {}
         self._lateral_order = {}
         self._detectors = {}
+        self._previous_scan_ts = 0
         self._state = None
         self._occupancy = None
 
@@ -41,7 +66,7 @@ class Bay:
         self._logger.debug("Detectors configured:")
         for detector in self._detectors.keys():
             self._logger.debug("\t\t{} - {}".format(detector,
-                                                self._detectors[detector].sensor_interface.addr))
+                                                    self._detectors[detector].sensor_interface.addr))
 
         # Activate detectors.
         self._detector_state('activate')
@@ -91,6 +116,7 @@ class Bay:
 
     # Bay properties
     @property
+    @scan_if_stale
     def occupied(self):
         """
         Occupancy state of the bay, derived from the State.
@@ -106,12 +132,14 @@ class Bay:
 
     # How good is the parking job?
     @property
+    @scan_if_stale
     def quality(self):
-        return {**self._quality['longitudinal'], **self._quality['lateral']}
+        return self._quality
 
     @property
+    @scan_if_stale
     def position(self):
-        return {**self._position['longitudinal'], **self._position['lateral']}
+        return self._position
 
     # Get number of lateral detectors. This is used to pass to the display and set up layers correctly.
     @property
@@ -119,82 +147,89 @@ class Bay:
         self._logger.debug("Lateral count requested. Lateral detectors: {}".format(self._detectors['lateral']))
         return len(self._detectors['lateral'])
 
-    # Public method to scan detectors.
-    def scan(self):
-        self._logger.debug("Running detector scan.")
-        # Scan the detectors and get fresh data.
-        self._scan_detectors()
-        self._logger.debug("Evaluating for timer expiration.")
-        # Update the dock timer.
-        if self._detectors['longitudinal'][self._selected_longitudinal].motion:
-            # If motion is detected, update the time mark to the current time.
-            self._logger.debug("Motion found, resetting dock timer.")
-            self._dock_timer['mark'] = time.monotonic()
-        else:
-            self._logger.debug("No motion found, checking for dock timer expiry.")
-            # No motion, check for completion
-            if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
-                # Set self back to ready.
-                self.state = 'Ready'
+    # # Public method to scan detectors.
+    # def scan(self):
+    #     self._logger.debug("Running detector scan.")
+    #     # Scan the detectors and get fresh data.
+    #     self._scan_detectors()
+    #     self._logger.debug("Evaluating for timer expiration.")
+    #     # Update the dock timer.
+    #     if self._detectors[self._settings['detectors']['selected_range']].motion:
+    #         # If motion is detected, update the time mark to the current time.
+    #         self._logger.debug("Motion found, resetting dock timer.")
+    #         self._dock_timer['mark'] = time.monotonic()
+    #     else:
+    #         self._logger.debug("No motion found, checking for dock timer expiry.")
+    #         # No motion, check for completion
+    #         if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
+    #             # Set self back to ready.
+    #             self.state = 'Ready'
 
     # Tells the detectors to update.
     # Note, this does NOT trigger timer operations.
-    def _scan_detectors(self):
-        self._position = {'longitudinal': {}, 'lateral': {}}
-        self._quality = {'longitudinal': {}, 'lateral': {}}
+    def _scan_detectors(self, filter_lateral=True):
         self._logger.debug("Starting detector scan.")
         self._logger.debug("Have detectors: {}".format(self._detectors))
-        # Staging dicts.
-        value = {}
+        # Staging dicts. This makes sure we wipe any items that need to be wiped.
+        position = {}
         quality = {}
         # Check all the detectors.
         for detector_name in self._detectors:
-            value[detector_name] = self._detectors[detector_name].value
+            position[detector_name] = self._detectors[detector_name].value
             quality[detector_name] = self._detectors[detector_name].quality
             self._logger.debug("Read of detector {} returned value '{}' and quality '{}'".
-                               format(self._detectors[detector_name].name, value[detector_name], quality[detector_name]))
+                               format(self._detectors[detector_name].name, position[detector_name],
+                                      quality[detector_name]))
 
-        # Check all the lateral detectors for interception
-        for lateral_name in filter(lambda detector: isinstance(detector, Lateral), self._detectors):
-            self._logger.debug("Checking intercept for lateral: {}".format(lateral_name))
+        if filter_lateral:
+            for lateral_name in self._settings['detectors']['lateral']:
+                # If intercept range hasn't been met yet, we wipe out any value, it's meaningless.
+                if self._settings['detectors']['intercepts'][lateral_name] < \
+                        position[self._settings['detectors']['selected_range']]:
+                    quality[lateral_name] = "Not Intercepted"
 
+        self._position = position
+        self._quality = quality
 
     # Method to check occupancy.
     def _check_occupancy(self):
+        # Do a new scan and *don't* filter out non-intercepted laterals. We need to
+        self._scan_detectors(filter_lateral=False)
         self._logger.debug("Checking for occupancy.")
-        self._logger.debug("Longitudinal is {}".format(self._quality['longitudinal']))
+        self._logger.debug("Longitudinal is {}".format(self._quality[self._settings['detectors']['selected_range']]))
         # First cut is the range.
-        if self._quality['longitudinal'] in ('No object', 'Door open'):
+        if self._quality[self._settings['detectors']['selected_range']] in ('No object', 'Door open'):
             # If the detector can hit the garage door, or the door is open, then clearly nothing is in the way, so
             # the bay is vacant.
-            self._logger.debug("Longitudinal quality is {}, not occupied.".format(self._quality['longitudinal']))
+            self._logger.debug("Longitudinal quality is {}, not occupied.".format(self._quality[self._settings['detectors']['selected_range']]))
             return False
-        if self._quality['longitudinal'] in ('Emergency!', 'Back up', 'Park', 'Final', 'Base'):
+        if self._quality[self._settings['detectors']['selected_range']] in ('Emergency!', 'Back up', 'Park', 'Final', 'Base'):
             # If the detector is giving us any of the 'close enough' qualities, there's something being found that
             # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
             # the sensors or whatnot
             self._logger.debug("Longitudinal quality is {}, could be occupied.".format(self._quality['longitudinal']))
             lat_score = 0
-            for detector in self._quality['lateral']:
+            for detector in self._settings['detectors']['lateral']:
                 if self._quality['lateral'][detector] in ('OK', 'Warning', 'Critical'):
                     # No matter how badly parked the vehicle is, it's still *there*
                     lat_score += 1
             self._logger.debug("Achieved lateral score {} of {}".format(lat_score, len(self._quality['lateral'])))
-            if lat_score == len(self._quality['lateral']):
+            if lat_score == len(self._settings['detectors']['lateral']):
                 # All sensors have found something more or less in the right place, so yes, we're occupied!
                 return True
         # If for some reason we drop through to here, assume we're not occupied.
         return False
 
     # Method to check the range sensor for motion.
+    @scan_if_stale
     def monitor(self):
-        vector = self._detectors['longitudinal'][self._selected_longitudinal].vector
+        vector = self._detectors[self._settings['detectors']['selected_range']].vector
         # If there's motion, change state.
         if vector['direction'] == 'forward':
             self.state = 'Docking'
         elif vector['direction'] == 'reverse':
             self.state = 'Undocking'
-        elif self._detectors['longitudinal'][self._selected_longitudinal].value == 'Weak':
+        elif self._detectors[self._settings['detectors']['selected_range']].value == 'Weak':
             self.state = 'Docking'
 
     @property
@@ -253,14 +288,15 @@ class Bay:
                               'topic_mappings': {'bay_id': self.bay_id}},
                              {'topic_type': 'bay',
                               'topic': 'bay_speed',
-                              'message': self._detectors[self._selected_longitudinal].vector,
+                              'message': self._detectors[self._settings['detectors']['selected_range']].vector,
                               'repeat': True,
                               'topic_mappings': {'bay_id': self.bay_id}},
                              {'topic_type': 'bay',
                               'topic': 'bay_motion',
-                              'message': self._detectors[self._selected_longitudinal].motion,
+                              'message': self._detectors[self._settings['detectors']['selected_range']].motion,
                               'repeat': True,
                               'topic_mappings': {'bay_id': self.bay_id}}]
+
         if self._dock_timer['mark'] is None:
             message = 'offline'
         else:
@@ -278,8 +314,8 @@ class Bay:
     # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
     def display_data(self):
         return_data = {'bay_id': self.bay_id, 'bay_state': self.state,
-                       'range': self._position['longitudinal'][self._selected_longitudinal],
-                       'range_quality': self._quality['longitudinal'][self._selected_longitudinal]}
+                       'range': self._position['longitudinal'][self._settings['detectors']['selected_range']],
+                       'range_quality': self._quality['longitudinal'][self._settings['detectors']['selected_range']]}
         # Percentage of range covered. This is used to construct the strobe.
         # If it's not a Quantity, just return zero.
         if isinstance(return_data['range'], Quantity):
@@ -363,14 +399,13 @@ class Bay:
     def _setup_detectors(self):
         # For each detector we use, apply its properties.
         self._logger.debug("Detectors: {}".format(self._detectors.keys()))
-        for dc in self._settings['detectors'].keys():
+        for dc in self._settings['detectors']['settings'].keys():
             self._logger.debug("Configuring detector {}".format(dc))
-            self._logger.debug("Settings: {}".format(self._settings['detectors'][dc]))
-            for item in self._settings['detectors'][dc]:
-                self._logger.debug("Setting property {} to {}".format(item, self._settings['detectors'][dc][item]))
-                setattr(self._detectors[dc], item, self._settings['detectors'][dc][item])
-
-
+            self._logger.debug("Settings: {}".format(self._settings['detectors']['settings'][dc]))
+            for item in self._settings['detectors']['settings'][dc]:
+                self._logger.debug(
+                    "Setting property {} to {}".format(item, self._settings['detectors']['settings'][dc][item]))
+                setattr(self._detectors[dc], item, self._settings['detectors']['settings'][dc][item])
 
     # # Method to set up the detectors for the bay. This applies bay-specific options to the individual detectors, which
     # # are initialized by the main routine.
