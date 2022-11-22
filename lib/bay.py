@@ -182,11 +182,20 @@ class Bay:
                                       quality[detector_name]))
 
         if filter_lateral:
+            # Pull the raw range value once, use it to test all the intercepts.
+            raw_range = self._detectors[self._settings['detectors']['selected_range']].value_raw
             for lateral_name in self._settings['detectors']['lateral']:
                 # If intercept range hasn't been met yet, we wipe out any value, it's meaningless.
-                if self._settings['detectors']['intercepts'][lateral_name] < \
-                        position[self._settings['detectors']['selected_range']]:
-                    quality[lateral_name] = "Not Intercepted"
+                # Have a bug where this is sometimes erroring out due to a None range value.
+                # Trapping and logging for now.
+                try:
+                    if self._settings['detectors']['intercepts'][lateral_name] < raw_range:
+                        quality[lateral_name] = "Not Intercepted"
+                except ValueError:
+                    self._logger.warning("For lateral sensor {} cannot compare intercept {} to range {}".
+                                         format(lateral_name,
+                                                self._settings['detectors']['intercepts'][lateral_name],
+                                                raw_range))
 
         self._position = position
         self._quality = quality
