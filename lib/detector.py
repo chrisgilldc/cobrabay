@@ -421,7 +421,6 @@ class Range(SingleDetector):
 class Lateral(SingleDetector):
     def __init__(self, config_obj, detector_id):
         super().__init__(config_obj, detector_id)
-        self._range_reading = None
 
     @property
     @read_if_stale
@@ -477,15 +476,6 @@ class Lateral(SingleDetector):
     @intercept.setter
     def intercept(self, m_input):
         self._settings['intercept'] = self._convert_value(m_input)
-
-    # Take in range readings from the bay.
-    @property
-    def range_reading(self):
-        return self._range_reading
-
-    @range_reading.setter
-    def range_reading(self, m_input):
-        self._range_reading = m_input
 
     @property
     def spread_ok(self):
