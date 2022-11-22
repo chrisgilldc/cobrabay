@@ -226,9 +226,6 @@ class CobraBay:
 
         # As long as the bay still thinks it's docking, keep displaying!
         while self._bays[bay_id].state == "Docking":
-            # Trigger a scan of the bay.
-            self._logger.debug("Requesting bay scan.")
-            self._bays[bay_id].scan()
             # Collect the MQTT messasges from the bay itself.
             self._logger.debug("Collecting MQTT messages from bay.")
             bay_messages = self._bays[bay_id].mqtt_messages()
