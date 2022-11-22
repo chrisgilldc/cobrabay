@@ -325,8 +325,8 @@ class Bay:
     # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
     def display_data(self):
         return_data = {'bay_id': self.bay_id, 'bay_state': self.state,
-                       'range': self._position['longitudinal'][self._settings['detectors']['selected_range']],
-                       'range_quality': self._quality['longitudinal'][self._settings['detectors']['selected_range']]}
+                       'range': self._position[self._settings['detectors']['selected_range']],
+                       'range_quality': self._quality[self._settings['detectors']['selected_range']]}
         # Percentage of range covered. This is used to construct the strobe.
         # If it's not a Quantity, just return zero.
         if isinstance(return_data['range'], Quantity):
@@ -343,8 +343,8 @@ class Bay:
             for lateral_detector in self._lateral_order:
                 return_data['lateral'].append({
                     'name': lateral_detector,
-                    'quality': self._quality['lateral'][lateral_detector],
-                    'side': self._detectors['lateral'][lateral_detector].side}
+                    'quality': self._quality[lateral_detector],
+                    'side': self._detectors[lateral_detector].side}
                 )
         return return_data
 
