@@ -314,7 +314,7 @@ class Bay:
             )
 
         if self._dock_timer['mark'] is None:
-            message = 'offline'
+            message = 'Not running'
         else:
             message = self._dock_timer['allowed'] - (monotonic() - self._dock_timer['mark'])
         outbound_messages.append(
