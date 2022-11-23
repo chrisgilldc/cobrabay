@@ -231,7 +231,12 @@ class CB_VL53L1X(I2CSensor):
         if monotonic() - self._previous_timestamp < 0.2:
             return self._previous_reading
         else:
-            reading = self._sensor_obj.distance
+            try:
+                reading = self._sensor_obj.distance
+            except OSError as e:
+                self._logger.error("Attempt to read sensor threw error: {}".format(str(e)))
+                reading = None
+
             # A "none" means the sensor had no response.
             if reading is None:
                 return "No reading"
