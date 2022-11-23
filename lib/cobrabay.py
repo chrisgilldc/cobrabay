@@ -236,14 +236,14 @@ class CobraBay:
             display_data = self._bays[bay_id].display_data()
             self._logger.debug("Collected display data: {}".format(display_data))
             self._display.show_dock(display_data)
-
             # Put the display image on the MQTT stack.
             self._outbound_messages.append(
                 {'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': True})
-
             # Poll the network.
             self._logger.debug("Polling network.")
             self._network_handler()
+            # Check for completion
+            self._bays[bay_id].check_timer()
 
         self._post_action['time'] = monotonic()
 

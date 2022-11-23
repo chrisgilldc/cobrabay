@@ -147,23 +147,19 @@ class Bay:
         self._logger.debug("Lateral count requested. Lateral detectors: {}".format(self._detectors['lateral']))
         return len(self._detectors['lateral'])
 
-    # # Public method to scan detectors.
-    # def scan(self):
-    #     self._logger.debug("Running detector scan.")
-    #     # Scan the detectors and get fresh data.
-    #     self._scan_detectors()
-    #     self._logger.debug("Evaluating for timer expiration.")
-    #     # Update the dock timer.
-    #     if self._detectors[self._settings['detectors']['selected_range']].motion:
-    #         # If motion is detected, update the time mark to the current time.
-    #         self._logger.debug("Motion found, resetting dock timer.")
-    #         self._dock_timer['mark'] = time.monotonic()
-    #     else:
-    #         self._logger.debug("No motion found, checking for dock timer expiry.")
-    #         # No motion, check for completion
-    #         if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
-    #             # Set self back to ready.
-    #             self.state = 'Ready'
+    def check_timer(self):
+        self._logger.debug("Evaluating for timer expiration.")
+        # Update the dock timer.
+        if self._detectors[self._settings['detectors']['selected_range']].motion:
+            # If motion is detected, update the time mark to the current time.
+            self._logger.debug("Motion found, resetting dock timer.")
+            self._dock_timer['mark'] = time.monotonic()
+        else:
+            self._logger.debug("No motion found, checking for dock timer expiry.")
+            # No motion, check for completion
+            if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
+                # Set self back to ready.
+                self.state = 'Ready'
 
     # Tells the detectors to update.
     # Note, this does NOT trigger timer operations.
