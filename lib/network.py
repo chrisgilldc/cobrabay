@@ -281,7 +281,8 @@ class Network:
                         'name': '{0[bay_name]} Time Until Docked',
                         'type': 'sensor',
                         'entity': '{0[bay_id]}_dock_time_remaining',
-                        'unit_of_measurement': 'seconds'
+                        'unit_of_measurement': 'seconds',
+                        'payload_not_available': 'Not running'
                     }
                 },
 
@@ -588,6 +589,7 @@ class Network:
             'unit_of_measurement',
             'payload_on',
             'payload_off',
+            'payload_not_available',
             'value_template')
 
         # Optional parameters
