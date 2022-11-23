@@ -15,8 +15,6 @@ system:
     # display - The display
     # network - The network
     # Individual detectors and bays can also be set by including their names.
-    core: debug
-    bay1: debug
 # Settings for the display. We presume only one.
 display:
   matrix:
@@ -77,26 +75,27 @@ bays:
     bay_id: bay1
     name: "Bay 1"
     log_level: debug
-    park_time: 15s
+    park_time: 120s
     bay_depth: 276in
     longitudinal:
       defaults:
         offset: 42 in
-        spread_park: 2in
-        bay_depth: 237in
+        spread_park: 2 in
+        bay_depth: 237 in
       detectors:
         - detector: range
     lateral:
       # Lateral detectors are those that run perpendicular to the path of vehicle's travel.
       defaults:
-        offset: 24 in
+        offset: 23 in
         spread_ok: 1 in
         spread_warn: 3 in
         side: R
       detectors:
         - detector: front
-          intercept: 75 in
+          intercept: 77.5 in
         - detector: middle
-          intercept: 100 in
+          offset: 22 in
+          intercept: 126 in
         - detector: rear
-          intercept: 125 in
+          intercept: 215 in
