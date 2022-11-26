@@ -169,6 +169,7 @@ class CBConfig():
             config_dict['homeassistant'] = self._config['system']['homeassistant']
         except KeyError:
             config_dict['homeassistant'] = False
+        config_dict['interface'] = self._config['system']['interface']
         return config_dict
 
     def bay(self, bay_id):

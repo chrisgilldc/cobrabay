@@ -2,8 +2,8 @@ system:
   units: imperial  # Defaults to 'metric' if set to anything other than 'imperial'.
   system_name: CobraBay1  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
   network: True  # Connect to the network at all?
+  interface: eth0  # Interface used to uplink. This will be monitored.
   homeassistant: True # Integrate with Home Assistant. If yes, will send discovery messages.
-  monitor_range: False # Notes here.
   # Logging definition
   logging:
     # Default level for the system. If not included, will default to WARNING.
