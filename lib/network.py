@@ -7,8 +7,10 @@
 import logging
 from json import dumps as json_dumps
 from json import loads as json_loads
+import time
 
-from getmac import get_mac_address
+# from getmac import get_mac_address
+import psutil
 from paho.mqtt.client import Client
 
 from .util import Convertomatic
@@ -18,6 +20,7 @@ from .version import __version__
 class Network:
     def __init__(self, config):
         # Get our settings.
+        self._reconnect_timestamp = None
         self._settings = config.network()
         # Set up logger.
         self._logger = logging.getLogger("CobraBay").getChild("Network")
@@ -41,18 +44,14 @@ class Network:
         # Create a convertomatic instance.
         self._cv = Convertomatic(self._settings['units'])
 
-        # Find a MAC to use as client_id. Wireless is preferred, but if we don't have a wireless interface, fall back on
-        # the ethernet interface.
-        self._client_id = None
-        for interface in ['eth0', 'wlan0']:
-            while self._client_id is None:
-                try:
-                    self._client_id = get_mac_address(interface=interface).replace(':', '').upper()
-                except:
-                    pass
-                else:
-                    self._logger.info("Assigning Client ID {} from interface {}".format(self._client_id, interface))
-                    break
+        # Pull out the MAC as the client ID.
+        for address in psutil.net_if_addrs()[self._settings['interface']]:
+            # Find the link address.
+            if address.family == psutil.AF_LINK:
+                self._client_id = address.address.replace(':', '').upper()
+                break
+
+        self._logger.info("Defined Client ID: {}".format(self._client_id))
 
         # Initialize the MQTT connected variable.
         self._mqtt_connected = False
@@ -325,7 +324,10 @@ class Network:
                                                            self._topics[type][item]['callback'])
         self._mqtt_connected = True
 
-    def _on_disconnect(self):
+    def _on_disconnect(self, client, userdata, rc):
+        if rc != 0:
+            self._logger.warning("Unexpected disconnect with code: {}".format(rc))
+        self._reconnect_timer = time.monotonic()
         self._mqtt_connected = False
 
     # Device Command callback
@@ -442,20 +444,35 @@ class Network:
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
     def poll(self, outbound_messages=None):
-        # Send all the messages outbound.
-        for message in outbound_messages:
-            self._logger_mqtt.debug("Publishing MQTT message: {}".format(message))
-            self._pub_message(**message)
-        # Check for any incoming commands.
-        self._mqtt_client.loop()
+        reconnect = False
+        if not self._mqtt_connected:
+            if time.monotonic() - self._reconnect_timestamp > 30:
+                reconnect = self._connect_mqtt()
+                if not reconnect:
+                    self._reconnect_timestamp = time.monotonic()
+                    return
+
+        if self._mqtt_connected:
+            # Send all the messages outbound.
+            for message in outbound_messages:
+                self._logger_mqtt.debug("Publishing MQTT message: {}".format(message))
+                self._pub_message(**message)
+            # Check for any incoming commands.
+            self._mqtt_client.loop()
         # Yank any commands to send upward and clear it for the next run.
         upward_data = {
-            'online': True,  # Replace later with eth/not eth logic.
-            'mqtt_status': self._mqtt_client.is_connected(),
+            'online': self._iface_up(), # Is the interface up.
+            'mqtt_status': self._mqtt_client.is_connected(),  # Are we connected to MQTT.
             'commands': self._upward_commands
         }
         self._upward_commands = []
         return upward_data
+
+    # Check the status of the network interface.
+    def _iface_up(self):
+        # Pull out stats for our interface.
+        stats = psutil.net_if_stats()[self._settings['interface']]
+        return stats.isup
 
     def _connect_mqtt(self):
         # Set the last will prior to connecting.
@@ -466,9 +483,9 @@ class Network:
         try:
             self._mqtt_client.connect(host=self._mqtt_host, port=self._mqtt_port)
         except Exception as e:
-            self._logger.error('Network: Could not connect to MQTT broker.')
-            self._logger.debug('Network: ' + str(e))
-            raise
+            self._logger.warning('Network: Could not connect to MQTT broker.')
+            self._logger.warning('Network: ' + str(e))
+            return False
 
         # Subscribe to all the appropriate topics
         for type in self._topics:
