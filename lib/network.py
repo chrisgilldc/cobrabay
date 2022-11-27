@@ -446,12 +446,23 @@ class Network:
     def poll(self, outbound_messages=None):
         reconnect = False
         if not self._mqtt_connected:
-            if time.monotonic() - self._reconnect_timestamp > 30:
-                reconnect = self._connect_mqtt()
-                if not reconnect:
+            try_reconnect = False
+            # Has is been 30s since the previous attempt?
+            try:
+                if time.monotonic() - self._reconnect_timestamp > 30:
+                    try_reconnect = True
                     self._reconnect_timestamp = time.monotonic()
+            except TypeError:
+                try_reconnect = True
+                self._reconnect_timestamp = time.monotonic()
+
+            if try_reconnect:
+                reconnect = self._connect_mqtt()
+                # If we failed to reconnect, mark it as failure and return.
+                if not reconnect:
                     return
 
+        # Network/MQTT is up, proceed.
         if self._mqtt_connected:
             # Send all the messages outbound.
             for message in outbound_messages:
