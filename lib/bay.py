@@ -300,7 +300,7 @@ class Bay:
                               'repeat': True,
                               'topic_mappings': {'bay_id': self.bay_id}}]
         # Positions for all the detectors.
-        for detector in self._detectors:
+        for detector in self._detectors.keys():
             outbound_messages.append(
                 {'topic_type': 'bay',
                  'topic': 'bay_position',
@@ -308,7 +308,7 @@ class Bay:
                      'adjusted_reading': self._detectors[detector].value,
                      'raw_reading': self._detectors[detector].value_raw
                     },
-                 'repeat': False,
+                 'repeat': True,
                  'topic_mappings': {'bay_id': self.bay_id, 'detector_id': self._detectors[detector].id }
                  }
             )
