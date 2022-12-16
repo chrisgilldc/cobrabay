@@ -243,7 +243,7 @@ class Range(SingleDetector):
         if isinstance(self._history[0][0], Quantity):
             return self._history[0][0] - self.offset
         elif self._history[0][0] is None:
-            return "Unknown"
+            return None
         elif isinstance(self._history[0][0], str):
             if self._history[0][0] == 'No reading':
                 return "No reading"
@@ -429,7 +429,7 @@ class Lateral(SingleDetector):
         if isinstance(self._history[0][0], Quantity):
             return self._history[0][0] - self.offset
         else:
-            return "Unknown"
+            return None
 
     # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
@@ -439,7 +439,7 @@ class Lateral(SingleDetector):
         if isinstance(self._history[0][0], Quantity):
             return self._history[0][0]
         else:
-            return "Unknown"
+            return None
 
     @property
     @read_if_stale
