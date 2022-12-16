@@ -7,7 +7,7 @@ from pint import UnitRegistry, Quantity
 from time import monotonic
 from .detector import CB_VL53L1X
 import logging
-import pprint
+from pprint import pformat
 from functools import wraps
 
 
@@ -36,7 +36,6 @@ def scan_if_stale(func):
 
 class Bay:
     def __init__(self, bay_id, config, detectors):
-        pp = pprint.PrettyPrinter()
         # Get our settings.
         self._settings = config.bay(bay_id)
         # Create a logger.
@@ -46,7 +45,6 @@ class Bay:
         # Initialize variables.
         self._position = {}
         self._quality = {}
-        self._lateral_order = {}
         self._detectors = {}
         self._previous_scan_ts = 0
         self._state = None
@@ -54,8 +52,8 @@ class Bay:
 
         # Log our initialization.
         self._logger.info("Bay '{}' initializing...".format(self.bay_id))
-        self._logger.debug("Bay received config: {}".format(config))
-        pp.pprint(self._settings)
+        self._logger.info("Bay has settings:")
+        self._logger.info(pformat(self._settings))
         # Create a unit registry.
         self._ureg = UnitRegistry
 
@@ -110,7 +108,7 @@ class Bay:
     def display_reg_info(self):
         return_dict = {
             'bay_id': self.bay_id,
-            'lateral_order': self._lateral_order
+            'lateral_order': self._settings['detectors']['lateral']
         }
         return return_dict
 
@@ -329,6 +327,7 @@ class Bay:
 
     # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
     def display_data(self):
+        self._logger.debug("Collecting bay data for display. Have quality: {}".format(self._quality))
         return_data = {'bay_id': self.bay_id, 'bay_state': self.state,
                        'range': self._position[self._settings['detectors']['selected_range']],
                        'range_quality': self._quality[self._settings['detectors']['selected_range']]}
@@ -336,21 +335,25 @@ class Bay:
         # If it's not a Quantity, just return zero.
         if isinstance(return_data['range'], Quantity):
             return_data['range_pct'] = return_data['range'].to('cm') / self._settings['adjusted_depth'].to('cm')
+            # Singe this is dimensionless, just take the value and make it a Python scalar.
+            return_data['range_pct'] = return_data['range_pct'].magnitude
         else:
             return_data['range_pct'] = 0
         # List for lateral state.
         return_data['lateral'] = []
-        self._logger.debug("Using lateral order: {}".format(self._lateral_order))
+        self._logger.debug("Using lateral order: {}".format(self._settings['detectors']['lateral']))
         # Assemble the lateral data with *closest first*.
         # This will result in the display putting things together top down.
         # Lateral ordering is determined by intercept range when bay is started up.
-        if self._lateral_order is not None:
-            for lateral_detector in self._lateral_order:
+        if self._settings['detectors']['lateral'] is not None:
+            for lateral_detector in self._settings['detectors']['lateral']:
                 return_data['lateral'].append({
                     'name': lateral_detector,
                     'quality': self._quality[lateral_detector],
                     'side': self._detectors[lateral_detector].side}
                 )
+        else:
+            self._logger.debug("Not assembling laterals, lateral order is None.")
         return return_data
 
     # Method to be called when CobraBay it shutting down.
