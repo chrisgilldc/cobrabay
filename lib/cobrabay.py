@@ -27,7 +27,7 @@ class CobraBay:
 
         # Create the master logger. All modules will hang off this.
         self._master_logger = logging.getLogger("CobraBay")
-        # Default to INFO level.
+        # Set the master logger to Debug, so all other messages will pass up through it.
         self._master_logger.setLevel(logging.DEBUG)
         # Set up console handling.
         console_handler = logging.StreamHandler()
