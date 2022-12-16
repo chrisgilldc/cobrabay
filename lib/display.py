@@ -107,7 +107,7 @@ class Display:
                     # Put this in the right place in the lookup.
                     self._layers[bay_id][lateral][side][status[0]] = img
                     # Write for debugging
-                    img.save("/tmp/cobrabay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
+                    # img.save("/tmp/cobrabay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
                     del(draw)
                     del(img)
             # Now add the height of this bar to the accumulated height, to get the correct start for the next time.
@@ -143,9 +143,6 @@ class Display:
         # Make a base image, black background.
         final_image = Image.new("RGBA", (w, h), (0,0,0,255))
         ## Center area, the range number.
-        # Pull out the range and range quality to make the center placard.
-        self._logger.debug("Creating range placard with range: {}".format(display_data['range']))
-        # Only add the layer if it's a workable value.
         range_layer = self._placard_range(
             display_data['range'],
             display_data['range_quality'],
@@ -155,14 +152,14 @@ class Display:
 
         ## Bottom strobe box.
         # Frame is a pre-baked box.
-        final_image = Image.alpha_composite(final_image, self._layers['frame_approach'])
+        # final_image = Image.alpha_composite(final_image, self._layers['frame_approach'])
         # Strober calculate the blocking box and the strobe bugs.
         final_image = Image.alpha_composite(final_image, self._strober(display_data))
 
         # IF lateral data is reported, show it.
         self._logger.debug("Data has lateral entries: {}".format(len(display_data['lateral'])))
         if len(display_data['lateral']) > 0:
-            final_image = Image.alpha_composite(final_image, self._layers['frame_lateral'])
+            # final_image = Image.alpha_composite(final_image, self._layers['frame_lateral'])
             for reading in display_data['lateral']:
                 if reading['quality'] in ('OK','Warning', 'Critical'):
                     self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(reading['name'], reading['side'], reading['quality']))
@@ -187,7 +184,8 @@ class Display:
                 except KeyError:
                     self._running['strobe_color'] = 'red'
                 self._running['strobe_timer'] = monotonic_ns()
-            draw.line([(1,h-2),(w-2,h-2)], fill=self._running['strobe_color'])
+            # draw.line([(1,h-2),(w-2,h-2)], fill=self._running['strobe_color'])
+            draw.rectangle([(1,h-3),(w-2,h-1)], fill=self._running['strobe_color'])
         else:
             # If we're beyond range, always have the blockers be zero.
             if display_data['range_quality'] == 'Back up':
@@ -202,20 +200,22 @@ class Display:
             if display_data['range_quality'] != 'ok' and blocker_width > 28:
                 blocker_width = 28
             # Draw the blockers.
-            draw.line([(1, h-2),(blocker_width+1, h-2)], fill="white")
-            draw.line([(w-blocker_width-2, h-2), (w-2, h-2)], fill="white")
+            #draw.line([(1, h-2),(blocker_width+1, h-2)], fill="white")
+            #draw.line([(w-blocker_width-2, h-2), (w-2, h-2)], fill="white")
             # If we're fully parked the line is full and there's nowhere for the bugs, so don't bother.
             if blocker_width < 30:
                 left_strobe_start = blocker_width+2+self._running['strobe_offset']
                 left_strobe_stop = left_strobe_start + 3
                 if left_strobe_stop > (w/2)-1:
                     left_strobe_stop = (w/2)-1
-                draw.line([(left_strobe_start, h-2),(left_strobe_stop,h-2)], fill="red")
+                # draw.line([(left_strobe_start, h-2),(left_strobe_stop,h-2)], fill="red")
+                draw.rectangle([(left_strobe_start, h - 3), (left_strobe_stop, h - 1)], fill="red")
                 right_strobe_start = w - 2 - blocker_width - self._running['strobe_offset']
                 right_strobe_stop = right_strobe_start - 3
                 if right_strobe_stop < (w/2)+1:
                     right_strobe_stop = (w/2)+1
-                draw.line([(right_strobe_start, h - 2), (right_strobe_stop, h - 2)], fill="red")
+                # draw.line([(right_strobe_start, h - 2), (right_strobe_stop, h - 2)], fill="red")
+                draw.rectangle([(right_strobe_start, h - 3), (right_strobe_stop, h - 1)], fill="red")
             # If time is up, move the strobe bug forward.
             if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
                 self._running['strobe_offset'] += 1
