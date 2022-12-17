@@ -444,7 +444,20 @@ class Network:
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
     def poll(self, outbound_messages=None):
-        reconnect = False
+        # Set up the return data.
+        return_data = {
+            'online': self._iface_up(), # Is the interface up.
+            'mqtt_status': self._mqtt_client.is_connected(),  # Are we connected to MQTT.
+            'commands': {}
+        }
+
+        # If interface isn't up, not much to do, return immediately.
+        if not self._iface_up():
+            return return_data
+
+        # If interface is up but broker is not connected, retry every 30s. This doesn't wait so that we can return data
+        # to the main loop and let other tasks get handled. Proper docking/undocking shouldn't depend on the network so
+        # we don't want to block for it.
         if not self._mqtt_connected:
             try_reconnect = False
             # Has is been 30s since the previous attempt?
@@ -460,7 +473,7 @@ class Network:
                 reconnect = self._connect_mqtt()
                 # If we failed to reconnect, mark it as failure and return.
                 if not reconnect:
-                    return
+                    return return_data
 
         # Network/MQTT is up, proceed.
         if self._mqtt_connected:
@@ -470,14 +483,13 @@ class Network:
                 self._pub_message(**message)
             # Check for any incoming commands.
             self._mqtt_client.loop()
-        # Yank any commands to send upward and clear it for the next run.
-        upward_data = {
-            'online': self._iface_up(), # Is the interface up.
-            'mqtt_status': self._mqtt_client.is_connected(),  # Are we connected to MQTT.
-            'commands': self._upward_commands
-        }
+
+        # Add the upward commands to the return data.
+        return_data['commands'] = self._upward_commands
+        # Remove the upward commands that are being forwarded.
         self._upward_commands = []
-        return upward_data
+
+        return return_data
 
     # Check the status of the network interface.
     def _iface_up(self):
