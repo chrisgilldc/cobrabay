@@ -96,13 +96,15 @@ class Display:
                     draw = ImageDraw.Draw(img)
                     # Move the width depending on which side we're on.
                     if side == 'L':
-                        line_w = 5
+                        # line_w = 5
+                        line_w = 0
                     elif side == 'R':
-                        line_w = w - 2  # -2, one because of the border, one because it's 0 indexed.
+                        # line_w = w - 2  # -2, one because of the border, one because it's 0 indexed.
+                        line_w = w - 3
                     else:
                         raise ValueError("Not a valid side option, this should never happen!")
 
-                    draw.line([(line_w,1 + accumulated_height),(line_w,1 + accumulated_height + pixel_lengths[i])],
+                    draw.rectangle([(line_w,1 + accumulated_height),(line_w+2,1 + accumulated_height + pixel_lengths[i])],
                         fill=status[1],width=1)
                     # Put this in the right place in the lookup.
                     self._layers[bay_id][lateral][side][status[0]] = img
