@@ -282,7 +282,7 @@ class Range(SingleDetector):
             if self._history[0][0] < Quantity("2 in"):
                 return 'Emergency!'
             elif ( self._settings['bay_depth'] * 0.90 ) <= self._history[0][0]:
-                self._logger.debug("Reading is less than 90% of bay depth ({})".format(self._settings['bay_depth'] * .9))
+                self._logger.debug("Reading is more than 90% of bay depth ({})".format(self._settings['bay_depth'] * .9))
                 return 'No object'
             # Now consider the adjusted values.
             elif self.value < 0 and abs(self.value) > self.spread_park:
@@ -450,6 +450,8 @@ class Lateral(SingleDetector):
             self._logger.debug("Comparing to: \n\t{}\n\t{}".format(
                 self.spread_ok, self.spread_warn))
             if self.value > Quantity('96 in'):
+                # A standard vehicle width (in the US, at least) is 96 inches, so if we're reading something further
+                # than that, it's not the vehicle in question (ie: a far wall, another vehicle, etc).
                 qv = "No object"
             elif abs(self.value) <= self.spread_ok:
                 qv = "OK"
@@ -458,6 +460,8 @@ class Lateral(SingleDetector):
             elif abs(self.value) > self.spread_warn:
                 qv = "Critical"
             else:
+                # Total failure to return a value means the light didn't reflect off anything. That *probably* means
+                # nothing is there, but it could be failing for other reasons.
                 qv = "Unknown"
         else:
             qv = "Unknown"
@@ -467,15 +471,6 @@ class Lateral(SingleDetector):
     @property
     def ready(self):
         return self._ready
-
-    # The intercept distance of this lateral detector.
-    @property
-    def intercept(self):
-        return self._settings['intercept']
-
-    @intercept.setter
-    def intercept(self, m_input):
-        self._settings['intercept'] = self._convert_value(m_input)
 
     @property
     def spread_ok(self):
