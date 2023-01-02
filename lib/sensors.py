@@ -13,7 +13,8 @@ from pint import Quantity
 from pint import UnitRegistry
 from .tfmp import TFMP
 from pathlib import Path
-
+from pprint import pformat
+import sys
 
 class BaseSensor:
     def __init__(self, sensor_options, required):
@@ -49,7 +50,7 @@ class I2CSensor(BaseSensor):
         self._name = "{}-{}-{}".format(type(self).__name__, sensor_options['i2c_bus'],
                                        hex(sensor_options['i2c_address']))
         self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
-        self._logger.setLevel("WARNING")
+        self._logger.setLevel("DEBUG")
         self._logger.info("Initializing sensor...")
 
         # Set the I2C bus and I2C Address
@@ -234,8 +235,18 @@ class CB_VL53L1X(I2CSensor):
             try:
                 reading = self._sensor_obj.distance
             except OSError as e:
-                self._logger.error("Attempt to read sensor threw error: {}".format(str(e)))
-                reading = None
+                self._logger.critical("Attempt to read sensor threw error: {}".format(str(e)))
+                if self._logger.isEnabledFor(logging.DEBUG):
+
+                    self._logger.debug("I2C Bus Scan:")
+                    hex_list = []
+                    for address in self._i2c.scan():
+                        hex_list.append(hex(address))
+                    self._logger.debug(pformat(hex_list))
+                    self._logger.debug("Object Dump:")
+                    self._logger.debug(pformat(dir(self._sensor_obj)))
+                self._logger.critical("Cannot continue. Exiting.")
+                sys.exit(1)
 
             # A "none" means the sensor had no response.
             if reading is None:
