@@ -4,11 +4,10 @@
 import logging
 import yaml
 from pathlib import Path
-from pprint import PrettyPrinter
 from pint import Quantity
 
 
-class CBConfig():
+class CBConfig:
     def __init__(self, config_file=None, reset_sensors=False):
         self._config = None
         self._logger = logging.getLogger("CobraBay").getChild("Config")
@@ -35,7 +34,6 @@ class CBConfig():
         self.load_config()
 
     def load_config(self, reset_sensors=False):
-        pp = PrettyPrinter()
         # Open the current config file and suck it into a staging variable.
         staging_yaml = self._open_yaml(self._config_file)
         # Do a formal validation here? Probably!
@@ -45,7 +43,6 @@ class CBConfig():
             self._logger.exception("Could not validate config file. Will not load.")
         else:
             self._logger.info("Config file validated. Loading.")
-            self._logger.debug(validated_yaml)
             # We're good, so assign the staging to the real config.
             self._config = validated_yaml
 
@@ -57,17 +54,17 @@ class CBConfig():
             return str(self._config_file)
 
     @config_file.setter
-    def config_file(self, input):
+    def config_file(self, the_input):
         # IF a string, convert to a path.
-        if isinstance(input, str):
-            input = Path(input)
-        if not isinstance(input, Path):
+        if isinstance(the_input, str):
+            the_input = Path(the_input)
+        if not isinstance(the_input, Path):
             # If it's not a Path now, we can't use this.
             raise TypeError("Config file must be either a string or a Path object.")
-        if not input.is_file():
-            raise ValueError("Provided config file {} is not actually a file!".format(input))
+        if not the_input.is_file():
+            raise ValueError("Provided config file {} is not actually a file!".format(the_input))
         # If we haven't trapped yet, assign it.
-        self._config_file = input
+        self._config_file = the_input
 
     # Method for opening loading a Yaml file and slurping it in.
     @staticmethod
@@ -79,7 +76,7 @@ class CBConfig():
     # Main validator.
     def _validate(self, staging_yaml):
         # Check for the main sections.
-        for section in ('system', 'display', 'detectors', 'bays'):
+        for section in ('system', 'triggers', 'display', 'detectors', 'bays'):
             if section not in staging_yaml.keys():
                 raise KeyError("Required section {} not in config file.".format(section))
         return staging_yaml
@@ -89,6 +86,36 @@ class CBConfig():
 
     def _validate_general(self):
         pass
+
+    def log_handlers(self):
+        # Set defaults.
+        config_dict = {
+            'console': False,
+            'file': False,
+            'file_path': Path.cwd() / ( self._config['system']['system_name'] + '.log' ),
+            'syslog': False,
+            'format': logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        }
+
+        # Check for Console
+        try:
+            if self._config['system']['logging']['console']:
+                config_dict['console'] = True
+        except KeyError:
+            pass
+
+        # Check for file
+        try:
+            if self._config['system']['logging']['file']:
+                config_dict['file'] = True
+                try:
+                    config_dict['file_path'] = Path(self._config['system']['logging']['file_path'])
+                except KeyError:
+                    pass
+        except KeyError:
+            pass
+
+        return config_dict
 
     # Method to let modules get their proper logging levels.
     def get_loglevel(self, mod_id, mod_type=None):
@@ -302,6 +329,55 @@ class CBConfig():
         self._logger.debug("Returning config: {}".format(config_dict))
         return config_dict
 
+    def trigger(self, trigger_id):
+        self._logger.info("Received config generate request for trigger: {}".format(trigger_id))
+        if trigger_id not in self._config['triggers']:
+            raise KeyError("No configuration defined for trigger: '{}'".format(trigger_id))
+        config_dict = {
+            'id': trigger_id
+        }
+
+        # Validate the type.
+        try:
+            if self._config['triggers'][trigger_id]['type'] not in ('mqtt_sensor', 'mqtt_command', 'range'):
+                raise ValueError("Trigger {} has unknown type.")
+        except KeyError:
+            raise KeyError("Trigger {} does not have a defined type.")
+
+        # Both MQTT command and MQTT sensor must have a topic suffix defined
+        if self._config['triggers'][trigger_id]['type'] in ('mqtt_command', 'mqtt_sensor'):
+            try:
+                config_dict['topic'] = self._config['triggers'][trigger_id]['topic']
+            except KeyError:
+                raise KeyError("Trigger {} must have a topic defined and doesn't.".format(trigger_id))
+
+        # MQTT Sensor requires some additional checks.
+        if self._config['triggers'][trigger_id] == 'mqtt_sensor':
+            config_dict['topic'] = self._config['triggers'][trigger_id]['topic']
+            try:
+                config_dict['bay'] = self._config['triggers'][trigger_id]['bay']
+            except KeyError:
+                raise KeyError("Trigger {} must have a bay defined and doesn't.".format(trigger_id))
+
+            # Make sure either to or from is defined, but not both.
+            if self._config['triggers'][trigger_id]['to'] & self._config['triggers'][trigger_id]['from']:
+                raise ValueError("Trigger {} has both 'to' and 'from' options set, can only use one.")
+            elif self._config['triggers'][trigger_id]['to']:
+                config_dict['trigger_value'] = self._config['triggers'][trigger_id]['to']
+                config_dict['change_type'] = 'to'
+            elif self._config['triggers'][trigger_id]['from']:
+                config_dict['trigger_value'] = self._config['triggers'][trigger_id]['from']
+                config_dict['change_type'] = 'from'
+
+        # Check the when_triggered options for both mqtt_sensor and range triggers.
+        if self._config['triggers'][trigger_id] in ('mqtt_sensor', 'range'):
+            if self._config['triggers'][trigger_id]['when_triggered'] in ('dock', 'undock', 'occupancy', 'verify'):
+                config_dict['when_triggered'] = self._config['triggers'][trigger_id]['when_triggered']
+            else:
+                raise ValueError("Trigger {} has unknown when_triggered setting.".format(trigger_id))
+
+        return config_dict
+
     # Properties!
     @property
     def bay_list(self):
@@ -310,3 +386,7 @@ class CBConfig():
     @property
     def detector_list(self):
         return self._config['detectors'].keys()
+
+    @property
+    def trigger_list(self):
+        return self._config['triggers'].keys()

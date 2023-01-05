@@ -3,8 +3,8 @@
 ####
 
 import logging
-from logging.config import dictConfig as logging_dictConfig
-# from logging.handlers import SysLogHandler
+from logging.handlers import SysLogHandler
+from logging.handlers import WatchedFileHandler
 import sys
 from time import monotonic
 import atexit
@@ -18,7 +18,7 @@ from .display import Display
 from .detector import Lateral, Range
 from .network import Network
 from .systemhw import PiStatus
-
+from .version import __version__
 
 class CobraBay:
     def __init__(self, cmd_opts=None):
@@ -29,23 +29,26 @@ class CobraBay:
         self._master_logger = logging.getLogger("CobraBay")
         # Set the master logger to Debug, so all other messages will pass up through it.
         self._master_logger.setLevel(logging.DEBUG)
-        # Set up console handling.
+        # By default, set up console logging. This will be disabled if config file tells us to.
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.DEBUG)
-        basic_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        console_handler.setFormatter(basic_formatter)
+        # basic_formatter =
+        # console_handler.setFormatter(basic_formatter)
         self._master_logger.addHandler(console_handler)
         # Create a "core" logger, for just this module.
-        self._logger = logging.getLogger("CobraBay").getChild("core")
+        self._logger = logging.getLogger("CobraBay").getChild("Core")
 
-        # Drop a message to
-        self._logger.info("Initializing...")
+        # Initial startup message.
+        self._logger.info("CobraBay {} initializing...".format(__version__))
 
         # Create a config object.
         self._cbconfig = CBConfig(reset_sensors=True)
 
+        # Update the logging handlers.
+        self._setup_logging_handlers(self._cbconfig.log_handlers())
+
         # Reset our own level based on the configuration.
-        self._logger.setLevel(self._cbconfig.get_loglevel("core"))
+        self._logger.setLevel(self._cbconfig.get_loglevel("Core"))
 
         # Put the raw config in a variable, this is a patch.
         self.config = self._cbconfig._config
@@ -67,16 +70,14 @@ class CobraBay:
         # Queue the startup message.
         self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'Online'})
 
-
         self._logger.debug("Creating detectors...")
-        # Create the detectors
+        # Create the detectors. This is complex enough it gets its own method.
         self._detectors = self._setup_detectors()
+
         # Create master bay object for defined docking bay
         # Master list to store all the bays.
         self._bays = {}
         self._logger.debug("Creating bays...")
-        # For testing, only one bay, hard-wire it ATM.
-        # Create bays.
         for bay_id in self._cbconfig.bay_list:
             self._logger.info("Bay ID: {}".format(bay_id))
             self._bays[bay_id] = Bay(bay_id, self._cbconfig, self._detectors)
@@ -89,9 +90,18 @@ class CobraBay:
             self._network.register_bay(self._bays[bay_id].discovery_reg_info)
             self._display.register_bay(self._bays[bay_id].display_reg_info)
 
-        # Collect messages from the bays. We do a verify here.
+        # Collect messages from the bays.
         for bay_id in self._bays:
             self._outbound_messages = self._outbound_messages + self._bays[bay_id].mqtt_messages(verify=True)
+
+        # Create triggers.
+        #self._triggers = {}
+        #self._logger.debug("Creating triggers...")
+        #for trigger_id in self._cbconfig.trigger_list:
+        #    self._logger.info("Trigger ID: {}".format(trigger_id))
+        #    self._triggers[trigger_id]
+
+
 
         # Poll to dispatch the message queue
         self._logger.debug("Initial message queue: {}".format(self._outbound_messages))
@@ -353,3 +363,34 @@ class CobraBay:
             if self.config['detectors'][detector_id]['type'] == 'Lateral':
                 return_dict[detector_id] = Lateral(self._cbconfig, detector_id)
         return return_dict
+
+    # Method to set up Logging handlers.
+    def _setup_logging_handlers(self, handler_config):
+        # File based handler setup.
+        if handler_config['file']:
+            fh = WatchedFileHandler(handler_config['file_path'])
+            fh.setFormatter(handler_config['format'])
+            fh.setLevel(logging.DEBUG)
+            # Attach to the master logger.
+            self._master_logger.addHandler(fh)
+            self._master_logger.info("File logging enabled.")
+
+        if handler_config['syslog']:
+            raise NotImplemented("Syslog logging not yet implemented")
+
+        # Console handling. If disabling, send a message here.
+        if not handler_config['console']:
+            self._master_logger.info("Disabling console logging.")
+
+        # Remove all console handlers.
+        for handler in self._master_logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                self._master_logger.removeHandler(handler)
+
+        # Add the new console handler.
+        if handler_config['console']:
+            # Replace the console handler with a new one with the formatter.
+            ch = logging.StreamHandler()
+            ch.setFormatter(handler_config['format'])
+            ch = ch.setLevel(logging.DEBUG)
+            self._master_logger.addHandler(ch)

@@ -6,6 +6,10 @@ system:
   homeassistant: True # Integrate with Home Assistant. If yes, will send discovery messages.
   # Logging definition
   logging:
+    console: False
+    file: True
+#    file_path: Something
+#    syslog: Something else
     # Default level for the system. If not included, will default to WARNING.
     default_level: warning
     # Major components can have logging levels set separately. These are:
@@ -15,7 +19,35 @@ system:
     # display - The display
     # network - The network
     # Individual detectors and bays can also be set by including their names.
-# Settings for the display. We presume only one.
+    bay1: info
+# Triggers for actions. Need to have some enabled otherwise nothing ever happens!
+triggers:
+  # External command handler intended to take direct commands from an external system, ie: Home Assistant.
+  # Bay commands require a Bay ID, System Commands don't. See documentation for details.
+  # Can only have one of these.
+  command:
+    type: mqtt_command
+    topic: cmd
+  # "Sensor" monitors an MQTT topic for a topic changes. Sensors are expected to be a single
+  # string, ie: "on"/"off" or "True"/"False"
+  garage_door:
+    type: mqtt_sensor
+    bay: bay1
+    to: on
+    when_triggered: occupancy
+  entry_door:
+    type: mqtt_sensor
+    bay: bay1
+    when_triggered: verify
+  # Range based triggering. If movement is detected, take an action. This requires running the range sensor continually.
+  range:
+    type: range
+    enable: true
+    detector: range
+    when_triggered: occupancy
+
+# Settings for the display. Only one is supported! If you want to build a multi-panel display, treat it as one and do it
+# in hardware.
 display:
   matrix:
     width: 64  # Columns on the Matrix
