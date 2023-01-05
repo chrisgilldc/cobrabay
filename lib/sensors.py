@@ -16,6 +16,7 @@ from pathlib import Path
 from pprint import pformat
 import sys
 
+
 class BaseSensor:
     def __init__(self, sensor_options, required):
         self._settings = {}
@@ -59,17 +60,22 @@ class I2CSensor(BaseSensor):
         self.i2c_address = sensor_options['i2c_address']
         self._logger.debug("Now have I2C Bus {} and Address {}".format(self.i2c_bus, hex(self.i2c_address)))
 
+        # How many times, in the lifetime of the sensor, have we hit a fault.
+        self._lifetime_faults = 0
+        # Set if the sensor hit a fault, recovered, but hasn't yet succeeded in re-reading. If it faults *again*, bomb.
+        self._last_chance = False
+
     # Global properties. Since all supported sensors are I2C at the moment, these can be global.
     @property
     def i2c_bus(self):
         return self._i2c_bus
 
     @i2c_bus.setter
-    def i2c_bus(self, input):
-        if input not in (1, 2):
-            raise ValueError("I2C Bus ID for Raspberry Pi must be 1 or 2, not {}".format(input))
+    def i2c_bus(self, the_input):
+        if the_input not in (1, 2):
+            raise ValueError("I2C Bus ID for Raspberry Pi must be 1 or 2, not {}".format(the_input))
         else:
-            self._i2c_bus = input
+            self._i2c_bus = the_input
 
     @property
     def i2c_address(self):
@@ -135,6 +141,7 @@ class CB_VL53L1X(I2CSensor):
         # Call super.
         super().__init__(sensor_options)
         # Check for additional required options.
+        self._sensor_obj = None
         required = ['i2c_bus', 'i2c_address', 'enable_board', 'enable_pin']
         # Store the options.
         for item in required:
@@ -143,10 +150,11 @@ class CB_VL53L1X(I2CSensor):
 
         # Define the enable pin.
         self._enable_pin = None
-
+        self._enable_attempt_counter = 0
+        
         # Add self to instance list.
-
         CB_VL53L1X.instances.add(self)
+        # In principle, will use this in the future.
         self._performance = {
             'max_range': Quantity('4000mm'),
             'min_range': Quantity('30mm')
@@ -189,9 +197,22 @@ class CB_VL53L1X(I2CSensor):
         self.enable_pin.value = True
         # Wait one second to make sure the bus has stabilized.
         sleep(1)
-        i2c = busio.I2C(board.SCL, board.SDA)
-        self._sensor_obj = af_VL53L1X(i2c, address=0x29)
-        self._sensor_obj.set_address(self._i2c_address)
+        try:
+            i2c = busio.I2C(board.SCL, board.SDA)
+        except PermissionError as e:
+            # If the OS doesn't give us permissions, udev might still be setting things up.
+            # Try up to three times, then raise the exception again.
+            self._enable_attempt_counter = self._enable_attempt_counter + 1
+            self._logger.debug("Sensor enabled but not yet ready on attempt {}.".format(self._enable_attempt_counter))
+            if self._enable_attempt_counter == 3:
+                raise e
+            else:
+                self.enable()
+        else:
+            # Create the sensor object with the default address of 0x29
+            self._sensor_obj = af_VL53L1X(i2c, address=0x29)
+            # Change the address to the desired address.
+            self._sensor_obj.set_address(self._i2c_address)
 
     def disable(self):
         self.enable_pin.value = False
@@ -235,18 +256,45 @@ class CB_VL53L1X(I2CSensor):
             try:
                 reading = self._sensor_obj.distance
             except OSError as e:
+                # Try to recover from sensor fault.
                 self._logger.critical("Attempt to read sensor threw error: {}".format(str(e)))
-                if self._logger.isEnabledFor(logging.DEBUG):
+                self._lifetime_faults = self._lifetime_faults + 1
+                self._logger.critical("Lifetime faults are now: {}".format(self._lifetime_faults))
+                hex_list = []
+                for address in self._i2c.scan():
+                    hex_list.append(hex(address))
+                self._logger.debug("Current I2C bus: {}".format(hex_list))
 
-                    self._logger.debug("I2C Bus Scan:")
+                # Decide on the last chance.
+                if self._last_chance:
+                    self._logger.critical("This was the last chance. No more!")
+                    if self._logger.isEnabledFor(logging.DEBUG):
+                        self._logger.debug("I2C Bus Scan:")
+                        hex_list = []
+                        for address in self._i2c.scan():
+                            hex_list.append(hex(address))
+                        self._logger.debug("Current I2C bus: {}".format(hex_list))
+                        self._logger.debug("Object Dump:")
+                        self._logger.debug(pformat(dir(self._sensor_obj)))
+                    self._logger.critical("Cannot continue. Exiting.")
+                    sys.exit(1)
+                else:  # Still have a last chance....
+                    self._last_chance = True
                     hex_list = []
                     for address in self._i2c.scan():
                         hex_list.append(hex(address))
-                    self._logger.debug(pformat(hex_list))
-                    self._logger.debug("Object Dump:")
-                    self._logger.debug(pformat(dir(self._sensor_obj)))
-                self._logger.critical("Cannot continue. Exiting.")
-                sys.exit(1)
+                    self._logger.debug("I2C bus after fault: {}".format(hex_list))
+
+                    self._logger.debug("Resetting sensor to recover...")
+
+                    # Disable the sensor.
+                    self.disable()
+                    # Re-enable the sensor. This will re-enable the sensor and put it back at its correct address.
+                    self.enable()
+                    hex_list = []
+                    for address in self._i2c.scan():
+                        hex_list.append(hex(address))
+                    self._logger.debug("I2C bus after re-enabling: {}".format(hex_list))
 
             # A "none" means the sensor had no response.
             if reading is None:
@@ -327,17 +375,19 @@ class TFMini(SerialSensor):
         self._logger.debug("Test reading: {}".format(self.range))
 
     # This sensor doesn't need an enable, do nothing.
-    def enable(self):
+    @staticmethod
+    def enable():
         return True
 
     # Likewise, we don't need to disable, do nothing.
-    def disable(self):
+    @staticmethod
+    def disable():
         return True
 
     @property
     def range(self):
         # TFMini is always ranging, so no need to pace it.
-        reading = self._clustered_read() # Do a clustered read to ensure stability.
+        reading = self._clustered_read()  # Do a clustered read to ensure stability.
         self._logger.debug("TFmini read values: {}".format(reading))
         # Check the status to see if we got a value, or some kind of non-OK state.
         if reading.status == "OK":
@@ -360,5 +410,6 @@ class TFMini(SerialSensor):
                 stable_count += 1
             previous_read = reading
             i += 1
-        self._logger.debug("Took {} cycles in {}s to get stable reading of {}.".format(i, round(monotonic() - start,2), previous_read))
+        self._logger.debug("Took {} cycles in {}s to get stable reading of {}.".
+                           format(i, round(monotonic() - start, 2), previous_read))
         return previous_read
