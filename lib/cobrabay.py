@@ -20,6 +20,7 @@ from .network import Network
 from .systemhw import PiStatus
 from .version import __version__
 
+
 class CobraBay:
     def __init__(self, cmd_opts=None):
         # Register the exit handler.
@@ -95,13 +96,11 @@ class CobraBay:
             self._outbound_messages = self._outbound_messages + self._bays[bay_id].mqtt_messages(verify=True)
 
         # Create triggers.
-        #self._triggers = {}
-        #self._logger.debug("Creating triggers...")
-        #for trigger_id in self._cbconfig.trigger_list:
+        # self._triggers = {}
+        # self._logger.debug("Creating triggers...")
+        # for trigger_id in self._cbconfig.trigger_list:
         #    self._logger.info("Trigger ID: {}".format(trigger_id))
         #    self._triggers[trigger_id]
-
-
 
         # Poll to dispatch the message queue
         self._logger.debug("Initial message queue: {}".format(self._outbound_messages))
@@ -198,7 +197,7 @@ class CobraBay:
                 if self._bays[bay].state == 'Docking':
                     self._logger.info("Entering docking mode due to movement.")
                     self._dock(bay)
-                    break ## Exit this cycle
+                    break  ## Exit this cycle
                 # Since undocking isn't fully developed, don't do this right now. But it's in here as a stud.
                 # elif self._bays[bay].state == 'Undocking':
                 #     self._logger.info("Entering undocking mode due to movement.")
@@ -217,7 +216,6 @@ class CobraBay:
                  'topic': 'display',
                  'message': self._display.current, 'repeat': True})
             # Have the bay monitor range, for movement.
-
 
     # Start sensors and display to guide parking.
     def _dock(self, bay_id):
@@ -392,5 +390,5 @@ class CobraBay:
             # Replace the console handler with a new one with the formatter.
             ch = logging.StreamHandler()
             ch.setFormatter(handler_config['format'])
-            ch = ch.setLevel(logging.DEBUG)
+            ch.setLevel(logging.DEBUG)
             self._master_logger.addHandler(ch)
