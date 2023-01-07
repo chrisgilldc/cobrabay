@@ -119,7 +119,7 @@ class Display:
         self._logger.debug("Created laterals for {}: {}".format(bay_id, self._layers[bay_id]))
 
     # General purpose message displayer
-    def show(self,mode,message=None,color="white"):
+    def show(self, system_status, mode, message=None, color="white", icons=True):
         if mode == 'clock':
             string = datetime.now().strftime("%-I:%M %p")
             # Clock is always in green.
@@ -130,14 +130,27 @@ class Display:
             string = message
         else:
             raise ValueError("Show did not get a valid mode.")
+
         # Make a base layer.
-        base_img = Image.new("RGBA", (self._settings['matrix_width'], self._settings['matrix_height']), (0,0,0,255))
-        placard = self._placard(string, color, w_adjust=0, h_adjust=0)
-        final_image = Image.alpha_composite(base_img, placard)
-        self._output_image(final_image)
+        img = Image.new("RGBA", (self._settings['matrix_width'], self._settings['matrix_height']), (0,0,0,255))
+        # If enabled, put status icons at the bottom of the display.
+        if icons:
+            # Network status icon, shows overall network and MQTT status.
+            network_icon = self._icon_network(system_status['network'],system_status['mqtt'])
+            img = Image.alpha_composite(img, network_icon)
+            # Adjust available placard height so we don't stomp over the icons.
+            placard_h=6
+        else:
+            placard_h=0
+
+        # Placard with the text.
+        placard = self._placard(string, color, w_adjust=0, h_adjust=placard_h)
+        img = Image.alpha_composite(img, placard)
+        # Send it to the display!
+        self._output_image(img)
 
     # Specific displayer for docking.
-    def show_dock(self, display_data):
+    def show_motion(self, direction, display_data):
         self._logger.debug("Show Dock received data: {}".format(display_data))
         # For easy reference.
         w = self._settings['matrix_width']
@@ -153,9 +166,6 @@ class Display:
         final_image = Image.alpha_composite(final_image, range_layer)
 
         ## Bottom strobe box.
-        # Frame is a pre-baked box.
-        # final_image = Image.alpha_composite(final_image, self._layers['frame_approach'])
-        # Strober calculate the blocking box and the strobe bugs.
         final_image = Image.alpha_composite(final_image, self._strober(display_data))
 
         # IF lateral data is reported, show it.
@@ -248,9 +258,43 @@ class Display:
         draw.rectangle([(w-3, 0), (w-1, h-5)], width=1)
         return img
 
+    def _icon_network(self, net_status, mqtt_status, x_input=None, y_input=None):
+        # determine the network status color based on combined network and MQTT status.
+        if net_status is False:
+            net_color = 'red'
+            mqtt_color = 'yellow'
+        elif net_status is True:
+            net_color = 'green'
+            if mqtt_status is False:
+                net_color = 'red'
+            elif mqtt_status is True:
+                mqtt_color = 'green'
+            else:
+                raise ValueError("Network Icon draw got invalid MQTT status value {}.".format(net_status))
+        else:
+            raise ValueError("Network Icon draw got invalid network status value {}.".format(net_status))
+
+        # Default to lower right placement if no alternate positions given.
+        if x_input is None:
+            x_input = self._settings['matrix_width']-5
+        if y_input is None:
+            y_input = self._settings['matrix_height']-5
+
+        w = self._settings['matrix_width']
+        h = self._settings['matrix_height']
+        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([x_input+1,y_input,x_input+3,y_input+2], outline="white", fill=mqtt_color)
+        # Base network line.
+        draw.line([x_input,y_input+4,x_input+4,y_input+4],fill=net_color)
+        # Network stem
+        draw.line([x_input+2,y_input+3,x_input+2,y_input+4], fill=net_color)
+        return img
+
     # Make a placard to show range.
-    def _placard_range(self,input_range,range_quality,bay_state):
+    def _placard_range(self, input_range, range_quality, bay_state):
         self._logger.debug("Creating range placard with range {} and quality {}".format(input_range, range_quality))
+        range_string = "RANGE"
         # Some range quality statuses need a text output, not a distance.
         if range_quality == 'Back up':
             range_string = "BACK UP"
@@ -276,7 +320,7 @@ class Display:
         # Determine a color based on quality
         if range_quality in ('Critical','Back up'):
             text_color = 'red'
-        elif range_quality =='Warning':
+        elif range_quality == 'Warning':
             text_color = 'yellow'
         elif range_quality in ('Beyond range', 'Door open'):
             text_color = 'blue'
