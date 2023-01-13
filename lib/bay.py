@@ -45,6 +45,7 @@ class Bay:
         self._position = {}
         self._quality = {}
         self._detectors = {}
+        self._trigger_registry = {}
         self._previous_scan_ts = 0
         self._state = None
         self._occupancy = None
@@ -79,6 +80,23 @@ class Bay:
 
         self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
         self.state = "Ready"
+
+    # Connect triggers.
+    def register_trigger(self, trigger_obj):
+        self._logger.debug("Registering trigger: {}".format(trigger_obj.id))
+        self._trigger_registry[trigger_obj.id] = trigger_obj
+
+    # Disconnect triggers.
+    def deregister_trigger(self, trigger_id):
+        self._logger.debug("Unregistering trigger: {}".format(trigger_id))
+        del self._trigger_registry[trigger_id]
+
+    # Currently unused trigger to check commands at the Bay level.
+    # def check_triggers(self):
+    #     for trigger in self._trigger_registry:
+    #         if self._trigger_registry[trigger].triggered:
+    #             for cmd in self._trigger_registry[trigger].next_command:
+    #                 self._logger.debug("Got command: {}".format(cmd))
 
     # Abort gets called when we want to cancel a docking.
     def abort(self):
@@ -185,14 +203,14 @@ class Bay:
                     if raw_range > self._settings['detectors']['intercepts'][lateral_name]:
                         quality[lateral_name] = "Not Intercepted"
                         self._logger.debug("Sensor {} with intercept {}. Range {}, not intercepted.".
-                                             format(lateral_name,
-                                                    self._settings['detectors']['intercepts'][lateral_name].to('cm'),
-                                                    raw_range.to('cm')))
+                                           format(lateral_name,
+                                                  self._settings['detectors']['intercepts'][lateral_name].to('cm'),
+                                                  raw_range.to('cm')))
                 except ValueError:
-                     self._logger.debug("For lateral sensor {} cannot compare intercept {} to range {}".
-                                      format(lateral_name,
-                                             self._settings['detectors']['intercepts'][lateral_name],
-                                             raw_range))
+                    self._logger.debug("For lateral sensor {} cannot compare intercept {} to range {}".
+                                       format(lateral_name,
+                                              self._settings['detectors']['intercepts'][lateral_name],
+                                              raw_range))
         self._position = position
         self._quality = quality
 
@@ -209,7 +227,8 @@ class Bay:
             self._logger.debug("Longitudinal quality is {}, not occupied.".
                                format(self._quality[self._settings['detectors']['selected_range']]))
             return False
-        if self._quality[self._settings['detectors']['selected_range']] in ('Emergency!', 'Back up', 'Park', 'Final', 'Base'):
+        if self._quality[self._settings['detectors']['selected_range']] in (
+        'Emergency!', 'Back up', 'Park', 'Final', 'Base'):
             # If the detector is giving us any of the 'close enough' qualities, there's something being found that
             # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
             # the sensors or whatnot
@@ -269,6 +288,7 @@ class Bay:
         if m_input not in ('Docking', 'Undocking') and self._state in ('Docking', 'Undocking'):
             self._logger.debug("Entering state: {}".format(m_input))
             # Reset some variables.
+            # Make the mark none to be sure there's not a stale value in here.
             self._dock_timer['mark'] = None
         # Now store the state.
         self._state = m_input
@@ -307,9 +327,9 @@ class Bay:
                  'message': {
                      'adjusted_reading': self._detectors[detector].value,
                      'raw_reading': self._detectors[detector].value_raw
-                    },
+                 },
                  'repeat': True,
-                 'topic_mappings': {'bay_id': self.bay_id, 'detector_id': self._detectors[detector].id }
+                 'topic_mappings': {'bay_id': self.bay_id, 'detector_id': self._detectors[detector].id}
                  }
             )
 
@@ -349,11 +369,47 @@ class Bay:
         # Lateral ordering is determined by intercept range when bay is started up.
         if self._settings['detectors']['lateral'] is not None:
             for lateral_detector in self._settings['detectors']['lateral']:
-                return_data['lateral'].append({
+                detector_dict = {
                     'name': lateral_detector,
                     'quality': self._quality[lateral_detector],
-                    'side': self._detectors[lateral_detector].side}
-                )
+                }
+
+                if self._detectors[lateral_detector].side == 'Not Intercepted':
+                    detector_dict['side'] = "DND"
+                else:
+                    # This is a little confusing. The detector side is relative to the bay, ie: looking out from the range
+                    # sensor. The display position for indicator is relative to the display, ie: when looking (at) the
+                    # display. I arguably should have made it consistent, but not going to rewrite it now.
+
+                    if self._detectors[lateral_detector].side == 'R':
+                        # Sensor is mounted on the right side of the bay.
+                        if self._position[lateral_detector] > 0:
+                            # Vehicle is shifted to the left side of the bay
+                            # Put the indicators on the right side of the display (bay-left)
+                            detector_dict['side'] = 'R'
+                        elif self._position[lateral_detector] < 0:
+                            # Vehicle is shifted to the right side of the bay.
+                            # Pub the indicators on the left side of the display (bay-right)
+                            detector_dict['side'] = 'L'
+                        else:
+                            # It's exactly zero? What're the odd!?
+                            detector_dict['side'] = 'DND'
+                    elif self._detectors[lateral_detector].side == 'L':
+                        # Sensor is mounted on the left side of the bay.
+                        if self._position[lateral_detector] > 0:
+                            # Vehicle is shifted to the right side of the bay.
+                            # Put the indicators on the left side of the display (bay-right)
+                            detector_dict['side'] = 'L'
+                        elif self._position[lateral_detector] < 0:
+                            # Vehicle is shifted to the left side of the bay.
+                            # Put the indicators on the right side of the display (bay-left)
+                            detector_dict['side'] = 'R'
+                        else:
+                            detector_dict['side'] = 'DND'
+
+                return_data['lateral'].append(detector_dict)
+                # Calculate the side for placement.
+
         else:
             self._logger.debug("Not assembling laterals, lateral order is None.")
         return return_data
@@ -427,4 +483,3 @@ class Bay:
                 self._logger.debug(
                     "Setting property {} to {}".format(item, self._settings['detectors']['settings'][dc][item]))
                 setattr(self._detectors[dc], item, self._settings['detectors']['settings'][dc][item])
-

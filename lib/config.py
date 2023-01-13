@@ -2,6 +2,7 @@
 # Cobra Bay - Config Loader
 ####
 import logging
+import sys
 import yaml
 from pathlib import Path
 from pint import Quantity
@@ -38,9 +39,9 @@ class CBConfig:
         staging_yaml = self._open_yaml(self._config_file)
         # Do a formal validation here? Probably!
         try:
-            validated_yaml = self._validate(staging_yaml)
-        except:
-            self._logger.exception("Could not validate config file. Will not load.")
+            validated_yaml = self._validator(staging_yaml)
+        except KeyError as e:
+            raise e
         else:
             self._logger.info("Config file validated. Loading.")
             # We're good, so assign the staging to the real config.
@@ -74,15 +75,53 @@ class CBConfig:
         return config_yaml
 
     # Main validator.
-    def _validate(self, staging_yaml):
+    def _validator(self, staging_yaml):
         # Check for the main sections.
         for section in ('system', 'triggers', 'display', 'detectors', 'bays'):
             if section not in staging_yaml.keys():
                 raise KeyError("Required section {} not in config file.".format(section))
+        staging_yaml['system'] = self._validate_system(staging_yaml['system'])
+        # If MQTT Commands are enabled, create that trigger config. Will be picked up by the core.
+        if staging_yaml['system']['mqtt_commands']:
+            self._logger.info("Enabling MQTT Command processor.")
+            try:
+                staging_yaml['triggers']['sys_cmd'] = { 'type': 'syscommand' }
+            except TypeError:
+                staging_yaml['triggers'] = {}
+                staging_yaml['triggers']['sys_cmd'] = {'type': 'syscommand'}
+
+            for bay_id in staging_yaml['bays'].keys():
+                trigger_name = bay_id + "_cmd"
+                staging_yaml['triggers'][trigger_name] = {'type': 'baycommand', 'bay_id': bay_id }
         return staging_yaml
 
-    def _validate_basic(self):
-        pass
+    # Validate the system section.
+    def _validate_system(self, system_config):
+        valid_keys = ('units', 'system_name', 'network', 'mqtt_commands', 'interface', 'homeassistant', 'logging')
+        required_keys = ('system_name', 'interface')
+        # Remove any key values that aren't valid.
+        for actual_key in system_config:
+            if actual_key not in valid_keys:
+                # Delete unknown keys.
+                self._logger.error("System config has unknown item '{}'. Ignoring.".format(actual_key))
+        # Required keys for which we must have a value, but not a *specific* value.
+        for required_key in required_keys:
+            if required_key not in system_config:
+                self._logger.critical("System config requires '{}' to be set. Cannot continue.".format(required_key))
+                sys.exit(1)
+            elif not isinstance(system_config[required_key], str):
+                self._logger.critical("Required system config item '{}' must be a string. Cannot continue.".format(required_key))
+                sys.exit(1)
+            else:
+                # Strip spaces and we're good to go.
+                system_config[required_key] = system_config[required_key].replace(" ", "_")
+        # Specific value checks.
+        if system_config['units'].lower() not in ('metric', 'imperial'):
+            self._logger.debug("Unit setting {} not valid, defaulting to metric.".format(system_config['units']))
+            # If not metric or imperial, default to metric.
+            system_config['units'] = 'metric'
+
+        return system_config
 
     def _validate_general(self):
         pass
@@ -336,31 +375,43 @@ class CBConfig:
         config_dict = {
             'id': trigger_id
         }
-
+        self._logger.debug("Trigger has config: {}".format(self._config['triggers'][trigger_id]))
         # Validate the type.
         try:
-            if self._config['triggers'][trigger_id]['type'] not in ('mqtt_sensor', 'mqtt_command', 'range'):
+            if self._config['triggers'][trigger_id]['type'] not in ('mqtt_sensor', 'syscommand', 'baycommand', 'range'):
                 raise ValueError("Trigger {} has unknown type.")
+            else:
+                config_dict['type'] = self._config['triggers'][trigger_id]['type']
         except KeyError:
             raise KeyError("Trigger {} does not have a defined type.")
 
-        # Both MQTT command and MQTT sensor must have a topic suffix defined
-        if self._config['triggers'][trigger_id]['type'] in ('mqtt_command', 'mqtt_sensor'):
+        # Both MQTT command and MQTT sensor can have an MQTT topic defined. This will override auto-generation.
+        if config_dict['type'] == 'mqtt_sensor':
             try:
                 config_dict['topic'] = self._config['triggers'][trigger_id]['topic']
+                config_dict['topic_mode'] = 'full'
             except KeyError:
-                raise KeyError("Trigger {} must have a topic defined and doesn't.".format(trigger_id))
+                config_dict['topic'] = trigger_id
+                config_dict['topic_mode'] = 'suffix'
+
+        # Set topic and topic mode for the command handlers. These will always be 'cmd', and always a suffix.
+        if config_dict['type'] in ('syscommand','baycommand'):
+            config_dict['topic'] = 'cmd'
+            config_dict['topic_mode'] = 'suffix'
+
+        # Bay command needs the Bay ID to build the topic correctly.
+        if config_dict['type'] == 'baycommand':
+            config_dict['bay_id'] = self._config['triggers'][trigger_id]['bay_id']
 
         # MQTT Sensor requires some additional checks.
-        if self._config['triggers'][trigger_id] == 'mqtt_sensor':
-            config_dict['topic'] = self._config['triggers'][trigger_id]['topic']
+        if config_dict['type'] == 'mqtt_sensor':
             try:
-                config_dict['bay'] = self._config['triggers'][trigger_id]['bay']
+                config_dict['bay_id'] = self._config['triggers'][trigger_id]['bay']
             except KeyError:
                 raise KeyError("Trigger {} must have a bay defined and doesn't.".format(trigger_id))
 
             # Make sure either to or from is defined, but not both.
-            if self._config['triggers'][trigger_id]['to'] & self._config['triggers'][trigger_id]['from']:
+            if all(key in self._config['triggers'][trigger_id] for key in ('to', 'from')):
                 raise ValueError("Trigger {} has both 'to' and 'from' options set, can only use one.")
             elif self._config['triggers'][trigger_id]['to']:
                 config_dict['trigger_value'] = self._config['triggers'][trigger_id]['to']
@@ -370,7 +421,7 @@ class CBConfig:
                 config_dict['change_type'] = 'from'
 
         # Check the when_triggered options for both mqtt_sensor and range triggers.
-        if self._config['triggers'][trigger_id] in ('mqtt_sensor', 'range'):
+        if config_dict['type'] in ('mqtt_sensor', 'range'):
             if self._config['triggers'][trigger_id]['when_triggered'] in ('dock', 'undock', 'occupancy', 'verify'):
                 config_dict['when_triggered'] = self._config['triggers'][trigger_id]['when_triggered']
             else:

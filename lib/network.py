@@ -63,6 +63,8 @@ class Network:
         self._upward_commands = []
         # Registry to keep extant bays.
         self._bay_registry = {}
+        # Registry to keep triggers
+        self._trigger_registry = {}
 
         # Create the MQTT Client.
         self._mqtt_client = Client(
@@ -157,12 +159,12 @@ class Network:
                         'icon': 'mdi:lightning-bolt'
                     }
                 },
-                'device_command': {
-                    'topic': 'cobrabay/' + self._client_id + '/cmd',
-                    'enabled': False,
-                    'callback': self._cb_device_command
-                    # May eventually do discovery here to create selectors, but not yet.
-                },
+                # 'device_command': {
+                #     'topic': 'cobrabay/' + self._client_id + '/cmd',
+                #     'enabled': False,
+                #     'callback': self._cb_device_command
+                #     # May eventually do discovery here to create selectors, but not yet.
+                # },
                 'display': {
                     'topic': 'cobrabay/' + self._client_id + '/display',
                     'previous_state': {},
@@ -272,7 +274,6 @@ class Network:
                         'value_template': "{{% if value_json.direction in ('forward','reverse') %}} ON {{% else %}} OFF {{% endif %}}"
                     }
                 },
-
                 'bay_dock_time': {
                     'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/dock_time',
                     'previous_state': None,
@@ -284,15 +285,14 @@ class Network:
                         'payload_not_available': 'Not running'
                     }
                 },
-
-                # This is a generic callback that will work for all bays.
-                'bay_command': {
-                    'topic': 'cobrabay/' + self._client_id + '/+/cmd',
-                    'ha_discovery': {
-                        'type': 'select'
-                    },
-                    'callback': self._cb_bay_command
-                }
+                # # This is a generic callback that will work for all bays.
+                # 'bay_command': {
+                #     'topic': 'cobrabay/' + self._client_id + '/+/cmd',
+                #     'ha_discovery': {
+                #         'type': 'select'
+                #     },
+                #     'callback': self._cb_bay_command
+                #}
             }
         }
         self._logger.info('Network: Initialization complete.')
@@ -313,15 +313,38 @@ class Network:
         except KeyError:
             self._logger.error("Asked to Unregister bay ID {} but bay by that ID does not exist.".format(bay_id))
 
+    def register_trigger(self, trigger_obj):
+        self._logger.debug("Received trigger registration for {}".format(trigger_obj.id))
+        # Store the object!
+        self._trigger_registry[trigger_obj.id] = trigger_obj
+        self._logger.debug("Stored trigger object {}".format(trigger_obj.id))
+        # Add the MQTT Prefix to use to the object. Triggers set to override this will just ignore it.
+        trigger_obj.topic_prefix = "cobrabay/" + self._client_id
+        # Since it's possible we're already connected to MQTT, we call subscribe here separately.
+        self._trigger_subscribe(trigger_obj.id)
+
+    def _trigger_subscribe(self, trigger_id):
+        trigger_obj = self._trigger_registry[trigger_id]
+        self._logger.debug("Connecting trigger {}".format(trigger_id))
+        self._logger.debug("Subscribing...")
+        self._mqtt_client.subscribe(trigger_obj.topic)
+        self._logger.debug("Connecting callback...")
+        self._mqtt_client.message_callback_add(trigger_obj.topic, trigger_obj.callback)
+
     def _on_connect(self, userdata, flags, rc, properties=None):
         self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
-        # Connect to the callback topics. This will only connect to the device command topic at this stage.
-        for type in self._topics:
-            for item in self._topics[type]:
-                if 'callback' in self._topics[type][item]:
-                    self._logger.debug("Network: Creating callback for {}".format(item))
-                    self._mqtt_client.message_callback_add(self._topics[type][item]['topic'],
-                                                           self._topics[type][item]['callback'])
+        # # Connect to the static callback topics.
+        # for type in self._topics:
+        #     for item in self._topics[type]:
+        #         if 'callback' in self._topics[type][item]:
+        #             self._logger.debug("Network: Creating callback for {}".format(item))
+        #             self._mqtt_client.message_callback_add(self._topics[type][item]['topic'],
+        #                                                    self._topics[type][item]['callback'])
+        # Connect to all trigger topic callbacks.
+        for trigger_id in self._trigger_registry.keys():
+            self._trigger_subscribe(trigger_id)
+        # Attach the fallback message trapper.
+        self._mqtt_client.on_message = self._on_message
         self._mqtt_connected = True
 
     def _on_disconnect(self, client, userdata, rc):
@@ -330,61 +353,70 @@ class Network:
         self._reconnect_timer = time.monotonic()
         self._mqtt_connected = False
 
-    # Device Command callback
-    def _cb_device_command(self, client, userdata, message):
-        self._logger_mqtt.debug("Received device command message: {}".format(message.payload))
-        # Try to decode the JSON.
-        try:
-            message = json_loads(message.payload)
-        except:
-            self._logger_mqtt.error(
-                "Could not decode JSON from MQTT message '{}' on topic '{}'".format(message.topic, message))
-            # Ignore the error itself, plow through.
-            return False
+    # Catchall for MQTT messages. Don't act, just log.
+    def _on_message(self, client, user, message):
+        self._logger.debug("Received message on topic {} with payload {}. No other handler, no action.".format(
+            message.topic, message.payload
+        ))
+        print("Received message on topic {} with payload {}. No other handler, no action.".format(
+            message.topic, message.payload
+        ))
 
-        # Proceed on valid commands.
-        if 'cmd' not in message:
-            self._logger_mqtt.error("MQTT message for topic {} does not contain a 'cmd' directive".format(message.topic))
-        elif message['cmd'] == 'rediscover':
-            # Rerun Home Assistant discovery
-            self._ha_discovery()
-        elif message['cmd'] == 'display_sensor':
-            # If displaying a sensor, have to pass up other parameters as well.
-            # Remove the command, since we already have that, then put the rest into the options field.
-            del message['cmd']
-            self._upward_commands.append({'type': 'device', 'cmd': 'display_sensor', 'options': message})
-        elif message['cmd'] == 'rescan_sensors':
-            self._upward_commands.append({'type': 'device', 'cmd': 'rescan_sensors'})
-        else:
-            self._logger.info("Received unknown MQTT device command '{}'".format(message['cmd']))
-
-    # Bay Command callback
-    def _cb_bay_command(self, client, userdata, message):
-        self._logger_mqtt.debug("Received bay command message: {}".format(message.payload))
-        self._logger_mqtt.debug("Incoming topic: {}".format(message.topic))
-
-        # Pull out the bay ID.
-        bay_id = message.topic.split('/')[-2]
-        self._logger.debug("Using bay id: {}".format(bay_id))
-
-        # Try to decode the JSON.
-        try:
-            message = json_loads(message.payload)
-        except:
-            self._logger_mqtt.error("Could not decode JSON from MQTT message '{}' on topic '{}'"
-                               .format(message.topic, message.payload))
-            # Ignore the message and return, as if we never got int.
-            return
-
-        # Proceed on valid commands.
-        if 'cmd' not in message:
-            self._logger_mqtt.error(
-                "MQTT message for topic {} does not contain a cmd directive".format(message.topic))
-        elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify', 'reset'):
-            # If it's a valid bay command, pass it upward.
-            self._upward_commands.append({'type': 'bay', 'bay_id': bay_id, 'cmd': message['cmd']})
-        else:
-            self._logger.info("Received unknown MQTT bay command '{}'".format(message['cmd']))
+    # # Device Command callback
+    # def _cb_device_command(self, client, userdata, message):
+    #     self._logger_mqtt.debug("Received device command message: {}".format(message.payload))
+    #     # Try to decode the JSON.
+    #     try:
+    #         message = json_loads(message.payload)
+    #     except:
+    #         self._logger_mqtt.error(
+    #             "Could not decode JSON from MQTT message '{}' on topic '{}'".format(message.topic, message))
+    #         # Ignore the error itself, plow through.
+    #         return False
+    #
+    #     # Proceed on valid commands.
+    #     if 'cmd' not in message:
+    #         self._logger_mqtt.error("MQTT message for topic {} does not contain a 'cmd' directive".format(message.topic))
+    #     elif message['cmd'] == 'rediscover':
+    #         # Rerun Home Assistant discovery
+    #         self._ha_discovery()
+    #     elif message['cmd'] == 'display_sensor':
+    #         # If displaying a sensor, have to pass up other parameters as well.
+    #         # Remove the command, since we already have that, then put the rest into the options field.
+    #         del message['cmd']
+    #         self._upward_commands.append({'type': 'device', 'cmd': 'display_sensor', 'options': message})
+    #     elif message['cmd'] == 'rescan_sensors':
+    #         self._upward_commands.append({'type': 'device', 'cmd': 'rescan_sensors'})
+    #     else:
+    #         self._logger.info("Received unknown MQTT device command '{}'".format(message['cmd']))
+    #
+    # # Bay Command callback
+    # def _cb_bay_command(self, client, userdata, message):
+    #     self._logger_mqtt.debug("Received bay command message: {}".format(message.payload))
+    #     self._logger_mqtt.debug("Incoming topic: {}".format(message.topic))
+    #
+    #     # Pull out the bay ID.
+    #     bay_id = message.topic.split('/')[-2]
+    #     self._logger.debug("Using bay id: {}".format(bay_id))
+    #
+    #     # Try to decode the JSON.
+    #     try:
+    #         message = json_loads(message.payload)
+    #     except:
+    #         self._logger_mqtt.error("Could not decode JSON from MQTT message '{}' on topic '{}'"
+    #                            .format(message.topic, message.payload))
+    #         # Ignore the message and return, as if we never got int.
+    #         return
+    #
+    #     # Proceed on valid commands.
+    #     if 'cmd' not in message:
+    #         self._logger_mqtt.error(
+    #             "MQTT message for topic {} does not contain a cmd directive".format(message.topic))
+    #     elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify', 'reset'):
+    #         # If it's a valid bay command, pass it upward.
+    #         self._upward_commands.append({'type': 'bay', 'bay_id': bay_id, 'cmd': message['cmd']})
+    #     else:
+    #         self._logger.info("Received unknown MQTT bay command '{}'".format(message['cmd']))
 
     # Message publishing method
     def _pub_message(self, topic_type, topic, message, repeat=False, topic_mappings=None):
@@ -488,7 +520,6 @@ class Network:
         return_data['commands'] = self._upward_commands
         # Remove the upward commands that are being forwarded.
         self._upward_commands = []
-
         return return_data
 
     # Check the status of the network interface.
@@ -510,15 +541,14 @@ class Network:
             self._logger.warning('Network: ' + str(e))
             return False
 
-        # Subscribe to all the appropriate topics
-        for type in self._topics:
-            for item in self._topics[type]:
-                if 'callback' in self._topics[type][item]:
-                    try:
-                        self._mqtt_client.subscribe(self._topics[type][item]['topic'])
-                    except RuntimeError as e:
-                        self._logger.error("Caught error while subscribing to topic {}".format(item))
-                        self._logger.error(e, exc_info=True)
+        # for type in self._topics:
+        #     for item in self._topics[type]:
+        #         if 'callback' in self._topics[type][item]:
+        #             try:
+        #                 self._mqtt_client.subscribe(self._topics[type][item]['topic'])
+        #             except RuntimeError as e:
+        #                 self._logger.error("Caught error while subscribing to topic {}".format(item))
+        #                 self._logger.error(e, exc_info=True)
 
         # Send a discovery message and an online notification.
         if self._settings['homeassistant']:

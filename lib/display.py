@@ -385,7 +385,7 @@ class Display:
         self.current = b64encode(image_buffer.getvalue())
 
         # For debugging, write to a file in tmp.
-        image.save("/tmp/cobrabay-display.png", format='PNG')
+        # image.save("/tmp/cobrabay-display.png", format='PNG')
 
     @property
     def current(self):

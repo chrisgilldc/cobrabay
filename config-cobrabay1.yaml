@@ -2,49 +2,50 @@ system:
   units: imperial  # Defaults to 'metric' if set to anything other than 'imperial'.
   system_name: CobraBay1  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
   network: True  # Connect to the network at all?
+  mqtt_commands: True  # Take MQTT commands to control system and bay.
   interface: eth0  # Interface used to uplink. This will be monitored.
   homeassistant: True # Integrate with Home Assistant. If yes, will send discovery messages.
   # Logging definition
   logging:
-    console: False
+    console: True
     file: True
-#    file_path: Something
-#    syslog: Something else
+    # Can specify the path for the log file. Will default to current system_name (specified above) in the current working
+    # directory. Log rotation is NOT handled natively, use something external like logrotate.
+    # file_path: cwd/System_Name.log
     # Default level for the system. If not included, will default to WARNING.
-    default_level: warning
+    default_level: info
     # Major components can have logging levels set separately. These are:
     # bays - All bays
-    # core
+    # core - Operating core
     # detectors - All detectors
     # display - The display
     # network - The network
     # Individual detectors and bays can also be set by including their names.
-    bay1: info
 # Triggers for actions. Need to have some enabled otherwise nothing ever happens!
 triggers:
-  # External command handler intended to take direct commands from an external system, ie: Home Assistant.
-  # Bay commands require a Bay ID, System Commands don't. See documentation for details.
-  # Can only have one of these.
-  command:
-    type: mqtt_command
-    topic: cmd
   # "Sensor" monitors an MQTT topic for a topic changes. Sensors are expected to be a single
   # string, ie: "on"/"off" or "True"/"False"
   garage_door:
     type: mqtt_sensor
     bay: bay1
-    to: on
+    to: "on"
     when_triggered: occupancy
-  entry_door:
+  test:
+    topic: cobrabay/test
     type: mqtt_sensor
     bay: bay1
-    when_triggered: verify
-  # Range based triggering. If movement is detected, take an action. This requires running the range sensor continually.
-  range:
-    type: range
-    enable: true
-    detector: range
+    to: "on"
     when_triggered: occupancy
+#  entry_door:
+#    type: mqtt_sensor
+#    bay: bay1
+#    when_triggered: verify
+  # Range based triggering. If movement is detected, take an action. This requires running the range sensor continually.
+#  range:
+#    type: range
+#    enable: true
+#    detector: range
+#    when_triggered: occupancy
 
 # Settings for the display. Only one is supported! If you want to build a multi-panel display, treat it as one and do it
 # in hardware.

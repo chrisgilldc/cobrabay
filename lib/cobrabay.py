@@ -3,13 +3,14 @@
 ####
 
 import logging
-from logging.handlers import SysLogHandler
 from logging.handlers import WatchedFileHandler
-import sys
 from time import monotonic
 import atexit
 import busio
 import board
+import os
+import sys
+import psutil
 
 # Import the other CobraBay classes
 from .bay import Bay
@@ -18,13 +19,14 @@ from .display import Display
 from .detector import Lateral, Range
 from .network import Network
 from .systemhw import PiStatus
+from . import triggers
 from .version import __version__
 
 
 class CobraBay:
     def __init__(self, cmd_opts=None):
         # Register the exit handler.
-        # atexit.register(self.system_exit)
+        atexit.register(self.system_exit)
 
         # Create the master logger. All modules will hang off this.
         self._master_logger = logging.getLogger("CobraBay")
@@ -33,8 +35,6 @@ class CobraBay:
         # By default, set up console logging. This will be disabled if config file tells us to.
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.DEBUG)
-        # basic_formatter =
-        # console_handler.setFormatter(basic_formatter)
         self._master_logger.addHandler(console_handler)
         # Create a "core" logger, for just this module.
         self._logger = logging.getLogger("CobraBay").getChild("Core")
@@ -74,6 +74,7 @@ class CobraBay:
         self._logger.debug("Creating detectors...")
         # Create the detectors. This is complex enough it gets its own method.
         self._detectors = self._setup_detectors()
+        self._logger.debug("Have detectors: {}".format(self._detectors))
 
         # Create master bay object for defined docking bay
         # Master list to store all the bays.
@@ -96,11 +97,32 @@ class CobraBay:
             self._outbound_messages = self._outbound_messages + self._bays[bay_id].mqtt_messages(verify=True)
 
         # Create triggers.
-        # self._triggers = {}
-        # self._logger.debug("Creating triggers...")
-        # for trigger_id in self._cbconfig.trigger_list:
-        #    self._logger.info("Trigger ID: {}".format(trigger_id))
-        #    self._triggers[trigger_id]
+        self._triggers = self._setup_triggers()
+        self._logger.debug("Have triggers: {}".format(self._triggers))
+
+        # Parcel trigger objects out to the right place.
+        #  - MQTT triggers go to the network module,
+        #  - Range triggers go to the appropriate bay.
+        self._logger.debug("Linking triggers to modules.")
+        for trigger_id in self._triggers:
+            self._logger.debug("{} is a {} trigger".format(trigger_id,self._triggers[trigger_id].type))
+            trigger_obj = self._triggers[trigger_id]
+            # Network needs to be told about triggers that talk to MQTT.
+            if trigger_obj.type in ('syscommand', 'baycommand', 'mqtt_sensor'):
+                self._network.register_trigger(trigger_obj)
+            # Tell bays about their bay triggers.
+            if trigger_obj.type in ('baycommand'):
+                self._bays[trigger_obj.bay_id].register_trigger(trigger_obj)
+
+            # elif self._triggers[trigger_id].type == 'range':
+            #     # Make sure the desired bay exists!
+            #     try:
+            #         target_bay = self._bays[self._triggers[trigger_id].bay_id]
+            #     except KeyError:
+            #         self._logger.error("Trigger {} references non-existent bay {}. Cannot link.".
+            #                            format(trigger_id, self._bays[self._triggers[trigger_id].bay_id] ))
+            #         break
+            #     target_bay.register_trigger(self._triggers[trigger_id])
 
         # Poll to dispatch the message queue
         self._logger.debug("Initial message queue: {}".format(self._outbound_messages))
@@ -109,69 +131,57 @@ class CobraBay:
         self._outbound_messages = []
         self._logger.info('CobraBay: Initialization complete.')
 
-    # Command processor.
-    def _process_commands(self, command_stack):
-        self._logger.debug("Evaluating {} commands.".format(len(command_stack)))
-        # Might have more than one command in the stack, process each of them.
-        for command in command_stack:
-            self._logger.debug("Considering command: {}".format(command))
-            # Some commands can only run when we're *not* actively docking or undocking.
-            if self._bays[command['bay_id']] not in ('docking', 'undocking'):
-                if 'dock' in command['cmd']:
-                    self._logger.debug("Got dock command for Bay ID {}".format(command['bay_id']))
-                    self._logger.debug("Available bays: {}".format(self._bays.keys()))
-                    # try:
-                    self._motion(command['bay_id'], 'Docking')
-                    # except ValueError:
-                    #     self._logger.info("Bay command 'dock' was refused.")
-                if 'undock' in command['cmd']:
-                    try:
-                        self._motion(command['bay_id'], 'Undocking')
-                    except ValueError:
-                        self._logger.info("Bay command 'undock' was refused.")
-                    except KeyError:
-                        self._logger.info("Receved command 'dock' for unknown bay '{}'".format(command['bay_id']))
-                # Don't allow a verify when we're actually doing a motion.
-                if 'verify' in command['cmd']:
-                    self._bays[command['bay_id']].verify()
-                if 'abort' in command['cmd']:
-                    self._bays[command['bay_id']].abort()
-
+    # Common network handler, pushes data to the network and makes sure the MQTT client can poll.
     def _network_handler(self):
         # Add hardware status messages.
         self._mqtt_hw()
         # Send the outbound message queue to the network module to handle. After, we empty the message queue.
         network_data = self._network.poll(self._outbound_messages)
+        # We've pushed the message out, so reset our current outbound message queue.
         self._outbound_messages = []
-        # Check the network command queue. If there are commands, run them.
-        if len(network_data['commands']) > 0:
-            network_data['command'] = self._process_commands(network_data['commands'])
         return network_data
+
+    def _core_command(self, cmd):
+        self._logger.info("Core command received: {}".format(cmd))
+
+    # Method for checking the triggers and acting appropriately.
+    def _trigger_check(self):
+        # We pass the caller name explicitly. There's inspect-fu that could be done, but that
+        # may have portability issues.
+        for trigger_id in self._triggers.keys():
+            self._logger.debug("Checking trigger: {}".format(trigger_id))
+            trigger_obj = self._triggers[trigger_id]
+            self._logger.debug("Has trigger value: {}".format(trigger_obj.triggered))
+            if trigger_obj.triggered:
+                print("Is triggered!")
+                while trigger_obj.cmd_stack:
+                    cmd = trigger_obj.cmd_stack.pop(0)
+                    print("Trigger command: {}".format(cmd))
+                    if trigger_obj.type in ('baycommand','mqtt_sensor'):
+                        if cmd in ('dock','undock'):
+                            # Dock or undock, enter the motion routine.
+                            self._motion(trigger_obj.bay_id, cmd)
+                        elif cmd == 'abort':
+                            # On an abort, call the bay's abort. This will set it ready and clean up.
+                            # If we're in the _motion method, this will go back to run, if not, nothing happens.
+                            self._bays[trigger_obj.bay_id].abort()
+                    elif trigger_obj.type in ('syscommand'):
+                        self._core_command(cmd)
 
     # Main operating loop.
     def run(self):
         # This loop runs while the system is idle. Process commands, increment various timers.
         while True:
-            ## This was the old way of handling range triggering. Should be removed by the new trigger method.
-            ## Messages from the bay.
-            # for bay in self._bays:
-            #     # Monitor and check for a state change into docking or undocking.
-            #     self._bays[bay].monitor()
-            #     if self._bays[bay].state == 'Docking':
-            #         self._logger.info("Entering docking mode due to movement.")
-            #         self._motion(bay, None)
-            #         break  ## Exit this cycle
-            #     # Since undocking isn't fully developed, don't do this right now. But it's in here as a stud.
-            #     # elif self._bays[bay].state == 'Undocking':
-            #     #     self._logger.info("Entering undocking mode due to movement.")
-            #     #     self._undock()
-            #     self._outbound_messages = self._outbound_messages + self._bays[bay].mqtt_messages()
-            # Do a network poll, this method handles all the default outbound messages and any incoming commands.
+            # Do a network poll, this method handles all the default outbound messages and incoming status.
             network_data = self._network_handler()
             # Update the network components of the system state.
             system_status = {
                 'network': network_data['online'],
                 'mqtt': network_data['mqtt_status'] }
+
+            # Check triggers and execute actions if needed.
+            self._trigger_check()
+
             self._logger.debug("Sending system status to display: {}".format(system_status))
 
             self._display.show(system_status, "clock")
@@ -182,16 +192,23 @@ class CobraBay:
                  'message': self._display.current, 'repeat': True})
 
     # Start sensors and display to guide parking.
-    def _motion(self, bay_id, direction):
+    def _motion(self, bay_id, cmd):
+        # Convert command to a state. Should have planned this better, but didn't.
+        if cmd == 'dock':
+            direction = "Docking"
+        elif cmd == 'undock':
+            direction = "Undocking"
+        else:
+            raise ValueError("Motion command '{}' not valid.".format(cmd))
+
         self._logger.info('Beginning {} on bay {}.'.format(direction, bay_id))
 
-        # Put the bay into docking mode. The command handler will catch ValueErrors (when the bay isn't ready to dock)
-        # and KeyErrors (when the bay_id) is bad
+        # Set the bay to the proper state.
         self._bays[bay_id].state = direction
 
         # As long as the bay is in the desired state, keep running.
         while self._bays[bay_id].state == direction:
-            # Collect the MQTT messasges from the bay itself.
+            # Collect the MQTT messages from the bay itself.
             self._logger.debug("Collecting MQTT messages from bay.")
             bay_messages = self._bays[bay_id].mqtt_messages()
             self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
@@ -209,6 +226,8 @@ class CobraBay:
             self._network_handler()
             # Check for completion
             self._bays[bay_id].check_timer()
+            # Check the triggers. This lets an abort be called or an underlying system command be called.
+            self._trigger_check()
 
     # Utility method to put the hardware status on the outbound message queue. This needs to be used from a few places.
     def _mqtt_hw(self):
@@ -229,92 +248,84 @@ class CobraBay:
         self._logger.info('CobraBay: Undock not yet implemented.')
         return
 
-    # Display a message for a given amount of time.
-    def _hold_message(self, message, hold_time=120, message_color='white'):
-        mark = time.monotonic()
-        while time.monotonic() - mark < hold_time:
-            # Display completed for two minutes.
-            system_state = {'signal_strength': 5, 'mqtt_status': 'online'}
-            self._display.display_generic(system_state, message=message, message_color=message_color)
-        return
-
-    # def verify(self):
-    #     # Sweep the sensors once.
-    #     sensor_data = self._sensors.sweep()
-    #     # Calculate the bay state.
-    #     try:
-    #         self._bay.verify(sensor_data)
-    #     except OSError as e:
-    #         self._logger.debug("Bay is unavailable, cannot verify.")
-    #         return
-    #
-    #     # Append the bay state to the outbound message queue.
-    #     self._outbound_messages.append(dict(typetopic='bay_raw_sensors', message=sensor_data, repeat=True))
-    #     self._outbound_messages.append(dict(topic='bay_sensors', message=self._bay.sensors, repeat=True))
-    #     self._outbound_messages.append(dict(topic='bay_motion', message=self._bay.motion, repeat=True))
-    #     self._outbound_messages.append(dict(topic='bay_alignment', message=self._bay.alignment, repeat=True))
-    #     self._outbound_messages.append(dict(topic='bay_occupied', message=self._bay.occupied, repeat=True))
-    #     self._outbound_messages.append(dict(topic='bay_state', message=self._bay.state, repeat=True))
-
-    # Process to stop the docking or undocking process, shut down the sensors and return to the idle state.
-    # def complete_dock_undock(self):
-    #     self._logger.info('CobraBay: Beginning power down.')
-    #     # Get all the current tasks, except ourself.
-    #     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    #     # Cancel all the running coroutines. This will inherently stop all the ultrasound sensors.
-    #     for task in tasks:
-    #         task.cancel()
-    #     # Explicitly stop any vl53 sensors, which range on their own.
-    #     self._sensors.vl53('stop')
-    #     # Release the display to allow proper reinitialization later.
-    #     displayio.release_displays()
-
     def system_exit(self):
         # Wipe any previous messages. They don't matter now, we're going away!
         self._outbound_messages = []
         # Stop the ranging and close all the open sensors.
-        for bay in self._bays:
-            self._bays[bay].shutdown()
+        try:
+            for bay in self._bays:
+                self._logger.critical("Shutting down bay {}".format(bay))
+                self._bays[bay].shutdown()
+            for detector in self._detectors:
+                self._logger.critical("Shutting down detector: {}".format(detector))
+                self._detectors[detector].shutdown()
+        except AttributeError:
+            # Must be exiting before bays were defined. That's okay.
+            pass
         # Queue up outbound messages for shutdown.
+        # Marking the system as offline *should* make everything else unavailable as well, unless availability
+        # was set up incorrectly.
         self._outbound_messages.append(
             dict(
+                topic_type='system',
                 topic='device_connectivity',
-                message='offline',
+                message='Offline',
                 repeat=True
             )
         )
-        # self._outbound_messages.append(
-        #     dict(
-        #         topic='bay_state',
-        #         message='unavailable',
-        #         repeat=True
-        #     )
-        # )
-        # self._outbound_messages.append(
-        #     dict(
-        #         topic='bay_occupied',
-        #         message='unavailable',
-        #         repeat=True
-        #     )
-        # )
+        # Have the display show 'offline', then grab that and send it to the MQTT broker. This will be the image
+        # remaining when we go offline.
+        try:
+            self._display.show(system_status={ 'network': False, 'mqtt': False }, mode='message', message="OFFLINE", icons=False)
+            # Add image to the queue.
+            self._outbound_messages.append(
+                {'topic_type': 'system',
+                 'topic': 'display',
+                 'message': self._display.current, 'repeat': True})
+        except AttributeError:
+            pass
         # Call the network once. We'll ignore any commands we get.
+        self._logger.critical("Sending offline MQTT message.")
         self._network_handler()
 
     # Method to set up the detectors based on the configuration.
     def _setup_detectors(self):
-        i2c_bus = busio.I2C(board.SCL, board.SDA)
         return_dict = {}
         for detector_id in self.config['detectors']:
             self._logger.info("Creating detector: {}".format(detector_id))
             if self.config['detectors'][detector_id]['type'] == 'Range':
                 return_dict[detector_id] = Range(self._cbconfig, detector_id)
-                # This probably isn't needed anymore, let's try it without.
-                # try:
-                #     return_dict[detector_id].timing(self.config['detectors'][detector_id]['timing'])
-                # except KeyError:
-                #     return_dict[detector_id].timing('200 ms')
             if self.config['detectors'][detector_id]['type'] == 'Lateral':
                 return_dict[detector_id] = Lateral(self._cbconfig, detector_id)
+        return return_dict
+
+    def _setup_triggers(self):
+        self._logger.debug("Creating triggers...")
+        return_dict = {}
+        for trigger_id in self._cbconfig.trigger_list:
+            self._logger.info("Trigger ID: {}".format(trigger_id))
+            trigger_config = self._cbconfig.trigger(trigger_id)
+            self._logger.debug(trigger_config)
+            # Create trigger object based on type.
+            # All triggers except the system command handler will need a reference to the bay object.
+            if trigger_config['type'] is not "syscommand":
+                bay_obj = self._bays[trigger_config['bay_id']]
+            if trigger_config['type'] == 'mqtt_sensor':
+                trigger_object = triggers.MQTTSensor(trigger_config, bay_obj)
+            elif trigger_config['type'] == 'syscommand':
+                trigger_object = triggers.SysCommand(trigger_config)
+            elif trigger_config['type'] == 'baycommand':
+                # Get the bay object reference.
+                trigger_object = triggers.BayCommand(trigger_config, bay_obj)
+            elif trigger_config['type'] == 'range':
+                trigger_object = triggers.Range(trigger_config)
+            else:
+                # This case should be trapped by the config processor, but just in case, if trigger type
+                # is unknown, trap and ignore.
+                self._logger.error("Trigger {} has unknown type {}, cannot create.".
+                                   format(trigger_id, trigger_config['type']))
+                break
+            return_dict[trigger_id] = trigger_object
         return return_dict
 
     # Method to set up Logging handlers.

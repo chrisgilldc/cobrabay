@@ -13,3 +13,4 @@ PyYAML~=6.0
 gpiozero~=1.6.2
 rpi_bad_power
 pyserial~=3.5
+pid~=3.0.4
