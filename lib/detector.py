@@ -296,54 +296,64 @@ class Range(SingleDetector):
             else:
                 return 'OK'
 
-    # Based on readings, is the vehicle in motion?
+    # Determine the rate of motion being measured by the detector.
     @property
     @read_if_stale
-    def motion(self):
-        self._logger.debug("Trying to determine motion for detector: {}".format(self.name))
-        self._logger.debug("Sensor history: {}".format(self._history))
+    def _movement(self):
         # Filter out non-Quantity sensor responses. We may want to keep them for other reasons, but can't average them.
         history = []
         for entry in self._history:
             if isinstance(entry[0], Quantity):
                 history.append(entry)
+        # If we don't have at least two data points, can't measure, return none.
+        if len(history) < 2:
+            return None
+        elif history[0][0] == 'Weak':
+            return None
+        # If the sensor is reading beyond range, speed and direction can't be known, so return immediately.
+        last_element = len(history)-1
+        self._logger.debug("First history: {}".format(history[0]))
+        self._logger.debug("Last history: {}".format(history[last_element]))
+        try:
+            net_dist = self._history[0][0] - history[last_element][0]
+            net_time = Quantity(history[0][1] - history[last_element][1], 'nanoseconds').to('seconds')
+        except pint.errors.DimensionalityError:
+            # If we're trying to subtract a non-Quantity value, then return unknown for these.
+            return None
+        self._logger.debug("Moved {} in {}s".format(net_dist, net_time))
+        speed = (net_dist / net_time).to('kph')
+        # Since we've processed all this already, return all three values.
+        return {'speed': speed, 'net_dist': net_dist, 'net_time': net_time }
+
+    # Based on readings, is the vehicle in motion?
+    @property
+    @read_if_stale
+    def motion(self):
+        # Grab the movement
+        movement = self._movement
+        if movement is None:
+            return "Unknown"
+        elif abs(self._movement['net_dist']) > Quantity(self._settings['error_margin']):
+            return True
+        else:
+            return False
 
     @property
     @read_if_stale
     def vector(self):
-        # If the current reading is Weak, the door is probably open so we can't tell.
-        if self._history[0][0] == "Weak":
-            return {'speed': "Unknown", 'direction': "Unknown"}
-
-        # If the sensor is reading beyond range, speed and direction can't be known, so return immediately.
-        last_element = len(self._history)-1
-        self._logger.debug("First history: {}".format(self._history[0]))
-        self._logger.debug("Last history: {}".format(self._history[last_element]))
-        try:
-            net_dist = self._history[0][0] - self._history[last_element][0]
-            net_time = Quantity(self._history[0][1] - self._history[last_element][1], 'nanoseconds').to('seconds')
-        except pint.errors.DimensionalityError:
-            # If we're trying to subtract a non-Quantity value, then return unknown for these.
-            return {'speed': "Unknown", 'direction': "Unknown"}
-        self._logger.debug("Vector has net distance {} and net time {}".format(net_dist, net_time))
-        try:
-            speed = (net_dist / net_time).to('kph')
-        except ZeroDivisionError:
-            # If we divide by zero (ie: no net time)"
-            return {'speed': "Unknown", 'direction': "Unknown"}
-
-        # Decide if we're moving. Right now, we allow variance of up to 3 cm (1.5cm in either direction) to account
-        # for sensor wobble.
-        if net_dist > Quantity("1.5 cm"):
-            direction = 'forward'
-        elif net_dist < Quantity("-1.5 cm"):
-            # Make the speed positive, we'll report direction separately.
-            direction = 'reverse'
-            speed = speed * -1
+        # Grab the movement value.
+        movement = self._movement
+        # Determine a direction.
+        if movement is None:
+            # If movement couldn't be determined, we also can't determine vector, so this is unknown.
+            return { "speed": "Unknown", "direction": "Unknown" }
+        # Okay, not none, so has value!
+        if movement['net_dist'] > Quantity(self._settings['error_margin']):
+            return {'speed': abs(movement['speed']), 'direction': 'forward' }
+        elif movement['net_dist'] < (Quantity(self._settings['error_margin']) * -1):
+            return {'speed': abs(movement['speed']), 'direction': 'reverse' }
         else:
-            direction = 'still'
-            speed = Quantity("0 kph")
-        return {'speed': speed, 'direction': direction}
+            return {'speed': Quantity("0 kph"), 'direction': 'still' }
 
     # Gets called when the rangefinder has all settings and is being made ready for use.
     def _when_ready(self):
