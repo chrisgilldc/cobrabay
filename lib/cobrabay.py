@@ -111,8 +111,8 @@ class CobraBay:
             if trigger_obj.type in ('syscommand', 'baycommand', 'mqtt_sensor'):
                 self._network.register_trigger(trigger_obj)
             # Tell bays about their bay triggers.
-            if trigger_obj.type in ('baycommand'):
-                self._bays[trigger_obj.bay_id].register_trigger(trigger_obj)
+            #if trigger_obj.type in ('baycommand'):
+            #    self._bays[trigger_obj.bay_id].register_trigger(trigger_obj)
 
             # elif self._triggers[trigger_id].type == 'range':
             #     # Make sure the desired bay exists!
@@ -151,6 +151,9 @@ class CobraBay:
         for trigger_id in self._triggers.keys():
             self._logger.debug("Checking trigger: {}".format(trigger_id))
             trigger_obj = self._triggers[trigger_id]
+            # Range objects need to be checked explicitly. So call it!
+            if trigger_obj.type == 'range':
+                trigger_obj.check()
             self._logger.debug("Has trigger value: {}".format(trigger_obj.triggered))
             if trigger_obj.triggered:
                 while trigger_obj.cmd_stack:
@@ -308,30 +311,31 @@ class CobraBay:
     def _setup_triggers(self):
         self._logger.debug("Creating triggers...")
         return_dict = {}
+        self._logger.info("Trigger list: {}".format(self._cbconfig.trigger_list))
         for trigger_id in self._cbconfig.trigger_list:
             self._logger.info("Trigger ID: {}".format(trigger_id))
             trigger_config = self._cbconfig.trigger(trigger_id)
             self._logger.debug(trigger_config)
             # Create trigger object based on type.
             # All triggers except the system command handler will need a reference to the bay object.
-            if trigger_config['type'] != "syscommand":
-                bay_obj = self._bays[trigger_config['bay_id']]
-            if trigger_config['type'] == 'mqtt_sensor':
-                trigger_object = triggers.MQTTSensor(trigger_config, bay_obj)
-            elif trigger_config['type'] == 'syscommand':
-                trigger_object = triggers.SysCommand(trigger_config)
-            elif trigger_config['type'] == 'baycommand':
-                # Get the bay object reference.
-                trigger_object = triggers.BayCommand(trigger_config, bay_obj)
-            elif trigger_config['type'] == 'range':
-                trigger_object = triggers.Range(trigger_config)
+            if trigger_config['type'] == "syscommand":
+                return_dict[trigger_id] = triggers.SysCommand(trigger_config)
             else:
-                # This case should be trapped by the config processor, but just in case, if trigger type
-                # is unknown, trap and ignore.
-                self._logger.error("Trigger {} has unknown type {}, cannot create.".
-                                   format(trigger_id, trigger_config['type']))
-                break
-            return_dict[trigger_id] = trigger_object
+                bay_obj = self._bays[trigger_config['bay_id']]
+                if trigger_config['type'] == 'mqtt_sensor':
+                    return_dict[trigger_id] = triggers.MQTTSensor(trigger_config, bay_obj)
+                elif trigger_config['type'] == 'baycommand':
+                    # Get the bay object reference.
+                    return_dict[trigger_id] = triggers.BayCommand(trigger_config, bay_obj)
+                elif trigger_config['type'] == 'range':
+                    # Range triggers also need the detector object.
+                    return_dict[trigger_id] = triggers.Range(trigger_config, bay_obj,
+                                                             self._detectors[trigger_config['detector']])
+                else:
+                    # This case should be trapped by the config processor, but just in case, if trigger type
+                    # is unknown, trap and ignore.
+                    self._logger.error("Trigger {} has unknown type {}, cannot create.".
+                                       format(trigger_id, trigger_config['type']))
         return return_dict
 
     # Method to set up Logging handlers.
