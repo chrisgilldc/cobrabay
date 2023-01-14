@@ -81,23 +81,6 @@ class Bay:
         self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
         self.state = "Ready"
 
-    # Connect triggers.
-    def register_trigger(self, trigger_obj):
-        self._logger.debug("Registering trigger: {}".format(trigger_obj.id))
-        self._trigger_registry[trigger_obj.id] = trigger_obj
-
-    # Disconnect triggers.
-    def deregister_trigger(self, trigger_id):
-        self._logger.debug("Unregistering trigger: {}".format(trigger_id))
-        del self._trigger_registry[trigger_id]
-
-    # Currently unused trigger to check commands at the Bay level.
-    # def check_triggers(self):
-    #     for trigger in self._trigger_registry:
-    #         if self._trigger_registry[trigger].triggered:
-    #             for cmd in self._trigger_registry[trigger].next_command:
-    #                 self._logger.debug("Got command: {}".format(cmd))
-
     # Abort gets called when we want to cancel a docking.
     def abort(self):
         self.state = "Ready"
