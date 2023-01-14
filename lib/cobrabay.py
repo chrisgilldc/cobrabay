@@ -153,20 +153,21 @@ class CobraBay:
             trigger_obj = self._triggers[trigger_id]
             self._logger.debug("Has trigger value: {}".format(trigger_obj.triggered))
             if trigger_obj.triggered:
-                print("Is triggered!")
                 while trigger_obj.cmd_stack:
                     cmd = trigger_obj.cmd_stack.pop(0)
-                    print("Trigger command: {}".format(cmd))
                     if trigger_obj.type in ('baycommand','mqtt_sensor'):
                         if cmd in ('dock','undock'):
                             # Dock or undock, enter the motion routine.
                             self._motion(trigger_obj.bay_id, cmd)
+                            self._logger.debug("Returned from motion method to trigger method.")
+                            break
                         elif cmd == 'abort':
                             # On an abort, call the bay's abort. This will set it ready and clean up.
                             # If we're in the _motion method, this will go back to run, if not, nothing happens.
                             self._bays[trigger_obj.bay_id].abort()
                     elif trigger_obj.type in ('syscommand'):
                         self._core_command(cmd)
+            self._logger.debug("Trigger check complete.")
 
     # Main operating loop.
     def run(self):
@@ -181,8 +182,7 @@ class CobraBay:
 
             # Check triggers and execute actions if needed.
             self._trigger_check()
-
-            self._logger.debug("Sending system status to display: {}".format(system_status))
+            self._logger.debug("Returned to main loop from trigger check.")
 
             self._display.show(system_status, "clock")
             # Push out the image to MQTT.
@@ -228,6 +228,12 @@ class CobraBay:
             self._bays[bay_id].check_timer()
             # Check the triggers. This lets an abort be called or an underlying system command be called.
             self._trigger_check()
+        self._logger.info("Bay state changed to {}. Returning to idle.".format(self._bays[bay_id].state))
+        # Collect and send a final set of MQTT messages.
+        self._logger.debug("Collecting MQTT messages from bay.")
+        bay_messages = self._bays[bay_id].mqtt_messages()
+        self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
+        self._outbound_messages = self._outbound_messages + bay_messages
 
     # Utility method to put the hardware status on the outbound message queue. This needs to be used from a few places.
     def _mqtt_hw(self):
@@ -308,7 +314,7 @@ class CobraBay:
             self._logger.debug(trigger_config)
             # Create trigger object based on type.
             # All triggers except the system command handler will need a reference to the bay object.
-            if trigger_config['type'] is not "syscommand":
+            if trigger_config['type'] != "syscommand":
                 bay_obj = self._bays[trigger_config['bay_id']]
             if trigger_config['type'] == 'mqtt_sensor':
                 trigger_object = triggers.MQTTSensor(trigger_config, bay_obj)

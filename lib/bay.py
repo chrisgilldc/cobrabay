@@ -173,6 +173,7 @@ class Bay:
             self._logger.debug("No motion found, checking for dock timer expiry.")
             # No motion, check for completion
             if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
+                self._logger.info("Dock timer has expired and no motion found. Returning to ready.")
                 # Set self back to ready.
                 self.state = 'Ready'
 
@@ -374,7 +375,9 @@ class Bay:
                     'quality': self._quality[lateral_detector],
                 }
 
-                if self._detectors[lateral_detector].side == 'Not Intercepted':
+                if self._position[lateral_detector] is None:
+                    detector_dict['side'] = 'None'
+                elif self._detectors[lateral_detector].side == 'Not Intercepted':
                     detector_dict['side'] = "DND"
                 else:
                     # This is a little confusing. The detector side is relative to the bay, ie: looking out from the range
