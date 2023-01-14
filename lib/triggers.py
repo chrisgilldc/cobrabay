@@ -12,9 +12,6 @@ class Trigger:
         # Initialize command stack.
         self._cmd_stack = []
 
-    def check(self, data):
-        raise NotImplemented("Check method should be overridden a subclass.")
-
     # Flag to enable quick boolean checks if there are waiting commands.
     @property
     def triggered(self):
@@ -194,14 +191,33 @@ class MQTTSensor(MQTTTrigger):
         return self._bay_obj.bay_id
 
 class Range(Trigger):
-    def __init__(self, config, bay_obj):
+    def __init__(self, config, bay_obj, detector_obj):
         super().__init__(config)
-        raise NotImplementedError("Nope!")
 
         # Store the bay object reference.
-        # self._bay_obj = bay_obj
+        self._bay_obj = bay_obj
+
+        # Store the detector object reference.
+        self._detector_obj = detector_obj
+
+    def check(self):
+        if self._detector_obj.motion:
+            self._trigger_action()
+
+    def _trigger_action(self):
+        # If action is supposed to be occupancy determined, check the bay.
+        if self._settings['when_triggered'] == 'occupancy':
+            if self._bay_obj.occupied == 'Occupied':
+                # If bay is occupied, vehicle must be leaving.
+                self._cmd_stack.append('undock')
+            elif self._bay_obj.occupied == 'Unoccupied':
+                # Bay is unoccupied, so vehicle approaching.
+                self._cmd_stack.append('dock')
+        else:
+            # otherwise drop the action through.
+            self._cmd_stack.append(self._settings['when_triggered'])
 
     # Bay ID this trigger is linked to.
     @property
     def bay_id(self):
-        return self._settings['bay_id']
+        return self._bay_obj.bay_id
