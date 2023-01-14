@@ -6,6 +6,7 @@ import sys
 import yaml
 from pathlib import Path
 from pint import Quantity
+from pprint import pformat
 
 
 class CBConfig:
@@ -45,6 +46,7 @@ class CBConfig:
         else:
             self._logger.info("Config file validated. Loading.")
             # We're good, so assign the staging to the real config.
+            self._logger.debug(pformat(validated_yaml))
             self._config = validated_yaml
 
     @property
@@ -83,7 +85,7 @@ class CBConfig:
         staging_yaml['system'] = self._validate_system(staging_yaml['system'])
         # If MQTT Commands are enabled, create that trigger config. Will be picked up by the core.
         if staging_yaml['system']['mqtt_commands']:
-            self._logger.info("Enabling MQTT Command processor.")
+            self._logger.info("Enabling MQTT Command processors.")
             try:
                 staging_yaml['triggers']['sys_cmd'] = { 'type': 'syscommand' }
             except TypeError:
@@ -346,11 +348,11 @@ class CBConfig:
             'name': self._config['detectors'][detector_id]['name'],
             'sensor': self._config['detectors'][detector_id]['sensor']
         }
+
         # Initialize required setting values so they exist. This is required so readiness can be checked.
         # If they're defined in the config, great, use those values, otherwise initialize as None.
-
         if self._config['detectors'][detector_id]['type'].lower() == 'range':
-            required_settings = ['offset', 'bay_depth', 'spread_park', 'pct_warn', 'pct_crit']
+            required_settings = ['offset', 'bay_depth', 'spread_park', 'pct_warn', 'pct_crit', 'error_margin']
         elif self._config['detectors'][detector_id]['type'].lower() == 'lateral':
             required_settings = ['offset', 'spread_ok', 'spread_warn', 'side']
         else:
