@@ -415,12 +415,13 @@ class CBConfig:
             # Make sure either to or from is defined, but not both.
             if all(key in self._config['triggers'][trigger_id] for key in ('to', 'from')):
                 raise ValueError("Trigger {} has both 'to' and 'from' options set, can only use one.")
-            elif self._config['triggers'][trigger_id]['to']:
-                config_dict['trigger_value'] = self._config['triggers'][trigger_id]['to']
-                config_dict['change_type'] = 'to'
-            elif self._config['triggers'][trigger_id]['from']:
-                config_dict['trigger_value'] = self._config['triggers'][trigger_id]['from']
-                config_dict['change_type'] = 'from'
+            else:
+                try:
+                    config_dict['trigger_value'] = self._config['triggers'][trigger_id]['to']
+                    config_dict['change_type'] = 'to'
+                except KeyError:
+                    config_dict['trigger_value'] = self._config['triggers'][trigger_id]['from']
+                    config_dict['change_type'] = 'from'
 
         # Check the when_triggered options for both mqtt_sensor and range triggers.
         if config_dict['type'] in ('mqtt_sensor', 'range'):
