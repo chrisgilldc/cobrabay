@@ -162,6 +162,7 @@ class MQTTSensor(MQTTTrigger):
     def callback(self, client, userdata, message):
         # Convert to a flat string
         message_text = str(message.payload, 'utf-8').lower()
+        print("MQTT Sensor trigger caught message: {}".format(message_text))
 
         # Check the message text against our trigger value.
         # For 'to' type, previous value doesn't matter, just check it!
@@ -169,8 +170,14 @@ class MQTTSensor(MQTTTrigger):
             if message_text == self._settings['trigger_value']:
                 self._trigger_action()
         elif self._settings['change_type'] == 'from':
-            if self._previous_value == self._settings['trigger_value'] & message_text != self._settings['trigger_value']:
+            if (
+                    (self._previous_value is None and message_text != self._settings['trigger_value'])
+                    or
+                    (self._previous_value == self._settings['trigger_value'] and message_text != self._settings['trigger_value'])
+            ):
                 self._trigger_action()
+            else:
+            # Always save the most-recently seen value as the 'previous value'
             self._previous_value = message_text
 
     def _trigger_action(self):
