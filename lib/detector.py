@@ -211,10 +211,13 @@ class SingleDetector(Detector):
         self.deactivate()
 
     # Debugging methods to let the main system know a few things about the attached sensor.
-
     @property
     def sensor_type(self):
         return type(self._sensor_obj)
+
+    @property
+    def status(self):
+        return self._sensor_obj.status
 
     @property
     def sensor_interface(self):
