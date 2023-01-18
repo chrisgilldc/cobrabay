@@ -148,6 +148,12 @@ class CB_VL53L1X(I2CSensor):
             if item not in sensor_options:
                 raise ValueError("Required board_option '{}' missing".format(item))
 
+        # The library doesn't store its ranging state itself, so we have to do this ourselves.
+        self._ranging = False
+
+        # Use this flag to mark a sensor as faulty during operation without tanking the whole system.
+        self._fault = False
+
         # Define the enable pin.
         self._enable_pin = None
         self._enable_attempt_counter = 0
@@ -186,10 +192,20 @@ class CB_VL53L1X(I2CSensor):
         self._sensor_obj.stop_ranging()
 
     def start_ranging(self):
-        self._sensor_obj.start_ranging()
+        try:
+            self._sensor_obj.start_ranging()
+        except:
+            raise
+        else:
+            self._ranging = True
 
     def stop_ranging(self):
-        self._sensor_obj.stop_ranging()
+        try:
+            self._sensor_obj.stop_ranging()
+        except:
+            raise
+        else:
+            self._ranging = False
 
     # Enable the sensor.
     def enable(self):
@@ -205,8 +221,13 @@ class CB_VL53L1X(I2CSensor):
             self._enable_attempt_counter = self._enable_attempt_counter + 1
             self._logger.debug("Sensor enabled but not yet ready on attempt {}.".format(self._enable_attempt_counter))
             if self._enable_attempt_counter == 3:
-                raise e
+                self._logger.error("Sensor reached enable failure limit. This is likely a hardware error that will "
+                                   "need physical intervention.")
+                self._logger.error("Marking faulty. Exception follows.")
+                self._logger.error(e, exc_info=True)
+                self._fault = True
             else:
+                self.disable()
                 self.enable()
         else:
             # Create the sensor object with the default address of 0x29
@@ -360,6 +381,25 @@ class CB_VL53L1X(I2CSensor):
         # Stop from ranging
         self.stop_ranging()
 
+    # Generalized method to get the status. Can return one of five states:
+    # 'enabled' - board is on but not ranging.
+    # 'disabled' - board is off.
+    # 'ranging' - board is on and actively ranging.
+    # 'fault' - sensor has been marked as having a fault.
+    @property
+    def status(self):
+        if self._fault is True:
+            return 'fault'
+        else:
+            if self.enable_pin is True:
+                if self._ranging is True:
+                    return 'ranging'
+                else:
+                    return 'enabled'
+            elif self.enable_pin is False:
+                return 'disabled'
+            else:
+                return 'fault'
 
 class TFMini(SerialSensor):
     def __init__(self, sensor_options):
@@ -413,3 +453,9 @@ class TFMini(SerialSensor):
         self._logger.debug("Took {} cycles in {}s to get stable reading of {}.".
                            format(i, round(monotonic() - start, 2), previous_read))
         return previous_read
+
+    # Status of the sensor. The TFMini *always* ranges if it's connected and powered.
+    # For debugging, this is just being hard-wired as 'ranging'. More handling to come later.
+    @property
+    def status(self):
+        return 'ranging'
