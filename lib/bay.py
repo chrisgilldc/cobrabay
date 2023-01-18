@@ -303,19 +303,9 @@ class Bay:
                               'message': self._detectors[self._settings['detectors']['selected_range']].vector,
                               'repeat': True,
                               'topic_mappings': {'bay_id': self.bay_id}}]
-        # Positions for all the detectors.
-        for detector in self._detectors.keys():
-            outbound_messages.append(
-                {'topic_type': 'bay',
-                 'topic': 'bay_position',
-                 'message': {
-                     'adjusted_reading': self._detectors[detector].value,
-                     'raw_reading': self._detectors[detector].value_raw
-                 },
-                 'repeat': True,
-                 'topic_mappings': {'bay_id': self.bay_id, 'detector_id': self._detectors[detector].id}
-                 }
-            )
+
+        # Add detector values, if applicable.
+        outbound_messages = outbound_messages + self._detector_status()
 
         if self._dock_timer['mark'] is None:
             message = 'Not running'
@@ -330,6 +320,30 @@ class Bay:
         )
         self._logger.debug("Have compiled outbound messages. {}".format(outbound_messages))
         return outbound_messages
+
+    def _detector_status(self):
+        return_list = []
+        # Positions for all the detectors.
+        for detector in self._detectors.keys():
+            # Template detector message, to get filled in.
+            detector_message = {'topic_type': 'bay', 'topic': 'bay_position',
+                                'message': {
+                                    'status': self._detectors[detector].status
+                                },
+                                'repeat': False,
+                                'topic_mappings': {'bay_id': self.bay_id, 'detector_id': self._detectors[detector].id }
+                                }
+
+            # If the detector is actively ranging, add the values.
+            if self._detectors[detector].status == 'ranging':
+                    detector_message['message']['adjusted_reading'] = self._detectors[detector].value
+                    detector_message['message']['raw_reading'] = self._detectors[detector].value_raw
+                    # While ranging, always send values to MQTT, even if they haven't changed.
+                    detector_message['repeat'] = True
+            # Add the detector to the return list.
+            self._logger.info("Adding detector message status: {}".format(detector_message))
+            return_list.append(detector_message)
+        return return_list
 
     # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
     def display_data(self):
