@@ -176,7 +176,6 @@ class MQTTSensor(MQTTTrigger):
                     (self._previous_value == self._settings['trigger_value'] and message_text != self._settings['trigger_value'])
             ):
                 self._trigger_action()
-            else:
             # Always save the most-recently seen value as the 'previous value'
             self._previous_value = message_text
 
