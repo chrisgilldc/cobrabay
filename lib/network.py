@@ -6,7 +6,7 @@
 
 import logging
 from json import dumps as json_dumps
-from json import loads as json_loads
+#from json import loads as json_loads
 import time
 
 # from getmac import get_mac_address
@@ -285,14 +285,18 @@ class Network:
                         'payload_not_available': 'Not running'
                     }
                 },
-                # # This is a generic callback that will work for all bays.
-                # 'bay_command': {
-                #     'topic': 'cobrabay/' + self._client_id + '/+/cmd',
-                #     'ha_discovery': {
-                #         'type': 'select'
-                #     },
-                #     'callback': self._cb_bay_command
-                #}
+                # Set up the command selector
+                'bay_command': {
+                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/cmd',
+                    'ha_discovery': {
+                        'name': '{0[bay_name]} Command',
+                        'type': 'select',
+                        'entity': '{0[bay_id]}_command',
+                        'options': "['Dock', 'Undock', 'Verify', 'Abort']",
+                        'command_template': "{% if value == 'Dock' %}dock{% elif value == 'Undock' %}undock{% elif value == 'Verify' %}verify{% elif value == 'Abort' %}abort{% endif %}",
+                        'value_template': "{% if value == 'dock' %}Dock{% elif value == 'undock' %}Undock{% elif value == 'verify' %}Verify{% elif value == 'abort' %}Abort{% endif %}"
+                    },
+                }
             }
         }
         self._logger.info('Network: Initialization complete.')
@@ -607,7 +611,7 @@ class Network:
         bay_name = self._bay_registry[bay_id]['bay_name']
         self._logger.debug("Have registry data: {}".format(self._bay_registry[bay_id]))
         # Create the single entities. There's one of these per bay.
-        for entity in ('bay_occupied','bay_state', 'bay_speed', 'bay_motion', 'bay_dock_time'):
+        for entity in ('bay_occupied','bay_state', 'bay_speed', 'bay_motion', 'bay_dock_time', 'bay_command'):
             self._ha_create(topic_type='bay',
                             topic_name=entity,
                             fields={'bay_id': bay_id, 'bay_name': bay_name})
@@ -652,11 +656,13 @@ class Network:
         config_dict['device'] = self._device_info
 
         optional_params = (
+            'command_template',
             'device_class',
             'image_encoding',
             'icon',
             'json_attributes_topic',
             'unit_of_measurement',
+            'options',
             'payload_on',
             'payload_off',
             'payload_not_available',
