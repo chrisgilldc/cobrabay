@@ -198,8 +198,12 @@ class CB_VL53L1X(I2CSensor):
             raise
         else:
             self._ranging = True
+            # Reset the previous reseting and previous timestamp. This is used for sensor pacing.
+            self._previous_reading = None
+            self._previous_timestamp = monotonic()
 
     def stop_ranging(self):
+        print("Trying to stop ranging on sensor object.")
         try:
             self._sensor_obj.stop_ranging()
         except:
@@ -219,7 +223,7 @@ class CB_VL53L1X(I2CSensor):
             # If the OS doesn't give us permissions, udev might still be setting things up.
             # Try up to three times, then raise the exception again.
             self._enable_attempt_counter = self._enable_attempt_counter + 1
-            self._logger.debug("Sensor enabled but not yet ready on attempt {}.".format(self._enable_attempt_counter))
+            self._logger.warning("Sensor enabled but not yet ready on attempt {}.".format(self._enable_attempt_counter))
             if self._enable_attempt_counter == 3:
                 self._logger.error("Sensor reached enable failure limit. This is likely a hardware error that will "
                                    "need physical intervention.")
@@ -236,7 +240,10 @@ class CB_VL53L1X(I2CSensor):
             self._sensor_obj.set_address(self._i2c_address)
 
     def disable(self):
+        print("Setting enable pin to false.")
         self.enable_pin.value = False
+        # Also set the internal ranging variable to false, since by definition, when the board gets killed, we stop ranging.
+        self._ranging = False
 
     @property
     def timing_budget(self):
@@ -269,9 +276,13 @@ class CB_VL53L1X(I2CSensor):
 
     @property
     def range(self):
-        # Make sure to pace the readings properly, so we're not over-running the native readings.
-        # If a request comes in before the sleep time (200ms), return the previous reading.
-        if monotonic() - self._previous_timestamp < 0.2:
+        print("Range method found sensor status: {}".format(self.status))
+        if self.status != 'ranging':
+            # Return 'No Reading' if the board isn't actively ranging, since, duh.
+            return 'No reading'
+        elif monotonic() - self._previous_timestamp < 0.2:
+            # Make sure to pace the readings properly, so we're not over-running the native readings.
+            # If a request comes in before the sleep time (200ms), return the previous reading.
             return self._previous_reading
         else:
             try:
@@ -391,12 +402,12 @@ class CB_VL53L1X(I2CSensor):
         if self._fault is True:
             return 'fault'
         else:
-            if self.enable_pin is True:
+            if self.enable_pin.value is True:
                 if self._ranging is True:
                     return 'ranging'
                 else:
                     return 'enabled'
-            elif self.enable_pin is False:
+            elif self.enable_pin.value is False:
                 return 'disabled'
             else:
                 return 'fault'
