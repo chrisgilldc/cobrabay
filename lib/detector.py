@@ -118,7 +118,6 @@ class Detector:
 
     # Value will return the adjusted reading from the sensor.
     @property
-    @read_if_stale
     def value(self):
         raise NotImplementedError
 
@@ -203,12 +202,22 @@ class SingleDetector(Detector):
 
     # Called when the system needs to go into idle mode and turn the sensor off.
     def deactivate(self):
+        print("Calling sensor object's stop_ranging method.")
         self._sensor_obj.stop_ranging()
+
+    # Complete turn the sensor on or off using its enable pin.
+    def enable(self):
+        self._sensor_obj.enable()
+
+    def disable(self):
+        self._logger.warning("Setting sensor enable pin to false.")
+        self._sensor_obj.disable()
 
     # Called *only* when the system is exiting. This is currently an alias for deactivating, but other types
     # of hardware may need other behavior, ie: freeing devices.
     def shutdown(self):
         self.deactivate()
+        self.disable()
 
     # Debugging methods to let the main system know a few things about the attached sensor.
     @property
