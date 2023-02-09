@@ -2,10 +2,9 @@ paho-mqtt~=1.6.1
 rpi-rgb-led-matrix
 pint~=0.19.2
 rgbmatrix~=0.0.1
-getmac~=0.8.3
-VL53L1X~=0.0.5
 smbus2~=0.4.2
 adafruit-circuitpython-aw9523
+adafruit-circuitpython-vl53l1x
 logging~=0.4.9.6
 psutil~=5.9.1
 pillow~=9.2.0
@@ -14,3 +13,4 @@ gpiozero~=1.6.2
 rpi_bad_power
 pyserial~=3.5
 pid~=3.0.4
+PyYAML>=6.0
