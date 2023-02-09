@@ -212,7 +212,7 @@ class Bay:
                                format(self._quality[self._settings['detectors']['selected_range']]))
             return False
         if self._quality[self._settings['detectors']['selected_range']] in (
-        'Emergency!', 'Back up', 'Park', 'Final', 'Base'):
+                'Emergency!', 'Back up', 'Park', 'Final', 'Base'):
             # If the detector is giving us any of the 'close enough' qualities, there's something being found that
             # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
             # the sensors or whatnot
@@ -331,15 +331,16 @@ class Bay:
                                     'status': self._detectors[detector].status
                                 },
                                 'repeat': False,
-                                'topic_mappings': {'bay_id': self.bay_id, 'detector_id': self._detectors[detector].id }
+                                'topic_mappings': {'bay_id': self.bay_id, 'detector_id': self._detectors[detector].id}
                                 }
 
             # If the detector is actively ranging, add the values.
+            self._logger.debug("Detector has status: {}".format(self._detectors[detector].status))
             if self._detectors[detector].status == 'ranging':
-                    detector_message['message']['adjusted_reading'] = self._detectors[detector].value
-                    detector_message['message']['raw_reading'] = self._detectors[detector].value_raw
-                    # While ranging, always send values to MQTT, even if they haven't changed.
-                    detector_message['repeat'] = True
+                detector_message['message']['adjusted_reading'] = self._detectors[detector].value
+                detector_message['message']['raw_reading'] = self._detectors[detector].value_raw
+                # While ranging, always send values to MQTT, even if they haven't changed.
+                detector_message['repeat'] = True
             # Add the detector to the return list.
             self._logger.info("Adding detector message status: {}".format(detector_message))
             return_list.append(detector_message)
