@@ -120,17 +120,17 @@ class TFMP:
         temp = (temp >> 3) - 256
 
         # Check for unusual states and flag those.
-        if dist == -1 or flux < 100:
+        if dist == 65535 or flux < 100:
             status = "Weak"
-        elif flux == -1:
+        elif dist == 65534 or flux == 65535:
             status = "Saturation"
-        elif dist == -4:
+        elif dist == 65532:
             status = "Flood"
         else:
             status = "OK"
 
         # If we're using pint Quantities, wrap as quantities.
-        if self._use_pint:
+        if self._use_pint and status == "OK":
             dist = pint.Quantity(dist,"cm").to(self._unit_length)
             temp = pint.Quantity(temp, "celsius").to(self._unit_temp)
         return_data = TFMP_data(status, dist, flux, temp)
