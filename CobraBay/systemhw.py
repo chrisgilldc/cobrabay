@@ -11,7 +11,7 @@ from gpiozero import CPUTemperature
 from pint import UnitRegistry
 from rpi_bad_power import new_under_voltage
 
-class PiStatus:
+class CBPiStatus:
     def __init__(self):
         self._ureg = UnitRegistry()
         self._ureg.define('percent = 1 / 100 = %')

@@ -17,7 +17,7 @@ from .util import Convertomatic
 from .version import __version__
 
 
-class Network:
+class CBNetwork:
     def __init__(self, config):
         # Get our settings.
         self._reconnect_timestamp = None
@@ -33,13 +33,6 @@ class Network:
         self._logger_mqtt.setLevel(config.get_loglevel('mqtt'))
         if self._logger_mqtt.level != self._logger.level:
             self._logger.info("MQTT Logging level set to {}".format(self._logger_mqtt.level))
-
-        try:
-            from secrets import secrets
-            self.secrets = secrets
-        except ImportError:
-            self._logger.error('No secrets file, cannot get connection details.')
-            raise
 
         # Create a convertomatic instance.
         self._cv = Convertomatic(self._settings['units'])
@@ -71,21 +64,21 @@ class Network:
             client_id=""
         )
         self._mqtt_client.username_pw_set(
-            username=self.secrets['username'],
-            password=self.secrets['password']
+            username=self._settings['mqtt']['username'],
+            password=self._settings['mqtt']['password']
         )
         # Send MQTT logging to the network logger.
         # self._mqtt_client.enable_logger(self._logger)
         # MQTT host to connect to.
-        self._mqtt_host = self.secrets['broker']
+        self._mqtt_host = self._settings['mqtt']['broker']
         # If port is set, us that.
         try:
-            self._mqtt_port = self.secrets['port']
+            self._mqtt_port = self._settings['mqtt']['port']
         except:
             self._mqtt_port = 1883
 
-        # Set TLS options.
-        if 'tls' in self.secrets:
+        # Set TLS options. Not currently supported, this is a stud.
+        if 'tls' in self._settings['mqtt']:
             pass
 
         # Connect callback.
@@ -97,7 +90,7 @@ class Network:
         self._topics = {
             'system': {
                 'device_connectivity': {
-                    'topic': 'cobrabay/' + self._client_id + '/connectivity',
+                    'topic': 'CobraBay/' + self._client_id + '/connectivity',
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
@@ -110,7 +103,7 @@ class Network:
                     }
                 },
                 'cpu_pct': {
-                    'topic': 'cobrabay/' + self._client_id + '/cpu_pct',
+                    'topic': 'CobraBay/' + self._client_id + '/cpu_pct',
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
@@ -122,7 +115,7 @@ class Network:
                     }
                 },
                 'cpu_temp': {
-                    'topic': 'cobrabay/' + self._client_id + '/cpu_temp',
+                    'topic': 'CobraBay/' + self._client_id + '/cpu_temp',
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
@@ -134,7 +127,7 @@ class Network:
                     }
                 },
                 'mem_info': {
-                    'topic': 'cobrabay/' + self._client_id + '/mem_info',
+                    'topic': 'CobraBay/' + self._client_id + '/mem_info',
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
@@ -144,11 +137,11 @@ class Network:
                         'value_template': "{{{{ value_json.mem_pct }}}}",
                         'unit_of_measurement': '%',
                         'icon': 'mdi:memory',
-                        'json_attributes_topic': 'cobrabay/' + self._client_id + '/mem_info'
+                        'json_attributes_topic': 'CobraBay/' + self._client_id + '/mem_info'
                     }
                 },
                 'undervoltage': {
-                    'topic': 'cobrabay/' + self._client_id + '/undervoltage',
+                    'topic': 'CobraBay/' + self._client_id + '/undervoltage',
                     'previous_state': {},
                     'ha_discovery': {
                         'name': '{} Undervoltage'.format(self._settings['system_name']),
@@ -160,13 +153,13 @@ class Network:
                     }
                 },
                 # 'device_command': {
-                #     'topic': 'cobrabay/' + self._client_id + '/cmd',
+                #     'topic': 'CobraBay/' + self._client_id + '/cmd',
                 #     'enabled': False,
                 #     'callback': self._cb_device_command
                 #     # May eventually do discovery here to create selectors, but not yet.
                 # },
                 'display': {
-                    'topic': 'cobrabay/' + self._client_id + '/display',
+                    'topic': 'CobraBay/' + self._client_id + '/display',
                     'previous_state': {},
                     'ha_discovery': {
                         'name': '{} Display'.format(self._settings['system_name']),
@@ -179,7 +172,7 @@ class Network:
             },
             'bay': {
                 'bay_occupied': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/occupancy',
+                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/occupancy',
                     'previous_state': 'Unknown',
                     'ha_discovery': {
                         'name': '{0[bay_name]} Occupied',
@@ -192,7 +185,7 @@ class Network:
                     }
                 },
                 'bay_state': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/state',
+                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/state',
                     'previous_state': None,
                     'ha_discovery': {
                         'name': '{0[bay_name]} State',
@@ -201,7 +194,7 @@ class Network:
                     }
                 },
                 'bay_laterals': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/{0[lateral]/display',
+                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/{0[lateral]/display',
                     'previous_state': {},
                     'ha_discovery': {
                         'name': '{0[bay_name]} {0[lateral]} Display',
@@ -212,7 +205,7 @@ class Network:
                 },
                 # Adjusted readings from the sensors.
                 # 'bay_position': {
-                #     'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/position',
+                #     'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/position',
                 #     'previous_state': None,
                 #     'ha_discovery': {
                 #         'name': '{0[bay_name]} Detector Position: {0[detector_name]}',
@@ -224,7 +217,7 @@ class Network:
                 #     }
                 # },
                 'bay_position': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/{0[detector_id]}',
+                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/{0[detector_id]}',
                     'previous_state': None,
                     'ha_discovery': {
                         'name': '{0[bay_name]} Detector Position: {0[detector_name]}',
@@ -233,12 +226,12 @@ class Network:
                         'value_template': '{{{{ value_json.adjusted_reading }}}}',
                         'unit_of_measurement': self._uom('length'),
                         'icon': 'mdi:ruler',
-                        'json_attributes_topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/{0[detector_id]}'
+                        'json_attributes_topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/{0[detector_id]}'
                     }
                 },
                 # How good the parking job is.
                 'bay_quality': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/quality',
+                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/quality',
                     'previous_state': None,
                     'enabled': True,
                     'ha_discovery': {
@@ -250,7 +243,7 @@ class Network:
                     }
                 },
                 'bay_speed': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/vector',
+                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/vector',
                     'previous_state': None,
                     'ha_discovery': {
                         'name': '{0[bay_name]} Speed',
@@ -263,7 +256,7 @@ class Network:
                 },
                 # Motion binary sensor. Keys off the 'direction' value in the Vector topic.
                 'bay_motion': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/vector',
+                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/vector',
                     'previous_state': 'Unknown',
                     'enabled': True,
                     'ha_discovery': {
@@ -275,7 +268,7 @@ class Network:
                     }
                 },
                 'bay_dock_time': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/dock_time',
+                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/dock_time',
                     'previous_state': None,
                     'ha_discovery': {
                         'name': '{0[bay_name]} Time Until Docked',
@@ -287,7 +280,7 @@ class Network:
                 },
                 # Set up the command selector
                 'bay_command': {
-                    'topic': 'cobrabay/' + self._client_id + '/{0[bay_id]}/cmd',
+                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/cmd',
                     'ha_discovery': {
                         'name': '{0[bay_name]} Command',
                         'type': 'select',
@@ -323,7 +316,7 @@ class Network:
         self._trigger_registry[trigger_obj.id] = trigger_obj
         self._logger.debug("Stored trigger object {}".format(trigger_obj.id))
         # Add the MQTT Prefix to use to the object. Triggers set to override this will just ignore it.
-        trigger_obj.topic_prefix = "cobrabay/" + self._client_id
+        trigger_obj.topic_prefix = "CobraBay/" + self._client_id
         # Since it's possible we're already connected to MQTT, we call subscribe here separately.
         self._trigger_subscribe(trigger_obj.id)
 
@@ -684,7 +677,7 @@ class Network:
             config_dict['payload_not_available'] = self._topics['system']['device_connectivity']['ha_discovery']['payload_off']
 
         # Configuration topic to which we'll send this configuration. This is based on the entity type and entity ID.
-        config_topic = "homeassistant/{}/cobrabay-{}/{}/config".\
+        config_topic = "homeassistant/{}/CobraBay-{}/{}/config".\
             format(config_dict['type'],
                    self._client_id,
                    config_dict['object_id'])

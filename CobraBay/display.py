@@ -17,7 +17,7 @@ import math
 ureg = UnitRegistry()
 
 
-class Display:
+class CBDisplay:
     def __init__(self, config):
         # Get a logger!
         self._logger = logging.getLogger("CobraBay").getChild("Display")
@@ -109,7 +109,7 @@ class Display:
                     # Put this in the right place in the lookup.
                     self._layers[bay_id][lateral][side][status[0]] = img
                     # Write for debugging
-                    # img.save("/tmp/cobrabay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
+                    # img.save("/tmp/CobraBay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
                     del(draw)
                     del(img)
             # Now add the height of this bar to the accumulated height, to get the correct start for the next time.
@@ -385,7 +385,7 @@ class Display:
         self.current = b64encode(image_buffer.getvalue())
 
         # For debugging, write to a file in tmp.
-        # image.save("/tmp/cobrabay-display.png", format='PNG')
+        # image.save("/tmp/CobraBay-display.png", format='PNG')
 
     @property
     def current(self):

@@ -4,11 +4,12 @@
 import time
 from pint import UnitRegistry, Quantity
 from time import monotonic
-from .detector import CB_VL53L1X
+from .detectors import CB_VL53L1X
 import logging
 from pprint import pformat
 from functools import wraps
-
+import sys
+from .exceptions import SensorValueException
 
 # Scan the detectors if we're asked for a property that needs a fresh can and we haven't scanned recently enough.
 def scan_if_stale(func):
@@ -33,18 +34,53 @@ def scan_if_stale(func):
     return wrapper
 
 
-class Bay:
-    def __init__(self, bay_id, config, detectors):
-        # Get our settings.
-        self._settings = config.bay(bay_id)
+class CBBay:
+    def __init__(self, bay_id,
+                 bay_name,
+                 bay_depth,
+                 stop_point,
+                 park_time,
+                 output_unit,
+                 detectors,
+                 detector_settings,
+                 log_level="DEBUG"):
+        """
+        :param bay_id: ID for the bay. Cannot have spaces.
+        :type bay_id: str
+        :param bay_name: Long "friendly" name for the Bay, used in MQTT messages
+        :type bay_name: str
+        :param bay_depth: Absolute distance of the bay, from the range sensor to the end. Must be a linear Quantity.
+        :type bay_depth: Quantity
+        :param stop_point: Distance from the sensor where the vehicle should stop
+        :type stop_point: Quantity
+        :param park_time: int
+        :param output_unit: Unit to output measurements in. Should be a distance unit understood by Pint (ie: 'in', 'cm', etc)
+        :type output_unit: str
+        :param detectors: Dictionary of detectors to use.
+        :type detectors: dict
+        :param detector_settings: Dictionary of detector configuration settings.
+        :type detector_settings: dict
+        :param log_level: Log level for the bay, must be a Logging level.
+        :type log_level: str
+        """
+        # Save parameters
+        self._bay_id = bay_id
+        self._bay_name = bay_name
+        self._bay_depth = bay_depth
+        self._stop_point = stop_point
+        self._park_time = park_time
+        self._output_unit = output_unit
+        self._detectors = detectors
+        self._detector_settings = detector_settings
         # Create a logger.
         self._logger = logging.getLogger("CobraBay").getChild(self.bay_id)
-        self._logger.setLevel(config.get_loglevel(bay_id))
+        self._logger.setLevel(log_level)
+        self._logger.info("Initializing bay: {}".format(bay_id))
+        self._logger.debug("Bay received detectors: {}".format(detectors))
 
         # Initialize variables.
         self._position = {}
         self._quality = {}
-        self._detectors = {}
         self._trigger_registry = {}
         self._previous_scan_ts = 0
         self._state = None
@@ -53,7 +89,6 @@ class Bay:
         # Log our initialization.
         self._logger.info("Bay '{}' initializing...".format(self.bay_id))
         self._logger.info("Bay has settings:")
-        self._logger.info(pformat(self._settings))
         # Create a unit registry.
         self._ureg = UnitRegistry
 
@@ -170,7 +205,12 @@ class Bay:
         quality = {}
         # Check all the detectors.
         for detector_name in self._detectors:
-            position[detector_name] = self._detectors[detector_name].value
+            try:
+                position[detector_name] = self._detectors[detector_name].value
+            except SensorValueException:
+                # For now, pass. Need to add logic here to actually set the overall bay status.
+                pass
+
             quality[detector_name] = self._detectors[detector_name].quality
             self._logger.debug("Read of detector {} returned value '{}' and quality '{}'".
                                format(self._detectors[detector_name].name, position[detector_name],
@@ -459,28 +499,28 @@ class Bay:
 
     @property
     def bay_id(self):
-        return self._settings['bay_id']
+        return self._bay_id
 
     @bay_id.setter
     def bay_id(self, input):
-        self._settings['bay_id'] = input
+        self._bay_id = input
 
     @property
     def bay_name(self):
-        return self._settings['bay_name']
+        return self._bay_name
 
     @bay_name.setter
     def bay_name(self, input):
-        self._settings['bay_name'] = input
+        self._bay_name = input
 
     # Apply specific config options to the detectors.
     def _setup_detectors(self):
         # For each detector we use, apply its properties.
         self._logger.debug("Detectors: {}".format(self._detectors.keys()))
-        for dc in self._settings['detectors']['settings'].keys():
+        for dc in self._detector_settings.keys():
             self._logger.debug("Configuring detector {}".format(dc))
-            self._logger.debug("Settings: {}".format(self._settings['detectors']['settings'][dc]))
-            for item in self._settings['detectors']['settings'][dc]:
+            self._logger.debug("Settings: {}".format(self._detector_settings[dc]))
+            for item in self._detector_settings[dc]:
                 self._logger.debug(
-                    "Setting property {} to {}".format(item, self._settings['detectors']['settings'][dc][item]))
-                setattr(self._detectors[dc], item, self._settings['detectors']['settings'][dc][item])
+                    "Setting property {} to {}".format(item, self._detector_settings[dc][item]))
+                setattr(self._detectors[dc], item, self._detector_settings[dc][item])

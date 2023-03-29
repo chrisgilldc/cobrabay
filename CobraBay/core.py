@@ -11,39 +11,49 @@ import atexit
 # import os
 # import sys
 # import psutil
+from pprint import pformat
+
+import CobraBay
 
 # Import the other CobraBay classes
-from .bay import Bay
-from .config import CBConfig
-from .display import Display
-from .detector import Lateral, Range
-from .network import Network
-from .systemhw import PiStatus
-from . import triggers
-from .version import __version__
+#from CobraBay.bay import Bay
+#from CobraBay.config import CBConfig
+#from CobraBay.display import Display
+# from CobraBay.detectors import Lateral, Range
+# #from CobraBay.network import CBNetwork
+# from CobraBay.sensors import CB_VL53L1X
+# # from CobraBay.systemhw import CBPiStatus
+# from . import triggers
+# from CobraBay.version import __version__
+import sys
 
 
-class CobraBay:
-    def __init__(self, cmd_opts=None):
+class CBCore:
+    def __init__(self, config_obj):
         # Register the exit handler.
         atexit.register(self.system_exit)
 
-        # Create the master logger. All modules will hang off this.
+        # Get the master handler. This may have already been started by the command line invoker.
         self._master_logger = logging.getLogger("CobraBay")
         # Set the master logger to Debug, so all other messages will pass up through it.
         self._master_logger.setLevel(logging.DEBUG)
-        # By default, set up console logging. This will be disabled if config file tells us to.
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.DEBUG)
-        self._master_logger.addHandler(console_handler)
+        # If console handler isn't already on the master logger, add it by default. Will be removed later if the
+        # config tells us to.
+        if not len(self._master_logger.handlers):
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.DEBUG)
+            self._master_logger.addHandler(console_handler)
         # Create a "core" logger, for just this module.
         self._logger = logging.getLogger("CobraBay").getChild("Core")
 
         # Initial startup message.
-        self._logger.info("CobraBay {} initializing...".format(__version__))
+        self._logger.info("CobraBay {} initializing...".format(CobraBay.__version__))
 
-        # Create a config object.
-        self._cbconfig = CBConfig(reset_sensors=True)
+        if not isinstance(config_obj,CobraBay.CBConfig):
+            raise TypeError("CobraBay core must be passed a CobraBay Config object (CBConfig).")
+        else:
+            # Save the passed CBConfig object.
+            self._cbconfig = config_obj
 
         # Update the logging handlers.
         self._setup_logging_handlers(self._cbconfig.log_handlers())
@@ -56,12 +66,12 @@ class CobraBay:
 
         # Create the object for checking hardware status.
         self._logger.debug("Creating Pi hardware monitor...")
-        self._pistatus = PiStatus()
+        self._pistatus = CobraBay.CBPiStatus()
 
         # Create the network object.
         self._logger.debug("Creating network object...")
         # Create Network object.
-        self._network = Network(config=self._cbconfig)
+        self._network = CobraBay.CBNetwork(config=self._cbconfig)
         self._logger.info('Connecting to network...')
         # Connect to the network.
         self._network.connect()
@@ -82,10 +92,13 @@ class CobraBay:
         self._logger.debug("Creating bays...")
         for bay_id in self._cbconfig.bay_list:
             self._logger.info("Bay ID: {}".format(bay_id))
-            self._bays[bay_id] = Bay(bay_id, self._cbconfig, self._detectors)
+            bay_config = self._cbconfig.bay(bay_id)
+            self._logger.debug("Bay config:")
+            self._logger.debug(pformat(bay_config))
+            self._bays[bay_id] = CobraBay.CBBay(**bay_config, detectors=self._detectors)
 
         self._logger.info('CobraBay: Creating display...')
-        self._display = Display(self._cbconfig)
+        self._display = CobraBay.CBDisplay(self._cbconfig)
 
         # Register the bay with the network and display.
         for bay_id in self._bays:
@@ -134,7 +147,7 @@ class CobraBay:
     # Common network handler, pushes data to the network and makes sure the MQTT client can poll.
     def _network_handler(self):
         # Add hardware status messages.
-        self._mqtt_hw()
+        self._outbound_messages.extend(self._mqtt_hw())
         # Send the outbound message queue to the network module to handle. After, we empty the message queue.
         network_data = self._network.poll(self._outbound_messages)
         # We've pushed the message out, so reset our current outbound message queue.
@@ -240,18 +253,20 @@ class CobraBay:
 
     # Utility method to put the hardware status on the outbound message queue. This needs to be used from a few places.
     def _mqtt_hw(self):
-        self._outbound_messages.append(
+        hw_messages = []
+        hw_messages.append(
             {'topic_type': 'system', 'topic': 'cpu_pct', 'message': self._pistatus.status('cpu_pct'), 'repeat': False})
-        self._outbound_messages.append(
+        hw_messages.append(
             {'topic_type': 'system', 'topic': 'cpu_temp', 'message': self._pistatus.status('cpu_temp'),
              'repeat': False})
-        self._outbound_messages.append(
+        hw_messages.append(
             {'topic_type': 'system', 'topic': 'mem_info', 'message': self._pistatus.status('mem_info'),
              'repeat': False})
-        self._outbound_messages.append(
+        hw_messages.append(
             {'topic_type': 'system', 'topic': 'undervoltage', 'message': self._pistatus.status('undervoltage'),
              'repeat': False}
         )
+        return hw_messages
 
     def undock(self):
         self._logger.info('CobraBay: Undock not yet implemented.')
@@ -302,10 +317,14 @@ class CobraBay:
         return_dict = {}
         for detector_id in self.config['detectors']:
             self._logger.info("Creating detector: {}".format(detector_id))
-            if self.config['detectors'][detector_id]['type'] == 'Range':
-                return_dict[detector_id] = Range(self._cbconfig, detector_id)
-            if self.config['detectors'][detector_id]['type'] == 'Lateral':
-                return_dict[detector_id] = Lateral(self._cbconfig, detector_id)
+            detector_config = self._cbconfig.detector(detector_id)
+            if detector_config['type'] == 'range':
+                self._logger.debug("Setting up Range detector with settings: {}".format(detector_config))
+                return_dict[detector_id] = CobraBay.detectors.Range(**detector_config)
+            if detector_config['type'] == 'lateral':
+                self._logger.debug("Setting up Lateral detector with settings: {}".format(detector_config))
+                return_dict[detector_id] = CobraBay.detectors.Lateral(**detector_config)
+        self._logger.debug("VL53LX instances: {}".format(len(CobraBay.sensors.CB_VL53L1X.instances)))
         return return_dict
 
     def _setup_triggers(self):
@@ -319,17 +338,17 @@ class CobraBay:
             # Create trigger object based on type.
             # All triggers except the system command handler will need a reference to the bay object.
             if trigger_config['type'] == "syscommand":
-                return_dict[trigger_id] = triggers.SysCommand(trigger_config)
+                return_dict[trigger_id] = CobraBay.triggers.SysCommand(trigger_config)
             else:
                 bay_obj = self._bays[trigger_config['bay_id']]
                 if trigger_config['type'] == 'mqtt_sensor':
-                    return_dict[trigger_id] = triggers.MQTTSensor(trigger_config, bay_obj)
+                    return_dict[trigger_id] = CobraBay.triggers.MQTTSensor(trigger_config, bay_obj)
                 elif trigger_config['type'] == 'baycommand':
                     # Get the bay object reference.
-                    return_dict[trigger_id] = triggers.BayCommand(trigger_config, bay_obj)
+                    return_dict[trigger_id] = CobraBay.triggers.BayCommand(trigger_config, bay_obj)
                 elif trigger_config['type'] == 'range':
                     # Range triggers also need the detector object.
-                    return_dict[trigger_id] = triggers.Range(trigger_config, bay_obj,
+                    return_dict[trigger_id] = CobraBay.triggers.Range(trigger_config, bay_obj,
                                                              self._detectors[trigger_config['detector']])
                 else:
                     # This case should be trapped by the config processor, but just in case, if trigger type

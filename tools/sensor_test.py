@@ -1,40 +1,21 @@
-import board
-import busio
-from adafruit_vl53l1x import VL53L1X
-import time
-from pint import Quantity
-from statistics import mean
+#!/usr/bin/python3
 
-test_time = "5 minutes"
-sensor_address = 0x30
-timing_budget = 200
+import argparse
+import pathlib
+import sys
 
-####
-# Nothing to change down here.
-####
+parser = argparse.ArgumentParser(
+    prog='sensor_test',
+    description='CobraBay Sensor Tester'
+)
 
-# Set up I2C Access
-i2c = busio.I2C(board.SCL, board.SDA)
+parser.add_argument('-c', '--config', default='config.yaml', help='Location of the CobraBay config file.')
+parser.add_argument('-l', '--lib', default='/home/pi/CobraBay/', help='Path to the CobraBay library directory.')
+args = parser.parse_args()
+print(args)
+# Add the library to the python path. We're assuming this isn't installed at the system level.
+sys.path.append(args.lib)
+# Import and create a CobraBay config object.
+from CobraBay.config import CBConfig
 
-# Create the sensor.
-sensor = VL53L1X(i2c, sensor_address)
-sensor.timing_budget = timing_budget
-sensor.start_ranging()
-
-# Convert test time into seconds
-test_time = Quantity(test_time).to('seconds').magnitude
-test_start = time.monotonic()
-
-readings = []
-
-while time.monotonic() - test_start < test_time:
-    reading = sensor.distance
-    print("Read: {}".format(reading))
-    readings.append(reading)
-    time.sleep(timing_budget/1000)
-
-print("All readings: {}".format(readings))
-reading_avg = mean(readings)
-reading_min = min(readings)
-reading_max = max(readings)
-print("Reading stats\n\tMin: {}\tMax: {}\tMean: {}".format(reading_min, reading_max, reading_avg))
+config = CBConfig(args.config)

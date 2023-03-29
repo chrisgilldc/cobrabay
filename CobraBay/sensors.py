@@ -15,14 +15,11 @@ from .tfmp import TFMP
 from pathlib import Path
 from pprint import pformat
 import sys
+import CobraBay.exceptions
 
 
 class BaseSensor:
-    def __init__(self, sensor_options, required):
-        self._settings = {}
-        for item in required:
-            if item not in sensor_options:
-                raise ValueError("Required sensor_option '{}' missing.".format(item))
+    def __init__(self, logger, log_level='WARNING'):
 
         # Create a unit registry for the object.
         self._ureg = UnitRegistry()
@@ -31,33 +28,34 @@ class BaseSensor:
         self._previous_timestamp = monotonic()
         self._previous_reading = None
 
-        # Sensor should call this init and then extend with its own options.
-        # super().__init__(board_options)
-
     @property
     def range(self):
         raise NotImplementedError("Range should be overridden by specific sensor class.")
 
+    # Base methods, should be overridden.
+    def start_ranging(self):
+        return
+
+    def stop_ranging(self):
+        return
 
 class I2CSensor(BaseSensor):
-    def __init__(self, sensor_options):
-        required = ('i2c_bus', 'i2c_address')
+    def __init__(self, i2c_bus, i2c_address, logger, log_level='WARNING'):
         try:
-            super().__init__(sensor_options, required)
+            super().__init__(logger, log_level)
         except ValueError:
             raise
         # Check for the Base I2C Sensors
         # Create a logger
-        self._name = "{}-{}-{}".format(type(self).__name__, sensor_options['i2c_bus'],
-                                       hex(sensor_options['i2c_address']))
+        self._name = "{}-{}-{}".format(type(self).__name__, i2c_bus, hex(i2c_address))
         self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
         self._logger.setLevel("DEBUG")
         self._logger.info("Initializing sensor...")
 
         # Set the I2C bus and I2C Address
         self._logger.debug("Setting I2C Properties...")
-        self.i2c_bus = sensor_options['i2c_bus']
-        self.i2c_address = sensor_options['i2c_address']
+        self.i2c_bus = i2c_bus
+        self.i2c_address = i2c_address
         self._logger.debug("Now have I2C Bus {} and Address {}".format(self.i2c_bus, hex(self.i2c_address)))
 
         # How many times, in the lifetime of the sensor, have we hit a fault.
@@ -65,7 +63,13 @@ class I2CSensor(BaseSensor):
         # Set if the sensor hit a fault, recovered, but hasn't yet succeeded in re-reading. If it faults *again*, bomb.
         self._last_chance = False
 
-    # Global properties. Since all supported sensors are I2C at the moment, these can be global.
+    # Global properties.
+
+    @property
+    def name(self):
+        """ Sensor Name, derived from type, bus, address. """
+        return self._name
+
     @property
     def i2c_bus(self):
         return self._i2c_bus
@@ -82,7 +86,7 @@ class I2CSensor(BaseSensor):
         return self._i2c_address
 
     @i2c_address.setter
-    # Stores the address of the board. Does *not* necesarially apply it to the board to update it.
+    # Stores the address of the board. Does *not* necessarily apply it to the board to update it.
     def i2c_address(self, i2c_address):
         # If it's in "0xYY" format, convert it to a base 16 int.
         if isinstance(i2c_address, str):
@@ -92,23 +96,28 @@ class I2CSensor(BaseSensor):
 
 
 class SerialSensor(BaseSensor):
-    def __init__(self, sensor_options):
-        required = ('port', 'baud')
+    def __init__(self, port, baud, logger, log_level='WARNING'):
+        """
+        :type baud: int
+        :type logger: str
+        """
         try:
-            super().__init__(sensor_options, required)
+            super().__init__(logger, log_level)
         except ValueError:
             raise
         # Create a logger
-        self._name = "{}-{}".format(type(self).__name__, sensor_options['port'])
+        self._name = "{}-{}".format(type(self).__name__, port)
         self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
         self._logger.info("Initializing sensor...")
         self._logger.setLevel("WARNING")
-        self.serial_port = sensor_options['port']
-        self.baud_rate = sensor_options['baud']
+        self._serial_port = None
+        self._baud_rate = None
+        self.serial_port = port
+        self.baud_rate = baud
 
     @property
     def serial_port(self):
-        return self._settings['serial_port']
+        return self._serial_port
 
     @serial_port.setter
     def serial_port(self, target_port):
@@ -118,18 +127,22 @@ class SerialSensor(BaseSensor):
             port_path = Path("/dev/" + target_port)
         # Make sure the path is a device we can access.
         if port_path.is_char_device():
-            self._settings['serial_port'] = str(port_path)
+            self._serial_port = str(port_path)
         else:
             raise ValueError("{} is not an accessible character device.".format(str(port_path)))
 
     @property
     def baud_rate(self):
-        return self._settings['baud_rate']
+        return self._baud_rate
 
     @baud_rate.setter
     def baud_rate(self, target_rate):
-        self._settings['baud_rate'] = target_rate
+        self._baud_rate = target_rate
 
+    @property
+    def name(self):
+        """ Sensor name, type-port """
+        return self._name
 
 class CB_VL53L1X(I2CSensor):
     _i2c_address: int
@@ -137,16 +150,22 @@ class CB_VL53L1X(I2CSensor):
 
     instances = weakref.WeakSet()
 
-    def __init__(self, sensor_options):
-        # Call super.
-        super().__init__(sensor_options)
-        # Check for additional required options.
+    def __init__(self, i2c_bus, i2c_address, enable_board, enable_pin, timing, logger, distance_mode ="long", log_level="WARNING"):
+        """
+        :type i2c_bus: int
+        :type i2c_address: hex
+        :type enable_board: str
+        :type enable_pin: str
+        :type logger: str
+        :type log_level: str
+        """
+
+        try:
+            super().__init__(i2c_bus=i2c_bus, i2c_address=i2c_address, logger=logger, log_level=log_level)
+        except ValueError:
+            raise
+
         self._sensor_obj = None
-        required = ['i2c_bus', 'i2c_address', 'enable_board', 'enable_pin']
-        # Store the options.
-        for item in required:
-            if item not in sensor_options:
-                raise ValueError("Required board_option '{}' missing".format(item))
 
         # The library doesn't store its ranging state itself, so we have to do this ourselves.
         self._ranging = False
@@ -175,17 +194,17 @@ class CB_VL53L1X(I2CSensor):
             raise
 
         # Set the properties
-        self.enable_board = sensor_options['enable_board']
-        self.enable_pin = sensor_options['enable_pin']
-        self.i2c_bus = sensor_options['i2c_bus']
-        self.i2c_address = sensor_options['i2c_address']
+        self.enable_board = enable_board
+        self.enable_pin = enable_pin
+        # self.i2c_bus = i2c_bus
+        # self.i2c_address = i2c_address
         # Enable self.
         self.enable()
 
         # Start ranging.
         self._sensor_obj.start_ranging()
         # Set the timing.
-        self.measurement_time = Quantity(sensor_options['timing']).to('microseconds').magnitude
+        self.measurement_time = Quantity(timing).to('microseconds').magnitude
         self.distance_mode = 'long'
         self._previous_reading = self._sensor_obj.distance
         self._logger.debug("Test reading: {}".format(self._previous_reading))
@@ -412,9 +431,14 @@ class CB_VL53L1X(I2CSensor):
             else:
                 return 'fault'
 
+
 class TFMini(SerialSensor):
-    def __init__(self, sensor_options):
-        super().__init__(sensor_options)
+    def __init__(self, port, baud, logger, log_level="WARNING"):
+        try:
+            super().__init__(port=port, baud=baud, logger=logger, log_level=log_level)
+        except ValueError:
+            raise
+
         self._performance = {
             'max_range': Quantity('12m'),
             'min_range': Quantity('0.3m')
@@ -423,7 +447,10 @@ class TFMini(SerialSensor):
         # Create the sensor object.
         self._logger.debug("Creating TFMini object on serial port {}".format(self.serial_port))
         self._sensor_obj = TFMP(self.serial_port, self.baud_rate)
-        self._logger.debug("Test reading: {}".format(self.range))
+        try:
+            self._logger.debug("Test reading: {}".format(self.range))
+        except CobraBay.exceptions.SensorValueException as e:
+            self._logger.warning("During sensor setup, received abnormal reading '{}'.".format(e.status))
 
     # This sensor doesn't need an enable, do nothing.
     @staticmethod
@@ -446,7 +473,7 @@ class TFMini(SerialSensor):
             self._previous_timestamp = monotonic()
             return self._previous_reading
         else:
-            return reading.status
+            raise CobraBay.exceptions.SensorValueException(status=reading.status)
 
     # When this was tested in I2C mode, the TFMini could return unstable answers, even at rest. Unsure if
     # this is still true in serial mode, keeping this clustering method for the moment.

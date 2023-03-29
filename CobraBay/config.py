@@ -2,18 +2,19 @@
 # Cobra Bay - Config Loader
 ####
 import logging
+import os.path
 import sys
 import yaml
 from pathlib import Path
 from pint import Quantity
 from pprint import pformat
+import importlib
 
 
 class CBConfig:
     def __init__(self, config_file=None, reset_sensors=False):
         self._config = None
         self._logger = logging.getLogger("CobraBay").getChild("Config")
-        self._logger.info("Processing config...")
 
         # Initialize the internal config file variable
         self._config_file = None
@@ -22,7 +23,7 @@ class CBConfig:
             Path('/etc/cobrabay/config.yaml'),
             Path.cwd().joinpath('config.yaml')
         ]
-        if config_file is not None:
+        if isinstance(config_file,Path):
             search_paths.insert(0, Path(config_file))
 
         for path in search_paths:
@@ -31,7 +32,7 @@ class CBConfig:
             except:
                 pass
         if self._config_file is None:
-            raise ValueError("Cannot find valid config file! Attempted: {}".format(search_paths))
+            raise ValueError("Cannot find valid config file! Attempted: {}".format([str(i) for i in search_paths]))
         # Load the config file. This does validation as well!
         self.load_config()
 
@@ -46,6 +47,8 @@ class CBConfig:
         else:
             self._logger.info("Config file validated. Loading.")
             # We're good, so assign the staging to the real config.
+            print("Loaded config...")
+            print(pformat(validated_yaml))
             self._logger.debug(pformat(validated_yaml))
             self._config = validated_yaml
 
@@ -99,7 +102,7 @@ class CBConfig:
 
     # Validate the system section.
     def _validate_system(self, system_config):
-        valid_keys = ('units', 'system_name', 'network', 'mqtt_commands', 'interface', 'homeassistant', 'logging')
+        valid_keys = ('units', 'system_name', 'mqtt', 'mqtt_commands', 'interface', 'homeassistant', 'logging')
         required_keys = ('system_name', 'interface')
         # Remove any key values that aren't valid.
         for actual_key in system_config:
@@ -225,7 +228,15 @@ class CBConfig:
         config_dict['gpio_slowdown'] = self._config['display']['matrix']['gpio_slowdown']
         config_dict['mqtt_image'] = self._config['display']['mqtt_image']
         config_dict['mqtt_update_interval'] = Quantity(self._config['display']['mqtt_update_interval'])
-        config_dict['core_font'] = 'fonts/OpenSans-Light.ttf'
+        # Default font is the packaged-in OpenSans Light.
+        with importlib.resources.path("CobraBay.data", 'OpenSans-Light.ttf') as p:
+            core_font_path = p
+        self._logger.debug("Using default font at path: {}".format(core_font_path))
+        config_dict['core_font'] = str(core_font_path)
+        # If the font is defined and exists, use that.
+        if 'font' in self._config['display']:
+            if os.path.isfile(self._config['display']['font']):
+                config_dict['core_font'] = self._config['display']['font']
         return config_dict
 
     # Return a settings dict to be used for the Network module.
@@ -238,6 +249,18 @@ class CBConfig:
         except KeyError:
             config_dict['homeassistant'] = False
         config_dict['interface'] = self._config['system']['interface']
+        # Check for MQTT definition
+        if 'mqtt' not in self._config['system'].keys():
+            raise ValueError("MQTT must be defined in system block.")
+        elif not isinstance(self._config['system']['mqtt'],dict):
+            raise TypeError("MQTT definition must be a dictionary of values.")
+        else:
+            required_keys = ['broker','port','username','password']
+            for rk in required_keys:
+                if rk not in self._config['system']['mqtt']:
+                    raise ValueError("Required key '{}' not in system MQTT definition".format(rk))
+            # Should be good, pull it over.
+            config_dict['mqtt'] = self._config['system']['mqtt']
         return config_dict
 
     def bay(self, bay_id):
@@ -247,13 +270,11 @@ class CBConfig:
         # Initialize the config dict. Include the bay ID, and default to metric.
         config_dict = {
             'bay_id': bay_id,
-            'unit_system': 'metric',
             'output_unit': 'm'
         }
-        # If Imperial is defined, set that.
+        # If Imperial is defined, bay should output in inches.
         try:
             if self._config['system']['units'].lower() == 'imperial':
-                config_dict['unit_system'] = 'imperial'
                 config_dict['output_unit'] = 'in'
         except KeyError:
             pass
@@ -267,30 +288,12 @@ class CBConfig:
         # How long there should be no motion until we consider the bay to be parked. Convert to seconds and take out
         # magnitude.
         config_dict['park_time'] = Quantity(self._config['bays'][bay_id]['park_time']).to('second').magnitude
-        # Actual bay depth.
+        # Actual bay depth, from the range sensor to the garage door.
         config_dict['bay_depth'] = Quantity(self._config['bays'][bay_id]['bay_depth']).to('cm')
-        # Adjust the bay depth by the offset.
-        config_dict['adjusted_depth'] = Quantity(config_dict['bay_depth']) - Quantity(
-            self._config['bays'][bay_id]['longitudinal']['defaults']['offset']).to('cm')
+        # Stop point, the distance from the sensor to the point where the vehicle should stop.
+        config_dict['stop_point'] = Quantity(self._config['bays'][bay_id]['stop_point']).to('cm')
 
-        # Get the defined defaults for detectors
-        defaults = {'lateral': {}, 'longitudinal': {}}
-        detector_options = {
-            'longitudinal': ('offset', 'bay_depth', 'spread_park'),
-            'lateral': ('offset', 'spread_ok', 'spread_warn', 'side', 'intercept')
-        }
-        for direction in ('lateral', 'longitudinal'):
-            for item in detector_options[direction]:
-                try:
-                    defaults[direction][item] = self._config['bays'][bay_id][direction]['defaults'][item]
-                except KeyError:
-                    pass
-
-        self._logger.debug("Assembled Longitudinal defaults: {}".format(defaults['longitudinal']))
-        self._logger.debug("Assembled Lateral defaults: {}".format(defaults['lateral']))
-
-        config_dict['detectors'] = {}
-        config_dict['detectors'] = {
+        config_dict['detector_settings'] = {
             'selected_range': None,
             'settings': {},
             'intercepts': {},
@@ -298,43 +301,42 @@ class CBConfig:
             'lateral': []
 
         }
-        # Create the actual detector configurations.
+        # Create the detector configuration for the bay.
+        # Each bay applies bay-specific options to a detector when it initializes.
         for direction in ('longitudinal', 'lateral'):
+            # Pull the defaults as a base. Otherwise, it's an empty dict.
+            try:
+                direction_defaults = self._config['bays'][bay_id][direction]['defaults']
+            except KeyError:
+                direction_defaults = {}
             for detector in self._config['bays'][bay_id][direction]['detectors']:
-                # Build the detector config for this detector. Check the config file for overrides first, then use
-                # defaults. If we can't do either, then raise an error.
-                detector_config = {}
-                for config_item in detector_options[direction]:
-                    try:
-                        detector_config[config_item] = detector[config_item]
-                    except KeyError:
-                        # No detector_specific option. Try to use the default.
-                        try:
-                            detector_config[config_item] = defaults[direction][config_item]
-                        except KeyError:
-                            # Couldn't find this either. That's a problem!
-                            raise
+                self._logger.debug("Processing bay-specific config for detector {}".format(detector))
+                # Merge the dicts. The union will combine keys, and use common keys from detector specific config.
+                self._logger.debug("Using defaults for detector: {} ({})".format(direction_defaults, type(direction_defaults)))
+                self._logger.debug(
+                    "Using detector-specific config for detector: {} ({})".format(detector, type(detector)))
+                detector_config = dict( direction_defaults.items() | detector.items() )
                 self._logger.debug("Assembled detector config: {}".format(detector_config))
                 # Store the settings.
-                config_dict['detectors']['settings'][detector['detector']] = detector_config
+                config_dict['detector_settings']['settings'][detector['detector']] = detector_config
                 # Save the name in the right place.
                 if direction == 'longitudinal':
-                    config_dict['detectors']['longitudinal'].append(detector['detector'])
+                    config_dict['detector_settings']['longitudinal'].append(detector['detector'])
 
                 # Lateral detectors have an intercept distance.
                 if direction == 'lateral':
-                    config_dict['detectors']['lateral'].append(detector['detector'])
+                    config_dict['detector_settings']['lateral'].append(detector['detector'])
                     try:
-                        config_dict['detectors']['intercepts'][detector['detector']] = Quantity(detector['intercept'])
+                        config_dict['detector_settings']['intercepts'][detector['detector']] = Quantity(detector['intercept'])
                     except KeyError as ke:
                         raise Exception('Lateral detector {} does not have intercept distance defined!'
                                         .format(detector['detector'])) from ke
 
             # Pick a range sensor to use as 'primary'.
-            if config_dict['detectors']['selected_range'] is None:
+            if config_dict['detector_settings']['selected_range'] is None:
                 # If there's only one longitudinal detector, that's the one to use for range.
-                if len(config_dict['detectors']['longitudinal']) == 1:
-                    config_dict['detectors']['selected_range'] = config_dict['detectors']['longitudinal'][0]
+                if len(config_dict['detector_settings']['longitudinal']) == 1:
+                    config_dict['detector_settings']['selected_range'] = config_dict['detector_settings']['longitudinal'][0]
         return config_dict
 
     # Config dict for a detector.
@@ -344,28 +346,62 @@ class CBConfig:
             raise KeyError("No configuration defined for detector '{}'".format(detector_id))
         # Assemble the config dict
         config_dict = {
-            'id': detector_id,
+            'detector_id': detector_id,
             'name': self._config['detectors'][detector_id]['name'],
-            'sensor': self._config['detectors'][detector_id]['sensor']
+            'type': self._config['detectors'][detector_id]['type'].lower(),
+            'sensor_type': self._config['detectors'][detector_id]['sensor']['type'],
+            'sensor_settings': self._config['detectors'][detector_id]['sensor']
         }
 
-        # Initialize required setting values so they exist. This is required so readiness can be checked.
-        # If they're defined in the config, great, use those values, otherwise initialize as None.
-        if self._config['detectors'][detector_id]['type'].lower() == 'range':
-            required_settings = ['offset', 'bay_depth', 'spread_park', 'pct_warn', 'pct_crit', 'error_margin']
-        elif self._config['detectors'][detector_id]['type'].lower() == 'lateral':
-            required_settings = ['offset', 'spread_ok', 'spread_warn', 'side']
-        else:
-            raise ValueError("Detector {} has unknown type.".format(detector_id))
+        # Add the logger to the sensor settings, so the sensor can log directly.
+        config_dict['sensor_settings']['logger'] = 'CobraBay.sensors'
+        del config_dict['sensor_settings']['type']
 
-        # The required settings list is stored in settings itself, so it can be used by the check_ready decorator.
-        config_dict['required'] = required_settings
-
-        for required_setting in required_settings:
+        # Optional parameters if included.
+        if config_dict['type'] == 'range':
             try:
-                config_dict[required_setting] = self._config['detectors'][detector_id][required_setting]
+                config_dict['error_margin'] = self._config['detectors'][detector_id]['error_margin']
             except KeyError:
-                config_dict[required_setting] = None
+                config_dict['error_margin'] = Quantity("0 cm")
+        elif config_dict['type'] == 'lateral':
+            pass
+        # # Initialize required setting values so they exist. This is required so readiness can be checked.
+        # # If they're defined in the config, great, use those values, otherwise initialize as None.
+        # if self._config['detectors'][detector_id]['type'].lower() == 'range':
+        #     required_settings = ['offset', 'spread_park', 'pct_warn', 'pct_crit']
+        #     fallback_defaults = {
+        #         'offset': Quantity("0 cm"),
+        #         'spread_park': Quantity("2 in"),
+        #         'pct_warn': 90,
+        #         'pct_crit': 95
+        #     }
+        # elif self._config['detectors'][detector_id]['type'].lower() == 'lateral':
+        #     required_settings = ['offset', 'spread_ok', 'spread_warn', 'side']
+        #     fallback_defaults = {
+        #         'offset': Quantity("0 cm"),
+        #         'spread_ok': Quantity("1 in"),
+        #         'spread_warn': Quantity("3 in"),
+        #         'side': None
+        #     }
+        # else:
+        #     raise ValueError("Detector {} has unknown type.".format(detector_id))
+        #
+        # for required_setting in required_settings:
+        #     try:
+        #         config_dict['sensor_settings'][required_setting] = self._config['detectors'][detector_id][required_setting]
+        #     except KeyError:
+        #         try:
+        #             config_dict[required_setting] = self._config['detectors']['defaults'][required_setting]
+        #             self._logger.warning("For {} assigned setting '{}' default value '{}'".
+        #                                  format(detector_id, required_setting,
+        #                                         self._config['detectors']['defaults'][required_setting]))
+        #         except KeyError:
+        #             if fallback_defaults[required_setting] is None:
+        #                 self._logger.critical("Setting '{}' not configured for detector '{}', and has no default. "
+        #                                       "Must be set! Cannot continue.".format(required_setting, detector_id))
+        #             else:
+        #                 config_dict['sensor_settings'][required_setting] = fallback_defaults[required_setting]
+        #
 
         self._logger.debug("Returning config: {}".format(config_dict))
         return config_dict

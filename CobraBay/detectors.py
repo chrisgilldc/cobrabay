@@ -4,16 +4,20 @@
 import pint.errors
 
 from .sensors import CB_VL53L1X, TFMini, I2CSensor, SerialSensor
+# Import all the CobraBay Exceptions.
+from .exceptions import CobraBayException, SensorValueException
 from pint import UnitRegistry, Quantity, DimensionalityError
 from time import monotonic_ns
 from functools import wraps
 import logging
 from collections import namedtuple
 
+
 # Decorator method to check if a method is ready.
 def check_ready(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
+        print("Checking for readiness via function: {}".format(func))
         # Call the function.
         func(self, *args, **kwargs)
         # Now check for readiness and set ready if we are.
@@ -29,8 +33,6 @@ def check_ready(func):
 
 # Use this decorator on any method that shouldn't be usable if the detector isn't marked ready. IE: don't let
 # a value be read if the sensor isn't completely set up.
-
-
 def only_if_ready(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -44,8 +46,6 @@ def only_if_ready(func):
 
 
 # Decorate these methods to have methods check the value history before doing another hit on the sensor.
-
-
 def use_value_cache(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -70,13 +70,11 @@ def use_value_cache(func):
 
 # This decorator is used for methods that rely on sensor data. If the sensor data is determined to be stale, it will
 # trigger a new sensor read prior to executing the method.
-
-
 def read_if_stale(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         read_sensor = False
-        # If
+        # Assume we shouldn't read the sensor.
         if len(self._history) > 0:
             # Time difference between now and the most recent read.
             time_delta = monotonic_ns() - self._history[0][1]
@@ -84,35 +82,38 @@ def read_if_stale(func):
                 read_sensor = True
         # If we have no history, ie: at startup, go ahead and read.
         else:
-            read_sensor = True
-
+            read_sensor = True  ## If there's no history, read the sensor, we must be on startup.
         # If flag is set, read the sensor and put its value into the history.
         if read_sensor:
-            value = self._sensor_obj.range
+            try:
+                value = self._sensor_obj.range
+            except BaseException as e:
+                # Save an exception into the history, we'll process this later.
+                value = e
             self._logger.debug("Triggered sensor reading. Got: {}".format(value))
             # Add value to the history and truncate history to ten records.
             self._history.insert(0, (value, monotonic_ns()))
             self._history = self._history[:10]
-
-        # Send whichever value it is into the function.
+        # Call the wrapped function.
         return func(self)
 
     return wrapper
 
 
 class Detector:
-    def __init__(self, config_obj, detector_id):
-        # Request the settings dict from the config object.
-        self._settings = config_obj.detector(detector_id)
+    def __init__(self, detector_id, name, offset="0 cm", log_level="WARNING", **kwargs):
+        # Save parameters.
+        self._detector_id = detector_id
+        self._name = name
         # Create a logger.
-        self._logger = logging.getLogger("CobraBay").getChild("Detector").getChild(self._settings['name'])
-        self._logger.setLevel(config_obj.get_loglevel(detector_id,mod_type='detector'))
+        self._logger = logging.getLogger("CobraBay").getChild("Detector").getChild(self._name)
+        self._logger.setLevel(log_level)
         # A unit registry
         self._ureg = UnitRegistry()
         # Is the detector ready for use?
         self._ready = False
         # Measurement offset. We start this at zero, even though that's probably ridiculous!
-        self._offset = Quantity("0 cm")
+        self._offset = Quantity(offset)
         # List to keep the history of sensor readings. This is used for some methods.
         self._history = []
 
@@ -176,17 +177,19 @@ class Detector:
 # Single Detectors add wrappers around a single sensor. Sensor arrays are not currently supported, but may be in the
 # future.
 class SingleDetector(Detector):
-    def __init__(self, config_obj, detector_id):
-        super().__init__(config_obj, detector_id)
-        self._logger.debug("Creating sensor object using options: {}".format(self._settings['sensor']))
-        if self._settings['sensor']['type'] == 'VL53L1X':
+    def __init__(self, sensor_type, sensor_settings, **kwargs):
+        print("Single detector has kwargs: {}".format(kwargs))
+        super().__init__(**kwargs)
+        self._logger.debug("Creating sensor object using options: {}".format(sensor_settings))
+        if sensor_type == 'VL53L1X':
             # Create the sensor object using provided settings.
-            self._sensor_obj = CB_VL53L1X(self._settings['sensor'])
-        elif self._settings['sensor']['type'] == 'TFMini':
-            self._sensor_obj = TFMini(self._settings['sensor'])
+            self._sensor_obj = CB_VL53L1X(**sensor_settings)
+        elif sensor_type == 'TFMini':
+            print("Setting up TFMini with sensor settings: {}".format(sensor_settings))
+            self._sensor_obj = TFMini(**sensor_settings)
         else:
             raise ValueError("Detector {} trying to use unknown sensor type {}".format(
-                self._settings['name'], self._settings['sensor']['type']))
+                 self._name, sensor_settings))
 
     # Allow adjustment of timing.
     def timing(self, timing_input):
@@ -239,13 +242,14 @@ class SingleDetector(Detector):
             return iface
         return None
 
+
 # Detector that measures range progress.
 class Range(SingleDetector):
-    def __init__(self, config_obj, detector_id):
-        super().__init__(config_obj, detector_id)
-        self._logger.info("Initializing Range detector.")
-        self._settings['pct_crit'] = 5 / 100
-        self._settings['pct_warn'] = 10 / 100
+    def __init__(self, error_margin, **kwargs):
+        print("Range init.\n\tHave kwargs: {}".format(kwargs))
+        super().__init__(**kwargs)
+        self._error_margin = error_margin
+
 
     # Return the adjusted reading of the sensor.
     @property
@@ -283,18 +287,26 @@ class Range(SingleDetector):
     def quality(self):
         self._logger.debug("Creating quality from latest value: {}".format(self._history[0][0]))
         self._logger.debug("90% of bay depth is: {}".format(self._settings['bay_depth'] * .9))
-        if isinstance(self._history[0][0], str):
+        # Is there one of our own exceptions? These we can *probably* handle and get some useful information from.
+        if isinstance(self._history[0][0], SensorValueException):
             # A weak reading from the sensor almost certainly means the door is open and nothing is blocking.
-            if self._history[0][0] == "Weak":
+            if self._history[0][0].status == "Weak":
                 return "Door open"
+            elif self._history[0][0].status in ("Saturation", "Flood"):
+                # When saturated or flooded, just pass on those statuses.
+                return self._history[0][0]
             else:
                 return "Unknown"
+        # All other exceptions.
+        elif isinstance(self._history[0][0], BaseException):
+            return "Unknown"
         else:
             # You're about to hit the wall!
             if self._history[0][0] < Quantity("2 in"):
                 return 'Emergency!'
-            elif ( self._settings['bay_depth'] * 0.90 ) <= self._history[0][0]:
-                self._logger.debug("Reading is more than 90% of bay depth ({})".format(self._settings['bay_depth'] * .9))
+            elif (self._settings['bay_depth'] * 0.90) <= self._history[0][0]:
+                self._logger.debug(
+                    "Reading is more than 90% of bay depth ({})".format(self._settings['bay_depth'] * .9))
                 return 'No object'
             # Now consider the adjusted values.
             elif self.value < 0 and abs(self.value) > self.spread_park:
@@ -323,7 +335,7 @@ class Range(SingleDetector):
         elif history[0][0] == 'Weak':
             return None
         # If the sensor is reading beyond range, speed and direction can't be known, so return immediately.
-        last_element = len(history)-1
+        last_element = len(history) - 1
         self._logger.debug("First history: {}".format(history[0]))
         self._logger.debug("Last history: {}".format(history[last_element]))
         try:
@@ -335,7 +347,7 @@ class Range(SingleDetector):
         self._logger.debug("Moved {} in {}s".format(net_dist, net_time))
         speed = (net_dist / net_time).to('kph')
         # Since we've processed all this already, return all three values.
-        return {'speed': speed, 'net_dist': net_dist, 'net_time': net_time }
+        return {'speed': speed, 'net_dist': net_dist, 'net_time': net_time}
 
     # Based on readings, is the vehicle in motion?
     @property
@@ -345,7 +357,7 @@ class Range(SingleDetector):
         movement = self._movement
         if movement is None:
             return "Unknown"
-        elif abs(self._movement['net_dist']) > Quantity(self._settings['error_margin']):
+        elif abs(self._movement['net_dist']) > Quantity(self._error_margin):
             return True
         else:
             return False
@@ -358,14 +370,14 @@ class Range(SingleDetector):
         # Determine a direction.
         if movement is None:
             # If movement couldn't be determined, we also can't determine vector, so this is unknown.
-            return { "speed": "Unknown", "direction": "Unknown" }
+            return {"speed": "Unknown", "direction": "Unknown"}
         # Okay, not none, so has value!
-        if movement['net_dist'] > Quantity(self._settings['error_margin']):
-            return {'speed': abs(movement['speed']), 'direction': 'forward' }
-        elif movement['net_dist'] < (Quantity(self._settings['error_margin']) * -1):
-            return {'speed': abs(movement['speed']), 'direction': 'reverse' }
+        if movement['net_dist'] > Quantity(self._error_margin):
+            return {'speed': abs(movement['speed']), 'direction': 'forward'}
+        elif movement['net_dist'] < (Quantity(self._error_margin) * -1):
+            return {'speed': abs(movement['speed']), 'direction': 'reverse'}
         else:
-            return {'speed': Quantity("0 kph"), 'direction': 'still' }
+            return {'speed': Quantity("0 kph"), 'direction': 'still'}
 
     # Gets called when the rangefinder has all settings and is being made ready for use.
     def _when_ready(self):
@@ -373,11 +385,11 @@ class Range(SingleDetector):
         self._derived_distances()
 
     # Allow dynamic distance mode changes to come from the bay. This is largely used for debugging.
-    def distance_mode(self, input):
+    def distance_mode(self, target_mode):
         try:
-            self._sensor_obj.distance_mode = input
+            self._sensor_obj.distance_mode = target_mode
         except ValueError:
-            print("Could not change distance mode to {}".format(input))
+            print("Could not change distance mode to {}".format(target_mode))
 
     @property
     def bay_depth(self):
@@ -385,8 +397,9 @@ class Range(SingleDetector):
 
     @bay_depth.setter
     @check_ready
-    def bay_depth(self, input):
-        self._settings['bay_depth'] = self._convert_value(input)
+    def bay_depth(self, depth):
+        self._settings['bay_depth'] = self._convert_value(depth)
+        self._derived_distances()
 
     @property
     def spread_park(self):
@@ -419,6 +432,7 @@ class Range(SingleDetector):
 
     # Pre-bake distances for warn and critical to make evaluations a little easier.
     def _derived_distances(self):
+        self._logger.debug("Calculating derived distances.")
         adjusted_distance = self._settings['bay_depth'] - self._offset
         self._settings['dist_warn'] = adjusted_distance.magnitude * self.pct_warn * adjusted_distance.units
         self._settings['dist_crit'] = adjusted_distance.magnitude * self.pct_crit * adjusted_distance.units
@@ -441,8 +455,8 @@ class Range(SingleDetector):
 
 # Detector for lateral position
 class Lateral(SingleDetector):
-    def __init__(self, config_obj, detector_id):
-        super().__init__(config_obj, detector_id)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     @property
     @read_if_stale
