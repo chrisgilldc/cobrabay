@@ -21,13 +21,12 @@ def check_ready(func):
         # Call the function.
         func(self, *args, **kwargs)
         # Now check for readiness and set ready if we are.
-        for setting in self._settings['required']:
-            if self._settings[setting] is None:
+        for setting in self._required:
+            if getattr(self, setting) is None:
                 self._ready = False
                 return
         self._ready = True
         self._when_ready()
-
     return wrapper
 
 
@@ -41,7 +40,6 @@ def only_if_ready(func):
                                "Current settings:\n{}".format(self._settings))
         else:
             return func(self, *args, **kwargs)
-
     return wrapper
 
 
@@ -145,11 +143,11 @@ class Detector:
 
     @property
     def id(self):
-        return self._settings['id']
+        return self._detector_id
 
     @property
     def name(self):
-        return self._settings['name']
+        return self._name
 
     # Convenience property to let upstream modules check for the detector type. This disconnects
     # from the class name, because in the future we may have multiple kinds of 'range' or 'lateral' detectors.
@@ -248,8 +246,20 @@ class Range(SingleDetector):
     def __init__(self, error_margin, **kwargs):
         print("Range init.\n\tHave kwargs: {}".format(kwargs))
         super().__init__(**kwargs)
+        # Required properties. These are checked by the check_ready decorator function to see if they're not None.
+        # Once all required properties are not None, the object is set to ready. Doesn't check for values being *correct*.
+        self._required = ['bay_depth','spread_park','pct_warn','pct_crit']
+        # Save parameters
         self._error_margin = error_margin
 
+        # Initialize variables, to be set by properties later.
+        # Since these are all bay-specific, it doesn't make sense to set them at init-time.
+        self._bay_depth = None
+        self._spread_park = None
+        self._pct_warn = None
+        self._pct_crit = None
+        self._dist_warn = None
+        self._dist_crit = None
 
     # Return the adjusted reading of the sensor.
     @property
@@ -286,7 +296,7 @@ class Range(SingleDetector):
     @read_if_stale
     def quality(self):
         self._logger.debug("Creating quality from latest value: {}".format(self._history[0][0]))
-        self._logger.debug("90% of bay depth is: {}".format(self._settings['bay_depth'] * .9))
+        self._logger.debug("90% of bay depth is: {}".format(self.bay_depth * .9))
         # Is there one of our own exceptions? These we can *probably* handle and get some useful information from.
         if isinstance(self._history[0][0], SensorValueException):
             # A weak reading from the sensor almost certainly means the door is open and nothing is blocking.
@@ -304,18 +314,18 @@ class Range(SingleDetector):
             # You're about to hit the wall!
             if self._history[0][0] < Quantity("2 in"):
                 return 'Emergency!'
-            elif (self._settings['bay_depth'] * 0.90) <= self._history[0][0]:
+            elif (self.bay_depth * 0.90) <= self._history[0][0]:
                 self._logger.debug(
-                    "Reading is more than 90% of bay depth ({})".format(self._settings['bay_depth'] * .9))
+                    "Reading is more than 90% of bay depth ({})".format(self.bay_depth * .9))
                 return 'No object'
             # Now consider the adjusted values.
             elif self.value < 0 and abs(self.value) > self.spread_park:
                 return 'Back up'
             elif abs(self.value) < self.spread_park:
                 return 'Park'
-            elif self.value <= self._settings['dist_crit']:
+            elif self.value <= self._dist_crit:
                 return 'Final'
-            elif self.value <= self._settings['dist_warn']:
+            elif self.value <= self._dist_warn:
                 return 'Base'
             else:
                 return 'OK'
@@ -393,49 +403,58 @@ class Range(SingleDetector):
 
     @property
     def bay_depth(self):
-        return self._settings['bay_depth']
+        return self._bay_depth
 
     @bay_depth.setter
     @check_ready
     def bay_depth(self, depth):
-        self._settings['bay_depth'] = self._convert_value(depth)
-        self._derived_distances()
+        self._bay_depth = self._convert_value(depth)
 
     @property
     def spread_park(self):
-        return self._settings['spread_park']
+        return self._spread_park
 
     @spread_park.setter
     @check_ready
     def spread_park(self, input):
-        self._settings['spread_park'] = self._convert_value(input)
+        self._spread_park = self._convert_value(input)
 
     # Properties for warning and critical percentages. We take these are "normal" percentages (ie: 15.10) and convert
     # to decimal so it can be readily used for multiplication.
     @property
     def pct_warn(self):
-        return self._settings['pct_warn'] * 100
+        try:
+            return self._pct_warn * 100
+        except TypeError:
+            return None
 
     @pct_warn.setter
     @check_ready
     def pct_warn(self, input):
-        self._settings['pct_warn'] = input / 100
+        self._pct_warn = input / 100
 
     @property
     def pct_crit(self):
-        return self._settings['pct_crit'] * 100
+        try:
+            return self._pct_crit * 100
+        except TypeError:
+            return None
 
     @pct_crit.setter
     @check_ready
     def pct_crit(self, input):
-        self._settings['pct_crit'] = input / 100
+        self._pct_crit = input / 100
+
+    # When object is declared ready, calculated derived distances.
+    def _when_ready(self):
+        self._derived_distances()
 
     # Pre-bake distances for warn and critical to make evaluations a little easier.
     def _derived_distances(self):
         self._logger.debug("Calculating derived distances.")
-        adjusted_distance = self._settings['bay_depth'] - self._offset
-        self._settings['dist_warn'] = adjusted_distance.magnitude * self.pct_warn * adjusted_distance.units
-        self._settings['dist_crit'] = adjusted_distance.magnitude * self.pct_crit * adjusted_distance.units
+        adjusted_distance = self.bay_depth - self._offset
+        self._dist_warn = adjusted_distance.magnitude * self.pct_warn * adjusted_distance.units
+        self._dist_crit = adjusted_distance.magnitude * self.pct_crit * adjusted_distance.units
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
@@ -457,6 +476,10 @@ class Range(SingleDetector):
 class Lateral(SingleDetector):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._required = ['side', 'spread_ok', 'spread_warn']
+        self._side = None
+        self._spread_ok = None
+        self._spread_warn = None
 
     @property
     @read_if_stale
@@ -510,26 +533,26 @@ class Lateral(SingleDetector):
 
     @property
     def spread_ok(self):
-        return self._settings['spread_ok']
+        return self._spread_ok
 
     @spread_ok.setter
     @check_ready
     def spread_ok(self, m_input):
-        self._settings['spread_ok'] = self._convert_value(m_input).to('cm')
+        self._spread_ok = self._convert_value(m_input).to('cm')
         # Check to see if the detector is now ready.
 
     @property
     def spread_warn(self):
-        return self._settings['spread_warn']
+        return self._spread_warn
 
     @spread_warn.setter
     @check_ready
     def spread_warn(self, m_input):
-        self._settings['spread_warn'] = self._convert_value(m_input).to('cm')
+        self._spread_warn = self._convert_value(m_input).to('cm')
 
     @property
     def side(self):
-        return self._settings['side']
+        return self._side
 
     @side.setter
     @check_ready
@@ -537,7 +560,7 @@ class Lateral(SingleDetector):
         if m_input.upper() not in ('R', 'L'):
             raise ValueError("Lateral side must be 'R' or 'L'")
         else:
-            self._settings['side'] = m_input.upper()
+            self._side = m_input.upper()
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
