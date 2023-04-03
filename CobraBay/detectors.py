@@ -17,7 +17,6 @@ from collections import namedtuple
 def check_ready(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        print("Checking for readiness via function: {}".format(func))
         # Call the function.
         func(self, *args, **kwargs)
         # Now check for readiness and set ready if we are.
@@ -83,11 +82,11 @@ def read_if_stale(func):
             read_sensor = True  ## If there's no history, read the sensor, we must be on startup.
         # If flag is set, read the sensor and put its value into the history.
         if read_sensor:
-            try:
-                value = self._sensor_obj.range
-            except BaseException as e:
-                # Save an exception into the history, we'll process this later.
-                value = e
+#            try:
+            value = self._sensor_obj.range
+ #           except BaseException as e:
+ #               # Save an exception into the history, we'll process this later.
+ #               value = e
             self._logger.debug("Triggered sensor reading. Got: {}".format(value))
             # Add value to the history and truncate history to ten records.
             self._history.insert(0, (value, monotonic_ns()))
@@ -199,15 +198,17 @@ class SingleDetector(Detector):
 
     # Called when the system needs to turn this sensor on.
     def activate(self):
+        self._logger.debug("Detector starting sensor ranging.")
         self._sensor_obj.start_ranging()
 
     # Called when the system needs to go into idle mode and turn the sensor off.
     def deactivate(self):
-        print("Calling sensor object's stop_ranging method.")
+        self._logger.debug("Detector stopping sensor ranging.")
         self._sensor_obj.stop_ranging()
 
     # Complete turn the sensor on or off using its enable pin.
     def enable(self):
+        self._logger.debug("Enabling sensor.")
         self._sensor_obj.enable()
 
     def disable(self):
@@ -506,7 +507,7 @@ class Lateral(SingleDetector):
         self._logger.debug("Assessing quality for value: {}".format(self.value))
         # Process quality if we get a quantity from the Detector.
         if isinstance(self.value, Quantity):
-            self._logger.debug("Comparing to: \n\t{}\n\t{}".format(
+            self._logger.debug("Comparing to OK ({}) and WARN ({})".format(
                 self.spread_ok, self.spread_warn))
             if self.value > Quantity('96 in'):
                 # A standard vehicle width (in the US, at least) is 96 inches, so if we're reading something further

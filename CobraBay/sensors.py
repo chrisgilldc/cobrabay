@@ -211,9 +211,11 @@ class CB_VL53L1X(I2CSensor):
         self._sensor_obj.stop_ranging()
 
     def start_ranging(self):
+        self._logger.debug("Starting ranging")
         try:
             self._sensor_obj.start_ranging()
-        except:
+        except BaseException as e:
+            self._logger.error("Encountered error when trying to start ranging! '{}'".format(str(e)))
             raise
         else:
             self._ranging = True
@@ -222,7 +224,7 @@ class CB_VL53L1X(I2CSensor):
             self._previous_timestamp = monotonic()
 
     def stop_ranging(self):
-        print("Trying to stop ranging on sensor object.")
+        self._logger.debug("Stopping ranging.")
         try:
             self._sensor_obj.stop_ranging()
         except:
@@ -298,7 +300,7 @@ class CB_VL53L1X(I2CSensor):
         print("Range method found sensor status: {}".format(self.status))
         if self.status != 'ranging':
             # Return 'No Reading' if the board isn't actively ranging, since, duh.
-            return 'No reading'
+            return 'Not ranging'
         elif monotonic() - self._previous_timestamp < 0.2:
             # Make sure to pace the readings properly, so we're not over-running the native readings.
             # If a request comes in before the sleep time (200ms), return the previous reading.
@@ -450,9 +452,9 @@ class TFMini(SerialSensor):
         try:
             self._logger.debug("Test reading: {}".format(self.range))
         except CobraBay.exceptions.SensorValueException as e:
-            self._logger.warning("During sensor setup, received abnormal reading '{}'.".format(e.status))
+            self._logger.warning("During sensor setup, received abnormal reading '{}'.".format(e))
 
-    # This sensor doesn't need an enable, do nothing.
+    # TFMini is always ranging, so enable here is just a dummy method.
     @staticmethod
     def enable():
         return True
@@ -473,7 +475,7 @@ class TFMini(SerialSensor):
             self._previous_timestamp = monotonic()
             return self._previous_reading
         else:
-            raise CobraBay.exceptions.SensorValueException(status=reading.status)
+            raise CobraBay.exceptions.SensorValueException(reading.status)
 
     # When this was tested in I2C mode, the TFMini could return unstable answers, even at rest. Unsure if
     # this is still true in serial mode, keeping this clustering method for the moment.
