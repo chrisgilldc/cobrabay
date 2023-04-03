@@ -207,7 +207,7 @@ class CBConfig:
                 return "CRITICAL"
             else:
                 self._logger.error(
-                    "Module {} had unknown level {}. Using WARNING instead.".format(mod_id, requested_level))
+                    "Module {} had unknown level {}. Using WARNING.".format(mod_id, requested_level))
                 return "WARNING"
 
     # Return a settings dict to be used for the Display module.
@@ -301,7 +301,7 @@ class CBConfig:
 
         # Create the detector configuration for the bay.
         # Each bay applies bay-specific options to a detector when it initializes.
-        long_fallback = { 'spread_park': '2 in', 'pct_warn': 90, 'pct_crit': 95 }
+        long_fallback = { 'offset': '0 in', 'spread_park': '2 in', 'pct_warn': 90, 'pct_crit': 95 }
         long_required = ['spread_park', 'pct_warn', 'pct_crit']
         lat_fallback = { 'offset': '0 in', 'spread_ok': '1 in', 'spread_warn': '3 in' }
         lat_required = ['side', 'intercept']
@@ -325,12 +325,21 @@ class CBConfig:
                             raise ValueError("Required setting '{}' not present in configuration for detector '{}' in "
                                              "bay '{}'. Must be set directly or have default set.".
                                 format(setting, detector, bay_id ))
+                    # Calculate the offset for this detector
+                    # This detector will be offset by the bay's stop point, adjusted by the original offset of the detector.
+                    config_dict['detector_settings'][detector['detector']]['offset'] = \
+                        Quantity(self._config['bays'][bay_id]['stop_point']) - \
+                        Quantity(config_dict['detector_settings'][detector['detector']]['offset'])
                     # Save the name of the detector to the longitudinal list.
                     config_dict['longitudinal'].append(detector['detector'])
                 # Lateral check.
                 if direction == 'lateral':
                     # Merge in the fallback items. User-defined defaults take precedence.
                     dd = dict(lat_fallback.items() | direction_defaults.items())
+                    # self._logger.debug("Assembled lateral defaults: {}".format(dd.items()))
+                    # self._logger.debug("Detector config items: {}".format(detector.items()))
+                    # merged = dict( dd.items() | detector.items() )
+                    # self._logger.debug("Merged: {}".format(merged))
                     # Merge in the defaults with the detector specific settings. Detector-specific items take precedence.
                     config_dict['detector_settings'][detector['detector']] = dict( dd.items() | detector.items() )
                     # Check for required settings.
