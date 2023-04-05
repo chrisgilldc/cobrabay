@@ -478,10 +478,10 @@ class CBBay:
 
     # Method to be called when CobraBay it shutting down.
     def shutdown(self):
-        self._logger.error("Beginning shutdown...")
-        self._logger.error("Shutting off detectors...")
+        self._logger.critical("Beginning shutdown...")
+        self._logger.critical("Shutting off detectors...")
         self._detector_state('deactivate')
-        self._logger.error("Shutdown complete. Exiting.")
+        self._logger.critical("Shutdown complete. Exiting.")
 
     # Traverse the detectors dict, activate everything that needs activating.
     def _detector_state(self, mode):

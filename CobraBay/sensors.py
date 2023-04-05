@@ -261,7 +261,6 @@ class CB_VL53L1X(I2CSensor):
             self._sensor_obj.set_address(self._i2c_address)
 
     def disable(self):
-        print("Setting enable pin to false.")
         self.enable_pin.value = False
         # Also set the internal ranging variable to false, since by definition, when the board gets killed, we stop ranging.
         self._ranging = False
