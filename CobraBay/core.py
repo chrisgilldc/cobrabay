@@ -59,10 +59,7 @@ class CBCore:
         self._setup_logging_handlers(self._cbconfig.log_handlers())
 
         # Reset our own level based on the configuration.
-        self._logger.setLevel(self._cbconfig.get_loglevel("Core"))
-
-        # Put the raw config in a variable, this is a patch.
-        self.config = self._cbconfig._config
+        self._logger.setLevel(self._cbconfig.get_loglevel("core"))
 
         # Create the object for checking hardware status.
         self._logger.debug("Creating Pi hardware monitor...")
@@ -317,7 +314,7 @@ class CBCore:
     # Method to set up the detectors based on the configuration.
     def _setup_detectors(self):
         return_dict = {}
-        for detector_id in self.config['detectors']:
+        for detector_id in self._cbconfig.detector_list:
             self._logger.info("Creating detector: {}".format(detector_id))
             detector_config = self._cbconfig.detector(detector_id)
             if detector_config['type'] == 'range':
