@@ -103,6 +103,9 @@ class CBBay:
         self._state = None
         self._occupancy = None
 
+        # Calculate the adjusted depth.
+        self._adjusted_depth = self._bay_depth - self._stop_point
+
         # Create a unit registry.
         self._ureg = UnitRegistry
 
