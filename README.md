@@ -171,7 +171,7 @@ Reports the most recent sensor readings for this bay.
 
 
 
-A pr*ogression of sensors would look like this:*
+A progression of sensors would look like this:*
 
 | | Bay Occupancy | Bay State |
 | --- | --- | --- |
