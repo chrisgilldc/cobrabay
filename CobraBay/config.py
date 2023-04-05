@@ -12,9 +12,10 @@ import importlib
 
 
 class CBConfig:
-    def __init__(self, config_file=None, reset_sensors=False):
+    def __init__(self, config_file=None, reset_sensors=False, log_level="WARNING"):
         self._config = None
         self._logger = logging.getLogger("CobraBay").getChild("Config")
+        self._logger.setLevel(log_level)
 
         # Initialize the internal config file variable
         self._config_file = None
@@ -35,6 +36,11 @@ class CBConfig:
             raise ValueError("Cannot find valid config file! Attempted: {}".format([str(i) for i in search_paths]))
         # Load the config file. This does validation as well!
         self.load_config()
+        # If necessary, adjust our own log level.
+        new_loglevel = self.get_loglevel('config')
+        if new_loglevel != log_level:
+            self._logger.setLevel(new_loglevel)
+            self._logger.warning("Adjusted config module logging level to '{}'".format(new_loglevel))
 
     def load_config(self, reset_sensors=False):
         # Open the current config file and suck it into a staging variable.
@@ -45,10 +51,9 @@ class CBConfig:
         except KeyError as e:
             raise e
         else:
-            self._logger.info("Config file validated. Loading.")
+            self._logger.info("Config file validated.")
             # We're good, so assign the staging to the real config.
-            print("Loaded config...")
-            print(pformat(validated_yaml))
+            self._logger.debug("Active configuration:")
             self._logger.debug(pformat(validated_yaml))
             self._config = validated_yaml
 
@@ -264,7 +269,7 @@ class CBConfig:
         return config_dict
 
     def bay(self, bay_id):
-        self._logger.info("Received config generate request for: {}".format(bay_id))
+        self._logger.debug("Received config generate request for: {}".format(bay_id))
         if bay_id not in self._config['bays']:
             raise KeyError("No configuration defined for {}".format(bay_id))
         # Initialize the config dict. Include the bay ID, and default to metric.
@@ -366,7 +371,7 @@ class CBConfig:
 
     # Config dict for a detector.
     def detector(self, detector_id):
-        self._logger.info("Received config generate request for: {}".format(detector_id))
+        self._logger.debug("Received config generate request for: {}".format(detector_id))
         if detector_id not in self._config['detectors']:
             raise KeyError("No configuration defined for detector '{}'".format(detector_id))
         # Assemble the config dict
@@ -396,7 +401,7 @@ class CBConfig:
         return config_dict
 
     def trigger(self, trigger_id):
-        self._logger.info("Received config generate request for trigger: {}".format(trigger_id))
+        self._logger.debug("Received config generate request for trigger: {}".format(trigger_id))
         if trigger_id not in self._config['triggers']:
             raise KeyError("No configuration defined for trigger: '{}'".format(trigger_id))
         config_dict = {

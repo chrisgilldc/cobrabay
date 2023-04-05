@@ -48,7 +48,7 @@ class CBBay:
                  lateral,
                  longitudinal,
                  intercepts,
-                 log_level="DEBUG", **kwargs):
+                 log_level="WARNING", **kwargs):
         """
         :param bay_id: ID for the bay. Cannot have spaces.
         :type bay_id: str
@@ -103,9 +103,6 @@ class CBBay:
         self._state = None
         self._occupancy = None
 
-        # Log our initialization.
-        self._logger.info("Bay '{}' initializing...".format(self.bay_id))
-        self._logger.info("Bay has settings:")
         # Create a unit registry.
         self._ureg = UnitRegistry
 
@@ -134,6 +131,7 @@ class CBBay:
         self._scan_detectors()
 
         self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
+
         self.state = "Ready"
 
     # Abort gets called when we want to cancel a docking.
@@ -490,13 +488,12 @@ class CBBay:
         # Traverse the dict looking for detectors that need activation.
         for detector in self._detectors:
             self._logger.debug("Changing detector {}".format(detector))
-            if isinstance(self._detectors[detector], CB_VL53L1X):
-                if mode == 'activate':
-                    self._detectors[detector].activate()
-                elif mode == 'deactivate':
-                    self._detectors[detector].deactivate()
-                else:
-                    raise RuntimeError("Detector activation reached impossible state.")
+            if mode == 'activate':
+                self._detectors[detector].activate()
+            elif mode == 'deactivate':
+                self._detectors[detector].deactivate()
+            else:
+                raise RuntimeError("Detector activation reached impossible state.")
 
     # # Traverse the detectors and make sure they're all stopped.
     # def _shutdown_detectors(self, detectors):

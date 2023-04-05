@@ -49,7 +49,7 @@ class I2CSensor(BaseSensor):
         # Create a logger
         self._name = "{}-{}-{}".format(type(self).__name__, i2c_bus, hex(i2c_address))
         self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
-        self._logger.setLevel("DEBUG")
+        self._logger.setLevel(log_level)
         self._logger.info("Initializing sensor...")
 
         # Set the I2C bus and I2C Address
@@ -297,7 +297,6 @@ class CB_VL53L1X(I2CSensor):
 
     @property
     def range(self):
-        print("Range method found sensor status: {}".format(self.status))
         if self.status != 'ranging':
             # Return 'No Reading' if the board isn't actively ranging, since, duh.
             return 'Not ranging'

@@ -89,7 +89,7 @@ class CBCore:
         # Create master bay object for defined docking bay
         # Master list to store all the bays.
         self._bays = {}
-        self._logger.debug("Creating bays...")
+        self._logger.info("Creating bays...")
         for bay_id in self._cbconfig.bay_list:
             self._logger.info("Bay ID: {}".format(bay_id))
             bay_config = self._cbconfig.bay(bay_id)
@@ -97,7 +97,7 @@ class CBCore:
             self._logger.debug(pformat(bay_config))
             self._bays[bay_id] = CobraBay.CBBay(**bay_config, detectors=self._detectors)
 
-        self._logger.info('CobraBay: Creating display...')
+        self._logger.info('Creating display...')
         self._display = CobraBay.CBDisplay(self._cbconfig)
 
         # Register the bay with the network and display.
@@ -110,7 +110,9 @@ class CBCore:
             self._outbound_messages = self._outbound_messages + self._bays[bay_id].mqtt_messages(verify=True)
 
         # Create triggers.
+        self._logger.debug("About to setup triggers.")
         self._triggers = self._setup_triggers()
+        self._logger.debug("Done calling setup_triggers.")
         self._logger.debug("Have triggers: {}".format(self._triggers))
 
         # Parcel trigger objects out to the right place.
@@ -142,7 +144,7 @@ class CBCore:
         self._network.poll(self._outbound_messages)
         # Flush the queue.
         self._outbound_messages = []
-        self._logger.info('CobraBay: Initialization complete.')
+        self._logger.info('System Initialization complete.')
 
     # Common network handler, pushes data to the network and makes sure the MQTT client can poll.
     def _network_handler(self):

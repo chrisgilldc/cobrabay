@@ -175,14 +175,13 @@ class Detector:
 # future.
 class SingleDetector(Detector):
     def __init__(self, sensor_type, sensor_settings, **kwargs):
-        print("Single detector has kwargs: {}".format(kwargs))
         super().__init__(**kwargs)
         self._logger.debug("Creating sensor object using options: {}".format(sensor_settings))
         if sensor_type == 'VL53L1X':
             # Create the sensor object using provided settings.
             self._sensor_obj = CB_VL53L1X(**sensor_settings)
         elif sensor_type == 'TFMini':
-            print("Setting up TFMini with sensor settings: {}".format(sensor_settings))
+            self._logger.debug("Setting up TFMini with sensor settings: {}".format(sensor_settings))
             self._sensor_obj = TFMini(**sensor_settings)
         else:
             raise ValueError("Detector {} trying to use unknown sensor type {}".format(
@@ -245,7 +244,6 @@ class SingleDetector(Detector):
 # Detector that measures range progress.
 class Range(SingleDetector):
     def __init__(self, error_margin, **kwargs):
-        print("Range init.\n\tHave kwargs: {}".format(kwargs))
         super().__init__(**kwargs)
         # Required properties. These are checked by the check_ready decorator function to see if they're not None.
         # Once all required properties are not None, the object is set to ready. Doesn't check for values being *correct*.
