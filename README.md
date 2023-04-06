@@ -65,18 +65,62 @@ Details on assembly, including models for 3d printing enclosures can be found he
 
 ### Configuration
 
-Configuration is handled in a dict at the beginning of code.py. It includes the following options. Defaults in bold.
+The system will look for a configuration file on startup.
+The configuration file is a yaml file with several major sections.
 
-#### General
-| Option        | Required?              | Valid Options            | Units   | Description                                                                                                                                                                     |
-|---------------|------------------------|--------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| units         | No                     | **'metric'**, 'imperial' | N/A     | Sets units to use for other options and display.                                                                                                                                |
-| sensor_pacing | No                     | float                    | seconds | Time between sonic sensor firings. This should be tuned so that echos from one sensor doesn't interfere with another - exact timing will depend on the geometry of your garage. |
-| bay           | Yes                    | ...                      | N/A     | Sub-dict with information about the parking bay. See below.                                                                                                                     |
-| sensors       | Yes                    | ...                      | N/A     | Sensor name with sub-dict of sensor options. See below.                                                                                                                         |
-| network       | No                     | True/False               | N/A     | Enable networking, yes or no. Defaults to False                                                                                                                                 |
-| ssid          | Yes if Network is True | str                      | N/A     | SSID of WiFi network to use                                                                                                                                                     | 
-| psk           | Yes if Network is True | str                      | N/A     | Pre-Shared Key of WiFi network to use                                                                                                                                           |
+#### System
+| Option               | Required? | Valid Options                   | Units   | Description                                                                                                                                                                     |
+|----------------------|-----------|---------------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| units                | No        | **'metric'**, 'imperial'        | N/A     | Sets units to use for other options and display.                                                                                                                                |
+| system_name          | No        | float                           | seconds | Time between sonic sensor firings. This should be tuned so that echos from one sensor doesn't interfere with another - exact timing will depend on the geometry of your garage. |
+| mqtt                 | Yes       | dict                            | N/A | Dictionary of MQTT settings. See below                                                                                                                                          |
+| mqtt_commands        | Yes       | bool                            | N/A | Should commands via MQTT be honored?                                                                                                                                            |
+| interface            | Yes       | Any valid Linux interface name. | N/A | Interface to monitor for connectivity status on the display.                                                                                                                    |
+| homeassistant        | Yes       | bool                            | N/A | Integrate with Home Assistant? Will control sending of HA discovery options.                                                                                                    |
+| logging | No     | dict                       | N/A | Options for logging system-wide or within specific modules. See below for details.                                                                                              |
+
+##### mqtt
+
+MQTT section, within the system segment.
+
+| Options   | Required? | Description                                          |
+|-----------| --- |------------------------------------------------------------|
+| broker    | Yes | Host or IP of the broker to connect to.                    |
+| port      | Yes | Broker port to connect to. SSL is not currently supported. |
+| username  | Yes | Username to log into the broker with.                      |
+| password  | Yes | Password to log into the broker with.                      |
+
+##### Logging
+
+Logging options, system wide or for specific modules.
+
+| Options    | Required? | Default               | Description                                  |
+|------------|-----------|-----------------------|----------------------------------------------|
+| console    | No        | True                  | Log to the console                           |
+| file       | No        | True                  | Log to a file                                | 
+| file_path  | No        | cwd/<System_Name>.log | File to log do when file logging is enabled. |
+| bays       | No        | None                  | Log level for all Bays                       |
+| <bay_name> | No     | None                  | Log level for a specific bay.                |
+| config                | No     | None                  | Log level for the configuriation handling module. |
+| core                  | No     | None                  | Log level for the CobraBay Core.                  |
+| detectors             | No     | None                  | Log level for all Detectors.                      |
+| <detector_name> | No     | None                  | Log level for a specific detector.                |
+| display               | No     | None                  | Log level for the Display module.                 |
+| network               | No     | None                  | Log level for the Network module.                 |
+
+
+#### Triggers
+Triggers are used to set when and how the system should take options. The triggers section can define a series of 
+triggers, as many as are needed.
+
+| Options | Required? | Default | Description |
+| --- | -- | --- | --- |
+| type | Yes | mqtt_sensor | Type of trigger this should be. Currently only 'mqtt_sensor' is supported. |
+| topic | Yes | None | MQTT topic to monitor. This must be a *complete* MQTT topic path. |
+| bay | Yes | None | Bay this trigger is assigned to. |
+| to | No | None | Topic payload to match that will set off this trigger. |
+| from | Yes, if 'to' is not set. | None | A change of the topic payload to any state *other* than this value will set off the trigger. |
+
 
 #### Bay Options
 Dimensions for the parking bay. All units are either in centimeters or inches, depending on the master units setting.
@@ -99,6 +143,10 @@ Dimensions for the parking bay. All units are either in centimeters or inches, d
 | trigger | hcsr04 | Yes | int | N/A | Pin to trigger ping. |
 | echo | hcsr04 | Yes | int | N/A | Pin to listen for echo on. |
 | timeout | hcsr04 | Yes | float | seconds | How long to wait for the echo. |
+
+
+
+
 
 ## MQTT Topics
 
@@ -133,10 +181,10 @@ A Device can accept the following commands through the topic 'cobrabay/_MAC_/cmd
 | reset          | None                                        | Perform a soft reset of the whole system                                                              |
 | rescan_sensors | None                                        | Rescan the defined sensors                                                                            |
 | display_sensor | sensor: *sensor_id*<br />timeout: *seconds* | Display reading from *sensor_id* on the display for *timeout* seconds. Timeout defaults to 360s (5m). | 
-| discover       | None                                        | Recalculate discovery and resend to Home Assistant.                                                   |
+| rediscover     | None                                        | Recalculate discovery and resend to Home Assistant.                                                   |
 
 ### Bay Sensors
-Bay sensors are reported as a child of the device, under '/cobrabay/_MAC_/_bay_name_/_sensor_'
+Bay sensors are reported as a child of the device, under '/CobraBay/_MAC_/_bay_name_/_sensor_'
 
 **Occupied**
 Current occupancy of the bay.
@@ -168,8 +216,6 @@ Reports the position 'quality' of the bay if bay is occupied.
 **Sensors**
 
 Reports the most recent sensor readings for this bay.
-
-
 
 A progression of sensors would look like this:*
 

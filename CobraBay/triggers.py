@@ -7,6 +7,7 @@ from json import loads as json_loads
 
 class Trigger:
     def __init__(self, config):
+        print("Trigger received config: {}".format(config))
         # Save the config.
         self._settings = config
         # Initialize command stack.
