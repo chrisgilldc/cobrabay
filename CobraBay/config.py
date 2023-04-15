@@ -405,9 +405,15 @@ class CBConfig:
         if trigger_id not in self._config['triggers']:
             raise KeyError("No configuration defined for trigger: '{}'".format(trigger_id))
         config_dict = {
-            'id': trigger_id
+            'id': trigger_id,
+            'log_level': self.get_loglevel(trigger_id)
         }
         self._logger.debug("Trigger has config: {}".format(self._config['triggers'][trigger_id]))
+        try:
+            config_dict['name'] = self._config['triggers'][trigger_id]['name']
+        except KeyError:
+            self._logger.debug("Trigger {} has no name, using ID instead.")
+            config_dict['name'] = trigger_id
         # Validate the type.
         try:
             if self._config['triggers'][trigger_id]['type'] not in ('mqtt_sensor', 'syscommand', 'baycommand', 'range'):
