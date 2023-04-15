@@ -183,9 +183,10 @@ class BayCommand(MQTTTrigger):
         else:
             self._logger.warning("Ignoring invalid command: {}".format(message.text))
 
-    # @property
-    # def bay_id(self):
-    #     return self._bay_obj.id
+    # Get the ID of the bay object to be returned. This is used by the core to find the bay object directly.
+    @property
+    def bay_id(self):
+        return self._bay_obj.id
     #
     # @property
     # def topic(self):
