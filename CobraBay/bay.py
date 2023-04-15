@@ -90,7 +90,7 @@ class CBBay:
         self._intercepts = intercepts
         self._selected_range = selected_range
         # Create a logger.
-        self._logger = logging.getLogger("CobraBay").getChild(self.bay_id)
+        self._logger = logging.getLogger("CobraBay").getChild(self.id)
         self._logger.setLevel(log_level)
         self._logger.info("Initializing bay: {}".format(bay_id))
         self._logger.debug("Bay received detectors: {}".format(detectors))
@@ -133,7 +133,7 @@ class CBBay:
         # Set our initial state.
         self._scan_detectors()
 
-        self._logger.info("Bay '{}' initialization complete.".format(self.bay_id))
+        self._logger.info("Bay '{}' initialization complete.".format(self.id))
 
         self.state = "Ready"
 
@@ -146,7 +146,7 @@ class CBBay:
     def discovery_reg_info(self):
         # For discovery, the detector hierarchy doesn't matter, so we can flatten it.
         return_dict = {
-            'bay_id': self.bay_id,
+            'bay_id': self.id,
             'bay_name': self.bay_name,
             'detectors': []
         }
@@ -163,7 +163,7 @@ class CBBay:
     @property
     def display_reg_info(self):
         return_dict = {
-            'bay_id': self.bay_id,
+            'bay_id': self.id,
             'lateral_order': self._lateral
         }
         return return_dict
@@ -343,12 +343,12 @@ class CBBay:
         # Initialize the outbound message list.
         # Always include the bay state and bay occupancy.
         outbound_messages = [{'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False,
-                              'topic_mappings': {'bay_id': self.bay_id}},
+                              'topic_mappings': {'bay_id': self.id}},
                              {'topic_type': 'bay',
                               'topic': 'bay_occupied',
                               'message': self.occupied,
                               'repeat': True,
-                              'topic_mappings': {'bay_id': self.bay_id}},
+                              'topic_mappings': {'bay_id': self.id}},
                              # {'topic_type': 'bay',
                              #  'topic': 'bay_position',
                              #  'message': self.position,
@@ -358,12 +358,12 @@ class CBBay:
                               'topic': 'bay_quality',
                               'message': self.quality,
                               'repeat': True,
-                              'topic_mappings': {'bay_id': self.bay_id}},
+                              'topic_mappings': {'bay_id': self.id}},
                              {'topic_type': 'bay',
                               'topic': 'bay_speed',
                               'message': self._detectors[self._selected_range].vector,
                               'repeat': True,
-                              'topic_mappings': {'bay_id': self.bay_id}}]
+                              'topic_mappings': {'bay_id': self.id}}]
 
         # Add detector values, if applicable.
         outbound_messages = outbound_messages + self._detector_status()
@@ -377,7 +377,7 @@ class CBBay:
              'topic': 'bay_dock_time',
              'message': message,
              'repeat': True,
-             'topic_mappings': {'bay_id': self.bay_id}}
+             'topic_mappings': {'bay_id': self.id}}
         )
         self._logger.debug("Have compiled outbound messages. {}".format(outbound_messages))
         return outbound_messages
@@ -392,7 +392,7 @@ class CBBay:
                                     'status': self._detectors[detector].status
                                 },
                                 'repeat': False,
-                                'topic_mappings': {'bay_id': self.bay_id, 'detector_id': self._detectors[detector].id}
+                                'topic_mappings': {'bay_id': self.id, 'detector_id': self._detectors[detector].id}
                                 }
 
             # If the detector is actively ranging, add the values.
@@ -410,7 +410,7 @@ class CBBay:
     # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
     def display_data(self):
         self._logger.debug("Collecting bay data for display. Have quality: {}".format(self._quality))
-        return_data = {'bay_id': self.bay_id, 'bay_state': self.state,
+        return_data = {'bay_id': self.id, 'bay_state': self.state,
                        'range': self._position[self._selected_range],
                        'range_quality': self._quality[self._selected_range]}
         # Percentage of range covered. This is used to construct the strobe.
@@ -518,12 +518,12 @@ class CBBay:
     #                 detectors[item].shutdown()
 
     @property
-    def bay_id(self):
+    def id(self):
         return self._bay_id
 
-    @bay_id.setter
-    def bay_id(self, input):
-        self._bay_id = input
+    @id.setter
+    def id(self, input):
+        self._bay_id = input.replace(" ","_").lower()
 
     @property
     def bay_name(self):
