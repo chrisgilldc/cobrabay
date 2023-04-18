@@ -107,7 +107,7 @@ class CBConfig:
 
     # Validate the system section.
     def _validate_system(self, system_config):
-        valid_keys = ('units', 'system_name', 'mqtt', 'mqtt_commands', 'interface', 'homeassistant', 'logging')
+        valid_keys = ('unit_system', 'system_name', 'mqtt', 'mqtt_commands', 'interface', 'homeassistant', 'logging')
         required_keys = ('system_name', 'interface')
         # Remove any key values that aren't valid.
         for actual_key in system_config:
@@ -126,10 +126,10 @@ class CBConfig:
                 # Strip spaces and we're good to go.
                 system_config[required_key] = system_config[required_key].replace(" ", "_")
         # Specific value checks.
-        if system_config['units'].lower() not in ('metric', 'imperial'):
-            self._logger.debug("Unit setting {} not valid, defaulting to metric.".format(system_config['units']))
+        if system_config['unit_system'].lower() not in ('metric', 'imperial'):
+            self._logger.debug("Unit setting {} not valid, defaulting to metric.".format(system_config['unit_system']))
             # If not metric or imperial, default to metric.
-            system_config['units'] = 'metric'
+            system_config['unit_system'] = 'metric'
 
         return system_config
 
@@ -219,8 +219,8 @@ class CBConfig:
     def display(self):
         # Initialize the config dict.
         config_dict = {}
-        # Bring in the units system.
-        config_dict['units'] = self._config['system']['units']
+        # Bring in the unit system.
+        config_dict['unit_system'] = self._config['system']['unit_system']
         # Set the strobe update speed.
         try:
             config_dict['strobe_speed'] = Quantity(self._config['display']['strobe_speed']).to('nanosecond').magnitude
@@ -247,7 +247,7 @@ class CBConfig:
     # Return a settings dict to be used for the Network module.
     def network(self):
         config_dict = {}
-        config_dict['units'] = self._config['system']['units']
+        config_dict['unit_system'] = self._config['system']['unit_system']
         config_dict['system_name'] = self._config['system']['system_name']
         try:
             config_dict['homeassistant'] = self._config['system']['homeassistant']
@@ -264,8 +264,12 @@ class CBConfig:
             for rk in required_keys:
                 if rk not in self._config['system']['mqtt']:
                     raise ValueError("Required key '{}' not in system MQTT definition".format(rk))
-            # Should be good, pull it over.
-            config_dict['mqtt'] = self._config['system']['mqtt']
+                else:
+                    config_dict["mqtt_" + rk] = self._config['system']['mqtt'][rk]
+            if 'port' in self._config['system']['mqtt']:
+                config_dict["mqtt_port"] = self._config['system']['mqtt']['port']
+            else:
+                config_dict["mqtt_port"] = 1883
         return config_dict
 
     def bay(self, bay_id):
@@ -285,7 +289,7 @@ class CBConfig:
         }
         # If Imperial is defined, bay should output in inches.
         try:
-            if self._config['system']['units'].lower() == 'imperial':
+            if self._config['system']['unit_system'].lower() == 'imperial':
                 config_dict['output_unit'] = 'in'
         except KeyError:
             pass

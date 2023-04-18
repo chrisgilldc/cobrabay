@@ -68,7 +68,8 @@ class CBCore:
         # Create the network object.
         self._logger.debug("Creating network object...")
         # Create Network object.
-        self._network = CobraBay.CBNetwork(config=self._cbconfig)
+        network_config = self._cbconfig.network()
+        self._network = CobraBay.CBNetwork(**network_config)
         self._logger.info('Connecting to network...')
         # Connect to the network.
         self._network.connect()

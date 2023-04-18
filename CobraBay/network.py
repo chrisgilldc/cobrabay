@@ -16,42 +16,58 @@ from paho.mqtt.client import Client
 from .util import Convertomatic
 from .version import __version__
 
+#
+# {'units': 'imperial',
+# 'system_name': 'CobraBay1',
+# 'homeassistant': True,
+# 'interface': 'eth0',
+# 'mqtt':
+#   {'broker': 'cnc.jumpbeacon.net',
+#   'port': 1883,
+#   'username': 'cobrabay',
+#   'password': 'NbX2&38z@%H@$Cg0'}}
 
 class CBNetwork:
-    def __init__(self, config):
-        # Get our settings.
-        self._reconnect_timestamp = None
-        self._settings = config.network()
+    def __init__(self,
+                 unit_system,
+                 system_name,
+                 interface,
+                 mqtt_broker,
+                 mqtt_port,
+                 mqtt_username,
+                 mqtt_password,
+                 homeassistant=True,
+                 log_level="WARNING",
+                 mqtt_log_level="WARNING"):
+        # Save parameters.
+        self._mqtt_broker = mqtt_broker
+        self._mqtt_port = mqtt_port
+        self._mqtt_username = mqtt_username
+        self._mqtt_password = mqtt_password
+        self._use_homeassistant = homeassistant
+        self._unit_system = unit_system
+        self._system_name = system_name
+        self._interface = interface
+
         # Set up logger.
         self._logger = logging.getLogger("CobraBay").getChild("Network")
-        self._logger.setLevel(config.get_loglevel('network'))
+        self._logger.setLevel(log_level)
         self._logger.info("Network initializing...")
-        self._logger.debug("Network has settings: {}".format(self._settings))
 
         # Sub-logger for just MQTT
         self._logger_mqtt = logging.getLogger("CobraBay").getChild("MQTT")
-        self._logger_mqtt.setLevel(config.get_loglevel('mqtt'))
+        self._logger_mqtt.setLevel(mqtt_log_level)
         if self._logger_mqtt.level != self._logger.level:
             self._logger.info("MQTT Logging level set to {}".format(self._logger_mqtt.level))
 
         # Create a convertomatic instance.
-        self._cv = Convertomatic(self._settings['units'])
+        self._cv = Convertomatic(self._unit_system)
 
-        # Pull out the MAC as the client ID.
-        for address in psutil.net_if_addrs()[self._settings['interface']]:
-            # Find the link address.
-            if address.family == psutil.AF_LINK:
-                self._client_id = address.address.replace(':', '').upper()
-                break
-
-        self._logger.info("Defined Client ID: {}".format(self._client_id))
-
-        # Initialize the MQTT connected variable.
+        # Initialize variables
+        self._reconnect_timestamp = None
         self._mqtt_connected = False
-
         # Current device state. Will get updated every time we're polled.
         self._device_state = 'unknown'
-
         # List for commands received and to be passed upward.
         self._upward_commands = []
         # Registry to keep extant bays.
@@ -59,27 +75,25 @@ class CBNetwork:
         # Registry to keep triggers
         self._trigger_registry = {}
 
+        # Pull out the MAC as the client ID.
+        for address in psutil.net_if_addrs()[interface]:
+            # Find the link address.
+            if address.family == psutil.AF_LINK:
+                self._client_id = address.address.replace(':', '').upper()
+                break
+
+        self._logger.info("Defined Client ID: {}".format(self._client_id))
+
         # Create the MQTT Client.
         self._mqtt_client = Client(
             client_id=""
         )
         self._mqtt_client.username_pw_set(
-            username=self._settings['mqtt']['username'],
-            password=self._settings['mqtt']['password']
+            username=self._mqtt_username,
+            password=self._mqtt_password
         )
         # Send MQTT logging to the network logger.
         # self._mqtt_client.enable_logger(self._logger)
-        # MQTT host to connect to.
-        self._mqtt_host = self._settings['mqtt']['broker']
-        # If port is set, us that.
-        try:
-            self._mqtt_port = self._settings['mqtt']['port']
-        except:
-            self._mqtt_port = 1883
-
-        # Set TLS options. Not currently supported, this is a stud.
-        if 'tls' in self._settings['mqtt']:
-            pass
 
         # Connect callback.
         self._mqtt_client.on_connect = self._on_connect
@@ -94,9 +108,9 @@ class CBNetwork:
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
-                        'name': '{} Connectivity'.format(self._settings['system_name']),
+                        'name': '{} Connectivity'.format(self._system_name),
                         'type': 'binary_sensor',
-                        'entity': '{}_connectivity'.format(self._settings['system_name'].lower()),
+                        'entity': '{}_connectivity'.format(self._system_name.lower()),
                         'device_class': 'connectivity',
                         'payload_on': 'Online',
                         'payload_off': 'Offline'
@@ -107,9 +121,9 @@ class CBNetwork:
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
-                        'name': '{} CPU Use'.format(self._settings['system_name']),
+                        'name': '{} CPU Use'.format(self._system_name),
                         'type': 'sensor',
-                        'entity': '{}_cpu_pct'.format(self._settings['system_name'].lower()),
+                        'entity': '{}_cpu_pct'.format(self._system_name.lower()),
                         'unit_of_measurement': '%',
                         'icon': 'mdi:chip'
                     }
@@ -119,9 +133,9 @@ class CBNetwork:
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
-                        'name': '{} CPU Temperature'.format(self._settings['system_name']),
+                        'name': '{} CPU Temperature'.format(self._system_name),
                         'type': 'sensor',
-                        'entity': '{}_cpu_temp'.format(self._settings['system_name'].lower()),
+                        'entity': '{}_cpu_temp'.format(self._system_name.lower()),
                         'device_class': 'temperature',
                         'unit_of_measurement': self._uom('temp')
                     }
@@ -131,9 +145,9 @@ class CBNetwork:
                     'previous_state': {},
                     'enabled': True,
                     'ha_discovery': {
-                        'name': '{} Memory Use'.format(self._settings['system_name']),
+                        'name': '{} Memory Use'.format(self._system_name),
                         'type': 'sensor',
-                        'entity': '{}_mem_info'.format(self._settings['system_name'].lower()),
+                        'entity': '{}_mem_info'.format(self._system_name.lower()),
                         'value_template': "{{{{ value_json.mem_pct }}}}",
                         'unit_of_measurement': '%',
                         'icon': 'mdi:memory',
@@ -144,9 +158,9 @@ class CBNetwork:
                     'topic': 'CobraBay/' + self._client_id + '/undervoltage',
                     'previous_state': {},
                     'ha_discovery': {
-                        'name': '{} Undervoltage'.format(self._settings['system_name']),
+                        'name': '{} Undervoltage'.format(self._system_name),
                         'type': 'binary_sensor',
-                        'entity': '{}_undervoltage'.format(self._settings['system_name'].lower()),
+                        'entity': '{}_undervoltage'.format(self._system_name.lower()),
                         'payload_on': 'Under voltage detected',
                         'payload_off': 'Voltage normal',
                         'icon': 'mdi:lightning-bolt'
@@ -162,9 +176,9 @@ class CBNetwork:
                     'topic': 'CobraBay/' + self._client_id + '/display',
                     'previous_state': {},
                     'ha_discovery': {
-                        'name': '{} Display'.format(self._settings['system_name']),
+                        'name': '{} Display'.format(self._system_name),
                         'type': 'camera',
-                        'entity': '{}_display'.format(self._settings['system_name'].lower()),
+                        'entity': '{}_display'.format(self._system_name.lower()),
                         'icon': 'mdi:monitor',
                         'image_encoding': 'b64'
                     }
@@ -287,7 +301,7 @@ class CBNetwork:
         self._bay_registry[discovery_reg_info['bay_id']] = discovery_reg_info
         self._logger.debug("Have registered new bay info: {}".format(self._bay_registry[discovery_reg_info['bay_id']]))
         # If Home Assistant is enabled, and we're already connected, run just the Bay discovery.
-        if self._mqtt_connected and self._settings['homeassistant']:
+        if self._mqtt_connected and self._use_homeassistant:
             self._logger.debug("Running HA discovery for bay {}".format(discovery_reg_info['bay_id']))
             self._ha_discovery_bay(discovery_reg_info['bay_id'])
 
@@ -509,7 +523,7 @@ class CBNetwork:
     # Check the status of the network interface.
     def _iface_up(self):
         # Pull out stats for our interface.
-        stats = psutil.net_if_stats()[self._settings['interface']]
+        stats = psutil.net_if_stats()[self._interface]
         return stats.isup
 
     def _connect_mqtt(self):
@@ -519,7 +533,7 @@ class CBNetwork:
             self._topics['system']['device_connectivity']['topic'],
             payload='Offline', qos=0, retain=True)
         try:
-            self._mqtt_client.connect(host=self._mqtt_host, port=self._mqtt_port)
+            self._mqtt_client.connect(host=self._mqtt_broker, port=self._mqtt_port)
         except Exception as e:
             self._logger.warning('Network: Could not connect to MQTT broker.')
             self._logger.warning('Network: ' + str(e))
@@ -535,7 +549,7 @@ class CBNetwork:
         #                 self._logger.error(e, exc_info=True)
 
         # Send a discovery message and an online notification.
-        if self._settings['homeassistant']:
+        if self._use_homeassistant:
             self._ha_discovery()
         self._send_online()
         # Set the internal MQTT tracker to True. Surprisingly, the client doesn't have a way to track this itself!
@@ -566,7 +580,7 @@ class CBNetwork:
         self._logger.debug("HA Discovery has been called.")
         # Build the device JSON to include in other updates.
         self._device_info = dict(
-            name=self._settings['system_name'],
+            name=self._system_name,
             identifiers=[self._client_id],
             suggested_area='Garage',
             manufacturer='ConHugeCo',
@@ -676,19 +690,18 @@ class CBNetwork:
     # Helper method to determine the correct unit of measure to use. When we have reported sensor units, we use
     # this method to ensure the correct unit is being put in.
     def _uom(self, unit_type):
-        system = self._settings['units']
         if unit_type == 'length':
-            if system == 'imperial':
+            if self._unit_system == 'imperial':
                 uom = "in"
             else:
                 uom = "cm"
         elif unit_type == 'temp':
-            if system == 'imperial':
+            if self._unit_system == 'imperial':
                 uom = "°F"
             else:
                 uom = "°C"
         elif unit_type == 'speed':
-            if system == 'imperial':
+            if self._unit_system == 'imperial':
                 uom = 'mph'
             else:
                 uom = 'kph'
