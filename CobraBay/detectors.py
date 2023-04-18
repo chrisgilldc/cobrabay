@@ -182,7 +182,7 @@ class SingleDetector(Detector):
         self._logger.debug("Creating sensor object using options: {}".format(sensor_settings))
         if sensor_type == 'VL53L1X':
             self._logger.debug("Setting up VL53L1X with sensor settings: {}".format(sensor_settings))
-            self._sensor_obj = CB_VL53L1X(**sensor_settings, log_level="WARNING")
+            self._sensor_obj = CB_VL53L1X(**sensor_settings, log_level=log_level)
         elif sensor_type == 'TFMini':
             self._logger.debug("Setting up TFMini with sensor settings: {}".format(sensor_settings))
             self._sensor_obj = TFMini(**sensor_settings, log_level=log_level)
@@ -326,6 +326,7 @@ class Range(SingleDetector):
             elif abs(self.value) < self.spread_park:
                 return 'Park'
             elif self.value <= self._dist_crit:
+                self._logger.debug("Critical distance is {}, returning Final.".format(self._dist_crit))
                 return 'Final'
             elif self.value <= self._dist_warn:
                 return 'Base'
@@ -455,8 +456,11 @@ class Range(SingleDetector):
     def _derived_distances(self):
         self._logger.debug("Calculating derived distances.")
         adjusted_distance = self.bay_depth - self._offset
-        self._dist_warn = adjusted_distance.magnitude * self.pct_warn * adjusted_distance.units
-        self._dist_crit = adjusted_distance.magnitude * self.pct_crit * adjusted_distance.units
+        self._logger.debug("Adjusted distance: {}".format(adjusted_distance))
+        self._dist_warn = ( adjusted_distance.magnitude * self.pct_warn )/100 * adjusted_distance.units
+        self._logger.debug("Warning distance: {}".format(self._dist_warn))
+        self._dist_crit = ( adjusted_distance.magnitude * self.pct_crit )/100 * adjusted_distance.units
+        self._logger.debug("Critical distance: {}".format(self._dist_crit))
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
@@ -510,10 +514,10 @@ class Lateral(SingleDetector):
         if isinstance(self.value, Quantity):
             self._logger.debug("Comparing to OK ({}) and WARN ({})".format(
                 self.spread_ok, self.spread_warn))
-            if self.value > Quantity('96 in'):
-                # A standard vehicle width (in the US, at least) is 96 inches, so if we're reading something further
-                # than that, it's not the vehicle in question (ie: a far wall, another vehicle, etc).
-                qv = "No object"
+            if self.value > Quantity('90 in'):
+                # A standard vehicle width (in the US, at least) is 96 inches. If we can reach across a significant
+                # proportion of the bay, we're not finding a vehicle, so deem it to be no vehicle.
+                qv = "No vehicle"
             elif abs(self.value) <= self.spread_ok:
                 qv = "OK"
             elif abs(self.value) <= self.spread_warn:

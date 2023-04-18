@@ -203,20 +203,7 @@ class CBNetwork:
                         'encoding': 'b64'
                     }
                 },
-                # Adjusted readings from the sensors.
-                # 'bay_position': {
-                #     'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/position',
-                #     'previous_state': None,
-                #     'ha_discovery': {
-                #         'name': '{0[bay_name]} Detector Position: {0[detector_name]}',
-                #         'type': 'sensor',
-                #         'entity': '{0[bay_id]}_position_{0[detector_id]}',
-                #         'value_template': '{{{{ value_json.{0[detector_id]} }}}}',
-                #         'unit_of_measurement': self._uom('length'),
-                #         'icon': 'mdi:ruler'
-                #     }
-                # },
-                'bay_position': {
+                'bay_detector': {
                     'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/{0[detector_id]}',
                     'previous_state': None,
                     'ha_discovery': {
@@ -268,12 +255,12 @@ class CBNetwork:
                     }
                 },
                 'bay_dock_time': {
-                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/dock_time',
+                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/motion_timeout',
                     'previous_state': None,
                     'ha_discovery': {
-                        'name': '{0[bay_name]} Time Until Docked',
+                        'name': '{0[bay_name]} Motion Timeout',
                         'type': 'sensor',
-                        'entity': '{0[bay_id]}_dock_time_remaining',
+                        'entity': '{0[bay_id]}_motion_timeout',
                         'unit_of_measurement': 'seconds',
                         'payload_not_available': 'Not running'
                     }
@@ -609,7 +596,7 @@ class CBNetwork:
                             topic_name=entity,
                             fields={'bay_id': bay_id, 'bay_name': bay_name})
         for detector in self._bay_registry[bay_id]['detectors']:
-            for entity in ('bay_position','bay_quality'):
+            for entity in ('bay_detector','bay_quality'):
                 self._ha_create(
                     topic_type='bay',
                     topic_name=entity,
