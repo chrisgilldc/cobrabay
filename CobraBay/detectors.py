@@ -82,12 +82,15 @@ def read_if_stale(func):
             read_sensor = True  ## If there's no history, read the sensor, we must be on startup.
         # If flag is set, read the sensor and put its value into the history.
         if read_sensor:
-#            try:
-            value = self._sensor_obj.range
- #           except BaseException as e:
- #               # Save an exception into the history, we'll process this later.
- #               value = e
-            self._logger.debug("Triggered sensor reading. Got: {}".format(value))
+            try:
+                value = self._sensor_obj.range
+            except CobraBayException as e:
+                # For our own exceptions, we can save and process.
+                value = e
+            except BaseException as e:
+                # Anything else we have to re-raise.
+                raise e
+            self._logger.debug("Triggered sensor reading. Got: {} ({})".format(value, type(value)))
             # Add value to the history and truncate history to ten records.
             self._history.insert(0, (value, monotonic_ns()))
             self._history = self._history[:10]
@@ -98,7 +101,7 @@ def read_if_stale(func):
 
 
 class Detector:
-    def __init__(self, detector_id, name, offset="0 cm", log_level="WARNING", **kwargs):
+    def __init__(self, detector_id, name, offset="0 cm", log_level="WARNING"):
         # Save parameters.
         self._detector_id = detector_id
         self._name = name
@@ -174,15 +177,15 @@ class Detector:
 # Single Detectors add wrappers around a single sensor. Sensor arrays are not currently supported, but may be in the
 # future.
 class SingleDetector(Detector):
-    def __init__(self, sensor_type, sensor_settings, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING", **kwargs):
+        super().__init__(detector_id=detector_id, name=name, log_level=log_level)
         self._logger.debug("Creating sensor object using options: {}".format(sensor_settings))
         if sensor_type == 'VL53L1X':
-            # Create the sensor object using provided settings.
-            self._sensor_obj = CB_VL53L1X(**sensor_settings)
+            self._logger.debug("Setting up VL53L1X with sensor settings: {}".format(sensor_settings))
+            self._sensor_obj = CB_VL53L1X(**sensor_settings, log_level="WARNING")
         elif sensor_type == 'TFMini':
             self._logger.debug("Setting up TFMini with sensor settings: {}".format(sensor_settings))
-            self._sensor_obj = TFMini(**sensor_settings)
+            self._sensor_obj = TFMini(**sensor_settings, log_level=log_level)
         else:
             raise ValueError("Detector {} trying to use unknown sensor type {}".format(
                  self._name, sensor_settings))
@@ -243,8 +246,8 @@ class SingleDetector(Detector):
 
 # Detector that measures range progress.
 class Range(SingleDetector):
-    def __init__(self, error_margin, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, detector_id, name, error_margin, sensor_type, sensor_settings, log_level="WARNING"):
+        super().__init__(detector_id, name, sensor_type, sensor_settings, log_level)
         # Required properties. These are checked by the check_ready decorator function to see if they're not None.
         # Once all required properties are not None, the object is set to ready. Doesn't check for values being *correct*.
         self._required = ['bay_depth','spread_park','pct_warn','pct_crit']
@@ -473,8 +476,8 @@ class Range(SingleDetector):
 
 # Detector for lateral position
 class Lateral(SingleDetector):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING"):
+        super().__init__(detector_id, name, sensor_type, sensor_settings, log_level)
         self._required = ['side', 'spread_ok', 'spread_warn']
         self._side = None
         self._spread_ok = None
