@@ -48,7 +48,7 @@ class I2CSensor(BaseSensor):
         # Check for the Base I2C Sensors
         # Create a logger
         self._name = "{}-{}-{}".format(type(self).__name__, i2c_bus, hex(i2c_address))
-        self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
+        self._logger = logging.getLogger("CobraBay").getChild("Sensor").getChild(self._name)
         self._logger.setLevel(log_level)
         self._logger.info("Initializing sensor...")
 
@@ -150,7 +150,8 @@ class CB_VL53L1X(I2CSensor):
 
     instances = weakref.WeakSet()
 
-    def __init__(self, i2c_bus, i2c_address, enable_board, enable_pin, timing, logger, distance_mode ="long", log_level="WARNING"):
+    def __init__(self, i2c_bus, i2c_address, enable_board, enable_pin, timing, logger, distance_mode ="long",
+                 log_level="WARNING"):
         """
         :type i2c_bus: int
         :type i2c_address: hex
@@ -202,13 +203,13 @@ class CB_VL53L1X(I2CSensor):
         self.enable()
 
         # Start ranging.
-        self._sensor_obj.start_ranging()
+        self.start_ranging()
         # Set the timing.
         self.measurement_time = Quantity(timing).to('microseconds').magnitude
         self.distance_mode = 'long'
         self._previous_reading = self._sensor_obj.distance
         self._logger.debug("Test reading: {}".format(self._previous_reading))
-        self._sensor_obj.stop_ranging()
+        self.stop_ranging()
 
     def start_ranging(self):
         self._logger.debug("Starting ranging")
@@ -216,7 +217,7 @@ class CB_VL53L1X(I2CSensor):
             self._sensor_obj.start_ranging()
         except BaseException as e:
             self._logger.error("Encountered error when trying to start ranging! '{}'".format(str(e)))
-            raise
+            raise e
         else:
             self._ranging = True
             # Reset the previous reseting and previous timestamp. This is used for sensor pacing.

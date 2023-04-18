@@ -349,11 +349,6 @@ class CBBay:
                               'message': self.occupied,
                               'repeat': True,
                               'topic_mappings': {'bay_id': self.id}},
-                             # {'topic_type': 'bay',
-                             #  'topic': 'bay_position',
-                             #  'message': self.position,
-                             #  'repeat': True,
-                             #  'topic_mappings': {'bay_id': self.bay_id}},
                              {'topic_type': 'bay',
                               'topic': 'bay_quality',
                               'message': self.quality,
@@ -387,7 +382,7 @@ class CBBay:
         # Positions for all the detectors.
         for detector in self._detectors.keys():
             # Template detector message, to get filled in.
-            detector_message = {'topic_type': 'bay', 'topic': 'bay_position',
+            detector_message = {'topic_type': 'bay', 'topic': 'bay_detector',
                                 'message': {
                                     'status': self._detectors[detector].status
                                 },

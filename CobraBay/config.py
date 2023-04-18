@@ -306,9 +306,9 @@ class CBConfig:
 
         # Create the detector configuration for the bay.
         # Each bay applies bay-specific options to a detector when it initializes.
-        long_fallback = { 'offset': '0 in', 'spread_park': '2 in', 'pct_warn': 90, 'pct_crit': 95 }
+        long_fallback = { 'offset': Quantity("0 cm"), 'spread_park': '2 in', 'pct_warn': 90, 'pct_crit': 95 }
         long_required = ['spread_park', 'pct_warn', 'pct_crit']
-        lat_fallback = { 'offset': '0 in', 'spread_ok': '1 in', 'spread_warn': '3 in' }
+        lat_fallback = { 'offset': Quantity("0 cm"), 'spread_ok': '1 in', 'spread_warn': '3 in' }
         lat_required = ['side', 'intercept']
         for direction in ('longitudinal', 'lateral'):
             # Pull the defaults as a base. Otherwise, it's an empty dict.
@@ -340,11 +340,7 @@ class CBConfig:
                 # Lateral check.
                 if direction == 'lateral':
                     # Merge in the fallback items. User-defined defaults take precedence.
-                    dd = dict(lat_fallback.items() | direction_defaults.items())
-                    # self._logger.debug("Assembled lateral defaults: {}".format(dd.items()))
-                    # self._logger.debug("Detector config items: {}".format(detector.items()))
-                    # merged = dict( dd.items() | detector.items() )
-                    # self._logger.debug("Merged: {}".format(merged))
+                    dd = dict( lat_fallback.items() | direction_defaults.items() )
                     # Merge in the defaults with the detector specific settings. Detector-specific items take precedence.
                     config_dict['detector_settings'][detector['detector']] = dict( dd.items() | detector.items() )
                     # Check for required settings.
