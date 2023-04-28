@@ -6,7 +6,7 @@ from pint import UnitRegistry, Quantity
 from time import monotonic
 from .detectors import CB_VL53L1X
 import logging
-from pprint import pformat
+from pprint import pformat, pprint
 from functools import wraps
 import sys
 from .exceptions import SensorValueException
@@ -48,7 +48,7 @@ class CBBay:
                  lateral,
                  longitudinal,
                  intercepts,
-                 log_level="WARNING", **kwargs):
+                 log_level="DEBUG", **kwargs):
         """
         :param bay_id: ID for the bay. Cannot have spaces.
         :type bay_id: str
@@ -122,7 +122,7 @@ class CBBay:
             self._logger.info("\t\t{} - {}".format(detector,addr))
 
         # Activate detectors.
-        self._detector_state('activate')
+        self._detector_state('ranging')
 
         # Dock timer.
         self._dock_timer = {
@@ -141,6 +141,18 @@ class CBBay:
     def abort(self):
         self.state = "Ready"
 
+    @property
+    def bay_name(self):
+        return self._bay_name
+
+    @bay_name.setter
+    def bay_name(self, input):
+        self._bay_name = input
+
+    @property
+    def detectors(self):
+        return self._detectors
+
     # Method to get info to pass to the Network module and register.
     @property
     def discovery_reg_info(self):
@@ -157,7 +169,6 @@ class CBBay:
                 'type': self._detectors[item].detector_type
             }
             return_dict['detectors'].append(detector)
-
         return return_dict
 
     @property
@@ -168,6 +179,14 @@ class CBBay:
         }
         return return_dict
 
+    @property
+    def id(self):
+        return self._bay_id
+
+    @id.setter
+    def id(self, input):
+        self._bay_id = input.replace(" ","_").lower()
+
     # Bay properties
     @property
     @scan_if_stale
@@ -177,12 +196,38 @@ class CBBay:
         If positively occupied or not, returns that, otherwise 'unknown'.
 
         :returns: bay occupancy state
-        :rtype: String
+        :rtype: bool
         """
-        if self._check_occupancy():
-            return 'Occupied'
-        else:
-            return 'Unoccupied'
+        # Do a new scan and *don't* filter out non-intercepted laterals. We need to
+        self._scan_detectors(filter_lateral=False)
+        self._logger.debug("Checking for occupancy.")
+        self._logger.debug("Longitudinal is {}".format(self._quality[self._selected_range]))
+        # First cut is the range.
+        if self._quality[self._selected_range] in ('No object', 'Door open'):
+            # If the detector can hit the garage door, or the door is open, then clearly nothing is in the way, so
+            # the bay is vacant.
+            self._logger.debug("Longitudinal quality is {}, not occupied.".
+                               format(self._quality[self._selected_range]))
+            return False
+        if self._quality[self._selected_range] in (
+                'Emergency!', 'Back up', 'Park', 'Final', 'Base'):
+            # If the detector is giving us any of the 'close enough' qualities, there's something being found that
+            # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
+            # the sensors or whatnot
+            self._logger.debug("Longitudinal quality is {}, could be occupied.".
+                               format(self._quality[self._selected_range]))
+            lat_score = 0
+            max_score = len(self._lateral)
+            for detector in self._lateral:
+                if self._quality[detector] in ('OK', 'Warning', 'Critical'):
+                    # No matter how badly parked the vehicle is, it's still *there*
+                    lat_score += 1
+            self._logger.debug("Achieved lateral score {} of {}".format(lat_score, max_score))
+            if lat_score == max_score:
+                # All sensors have found something more or less in the right place, so yes, we're occupied!
+                return True
+        # If for some reason we drop through to here, assume we're not occupied.
+        return False
 
     # How good is the parking job?
     @property
@@ -215,6 +260,88 @@ class CBBay:
                 self._logger.info("Dock timer has expired and no motion found. Returning to ready.")
                 # Set self back to ready.
                 self.state = 'Ready'
+
+    # Method to check the range sensor for motion.
+    @scan_if_stale
+    def monitor(self):
+        vector = self._detectors[self._selected_range].vector
+        # If there's motion, change state.
+        if vector['direction'] == 'forward':
+            self.state = 'Docking'
+        elif vector['direction'] == 'reverse':
+            self.state = 'Undocking'
+        elif self._detectors[self._selected_range].value == 'Weak':
+            self.state = 'Docking'
+
+    # Method to be called when CobraBay it shutting down.
+    def shutdown(self):
+        self._logger.critical("Beginning shutdown...")
+        self._logger.critical("Shutting off detectors...")
+        self._detector_state('disabled')
+        self._logger.critical("Shutdown complete. Exiting.")
+
+    @property
+    def state(self):
+        """
+        Operating state of the bay.
+        Can be one of 'docking', 'undocking', 'ready', 'unavailable'.
+
+        :returns Bay state
+        :rtype: String
+        """
+        return self._state
+
+    @state.setter
+    def state(self, m_input):
+        self._logger.debug("State change requested to {} from {}".format(m_input, self._state))
+        # Trap invalid bay states.
+        if m_input not in ('Ready', 'Docking', 'Undocking', 'Unavailable'):
+            raise ValueError("{} is not a valid bay state.".format(m_input))
+        self._logger.debug("Old state: {}, new state: {}".format(self._state, m_input))
+        if m_input == self._state:
+            self._logger.debug("Requested state {} is also current state. No action.".format(m_input))
+            return
+        if m_input in ('Docking', 'Undocking') and self._state not in ('Docking', 'Undocking'):
+            self._logger.debug("Entering state: {}".format(m_input))
+            self._dock_timer['mark'] = monotonic()
+            self._logger.debug("Start time: {}".format(self._dock_timer['mark']))
+            self._logger.debug("Detectors: {}".format(self._detectors))
+        if m_input not in ('Docking', 'Undocking') and self._state in ('Docking', 'Undocking'):
+            self._logger.debug("Entering state: {}".format(m_input))
+            # Reset some variables.
+            # Make the mark none to be sure there's not a stale value in here.
+            self._dock_timer['mark'] = None
+        # Now store the state.
+        self._state = m_input
+
+    @property
+    def vector(self):
+        return self._detectors[self._selected_range].vector
+
+    def _detector_status(self):
+        return_list = []
+        # Positions for all the detectors.
+        for detector in self._detectors.keys():
+            # Template detector message, to get filled in.
+            detector_message = {'topic_type': 'bay', 'topic': 'bay_detector',
+                                'message': {
+                                    'status': self._detectors[detector].status
+                                },
+                                'repeat': False,
+                                'topic_mappings': {'bay_id': self.id, 'detector_id': self._detectors[detector].id}
+                                }
+
+            # If the detector is actively ranging, add the values.
+            self._logger.debug("Detector has status: {}".format(self._detectors[detector].status))
+            if self._detectors[detector].status == 'ranging':
+                detector_message['message']['adjusted_reading'] = self._detectors[detector].value
+                detector_message['message']['raw_reading'] = self._detectors[detector].value_raw
+                # While ranging, always send values to MQTT, even if they haven't changed.
+                detector_message['repeat'] = True
+            # Add the detector to the return list.
+            self._logger.info("Adding detector message status: {}".format(detector_message))
+            return_list.append(detector_message)
+        return return_list
 
     # Tells the detectors to update.
     # Note, this does NOT trigger timer operations.
@@ -259,148 +386,46 @@ class CBBay:
         self._position = position
         self._quality = quality
 
-    # Method to check occupancy.
-    def _check_occupancy(self):
-        # Do a new scan and *don't* filter out non-intercepted laterals. We need to
-        self._scan_detectors(filter_lateral=False)
-        self._logger.debug("Checking for occupancy.")
-        self._logger.debug("Longitudinal is {}".format(self._quality[self._selected_range]))
-        # First cut is the range.
-        if self._quality[self._selected_range] in ('No object', 'Door open'):
-            # If the detector can hit the garage door, or the door is open, then clearly nothing is in the way, so
-            # the bay is vacant.
-            self._logger.debug("Longitudinal quality is {}, not occupied.".
-                               format(self._quality[self._selected_range]))
-            return False
-        if self._quality[self._selected_range] in (
-                'Emergency!', 'Back up', 'Park', 'Final', 'Base'):
-            # If the detector is giving us any of the 'close enough' qualities, there's something being found that
-            # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
-            # the sensors or whatnot
-            self._logger.debug("Longitudinal quality is {}, could be occupied.".
-                               format(self._quality[self._selected_range]))
-            lat_score = 0
-            max_score = len(self._lateral)
-            for detector in self._lateral:
-                if self._quality[detector] in ('OK', 'Warning', 'Critical'):
-                    # No matter how badly parked the vehicle is, it's still *there*
-                    lat_score += 1
-            self._logger.debug("Achieved lateral score {} of {}".format(lat_score, max_score))
-            if lat_score == max_score:
-                # All sensors have found something more or less in the right place, so yes, we're occupied!
-                return True
-        # If for some reason we drop through to here, assume we're not occupied.
-        return False
 
-    # Method to check the range sensor for motion.
-    @scan_if_stale
-    def monitor(self):
-        vector = self._detectors[self._selected_range].vector
-        # If there's motion, change state.
-        if vector['direction'] == 'forward':
-            self.state = 'Docking'
-        elif vector['direction'] == 'reverse':
-            self.state = 'Undocking'
-        elif self._detectors[self._selected_range].value == 'Weak':
-            self.state = 'Docking'
+    # # MQTT status methods. These generate payloads the core network handler can send upward.
+    # def mqtt_messages(self, verify=False):
+    #     # Initialize the outbound message list.
+    #     # Always include the bay state and bay occupancy.
+    #     outbound_messages = [{'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False,
+    #                           'topic_mappings': {'bay_id': self.id}},
+    #                          {'topic_type': 'bay',
+    #                           'topic': 'bay_occupied',
+    #                           'message': self.occupied,
+    #                           'repeat': True,
+    #                           'topic_mappings': {'bay_id': self.id}},
+    #                          {'topic_type': 'bay',
+    #                           'topic': 'bay_quality',
+    #                           'message': self.quality,
+    #                           'repeat': True,
+    #                           'topic_mappings': {'bay_id': self.id}},
+    #                          {'topic_type': 'bay',
+    #                           'topic': 'bay_speed',
+    #                           'message': self._detectors[self._selected_range].vector,
+    #                           'repeat': True,
+    #                           'topic_mappings': {'bay_id': self.id}}]
+    #
+    #     # Add detector values, if applicable.
+    #     outbound_messages = outbound_messages + self._detector_status()
+    #
+    #     if self._dock_timer['mark'] is None:
+    #         message = 'Not running'
+    #     else:
+    #         message = self._dock_timer['allowed'] - (monotonic() - self._dock_timer['mark'])
+    #     outbound_messages.append(
+    #         {'topic_type': 'bay',
+    #          'topic': 'bay_dock_time',
+    #          'message': message,
+    #          'repeat': True,
+    #          'topic_mappings': {'bay_id': self.id}}
+    #     )
+    #     self._logger.debug("Have compiled outbound messages. {}".format(outbound_messages))
+    #     return outbound_messages
 
-    @property
-    def state(self):
-        """
-        Operating state of the bay.
-        Can be one of 'docking', 'undocking', 'ready', 'unavailable'.
-
-        :returns Bay state
-        :rtype: String
-        """
-        return self._state
-
-    @state.setter
-    def state(self, m_input):
-        self._logger.debug("State change requested to {} from {}".format(m_input, self._state))
-        # Trap invalid bay states.
-        if m_input not in ('Ready', 'Docking', 'Undocking', 'Unavailable'):
-            raise ValueError("{} is not a valid bay state.".format(m_input))
-        self._logger.debug("Old state: {}, new state: {}".format(self._state, m_input))
-        if m_input == self._state:
-            self._logger.debug("Requested state {} is also current state. No action.".format(m_input))
-            return
-        if m_input in ('Docking', 'Undocking') and self._state not in ('Docking', 'Undocking'):
-            self._logger.debug("Entering state: {}".format(m_input))
-            self._dock_timer['mark'] = monotonic()
-            self._logger.debug("Start time: {}".format(self._dock_timer['mark']))
-            self._logger.debug("Detectors: {}".format(self._detectors))
-        if m_input not in ('Docking', 'Undocking') and self._state in ('Docking', 'Undocking'):
-            self._logger.debug("Entering state: {}".format(m_input))
-            # Reset some variables.
-            # Make the mark none to be sure there's not a stale value in here.
-            self._dock_timer['mark'] = None
-        # Now store the state.
-        self._state = m_input
-
-    # MQTT status methods. These generate payloads the core network handler can send upward.
-    def mqtt_messages(self, verify=False):
-        # Initialize the outbound message list.
-        # Always include the bay state and bay occupancy.
-        outbound_messages = [{'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False,
-                              'topic_mappings': {'bay_id': self.id}},
-                             {'topic_type': 'bay',
-                              'topic': 'bay_occupied',
-                              'message': self.occupied,
-                              'repeat': True,
-                              'topic_mappings': {'bay_id': self.id}},
-                             {'topic_type': 'bay',
-                              'topic': 'bay_quality',
-                              'message': self.quality,
-                              'repeat': True,
-                              'topic_mappings': {'bay_id': self.id}},
-                             {'topic_type': 'bay',
-                              'topic': 'bay_speed',
-                              'message': self._detectors[self._selected_range].vector,
-                              'repeat': True,
-                              'topic_mappings': {'bay_id': self.id}}]
-
-        # Add detector values, if applicable.
-        outbound_messages = outbound_messages + self._detector_status()
-
-        if self._dock_timer['mark'] is None:
-            message = 'Not running'
-        else:
-            message = self._dock_timer['allowed'] - (monotonic() - self._dock_timer['mark'])
-        outbound_messages.append(
-            {'topic_type': 'bay',
-             'topic': 'bay_dock_time',
-             'message': message,
-             'repeat': True,
-             'topic_mappings': {'bay_id': self.id}}
-        )
-        self._logger.debug("Have compiled outbound messages. {}".format(outbound_messages))
-        return outbound_messages
-
-    def _detector_status(self):
-        return_list = []
-        # Positions for all the detectors.
-        for detector in self._detectors.keys():
-            # Template detector message, to get filled in.
-            detector_message = {'topic_type': 'bay', 'topic': 'bay_detector',
-                                'message': {
-                                    'status': self._detectors[detector].status
-                                },
-                                'repeat': False,
-                                'topic_mappings': {'bay_id': self.id, 'detector_id': self._detectors[detector].id}
-                                }
-
-            # If the detector is actively ranging, add the values.
-            self._logger.debug("Detector has status: {}".format(self._detectors[detector].status))
-            if self._detectors[detector].status == 'ranging':
-                detector_message['message']['adjusted_reading'] = self._detectors[detector].value
-                detector_message['message']['raw_reading'] = self._detectors[detector].value_raw
-                # While ranging, always send values to MQTT, even if they haven't changed.
-                detector_message['repeat'] = True
-            # Add the detector to the return list.
-            self._logger.info("Adding detector message status: {}".format(detector_message))
-            return_list.append(detector_message)
-        return return_list
 
     # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
     def display_data(self):
@@ -471,62 +496,15 @@ class CBBay:
             self._logger.debug("Not assembling laterals, lateral order is None.")
         return return_data
 
-    # Method to be called when CobraBay it shutting down.
-    def shutdown(self):
-        self._logger.critical("Beginning shutdown...")
-        self._logger.critical("Shutting off detectors...")
-        self._detector_state('deactivate')
-        self._logger.critical("Shutdown complete. Exiting.")
-
     # Traverse the detectors dict, activate everything that needs activating.
-    def _detector_state(self, mode):
-        if mode not in ('activate', 'deactivate'):
-            raise ValueError("Bay can only set detector states to 'activate', or 'deactivate'")
-        self._logger.debug("Traversing detectors to {}".format(mode))
+    def _detector_state(self, target_status):
+        if target_status not in ('disabled','enabled','ranging'):
+            raise ValueError("'{}' not a valid state for detectors.".format(target_status))
+        self._logger.debug("Traversing detectors to set status to '{}'".format(target_status))
         # Traverse the dict looking for detectors that need activation.
         for detector in self._detectors:
             self._logger.debug("Changing detector {}".format(detector))
-            if mode == 'activate':
-                self._detectors[detector].activate()
-            elif mode == 'deactivate':
-                self._detectors[detector].deactivate()
-            else:
-                raise RuntimeError("Detector activation reached impossible state.")
-
-    # # Traverse the detectors and make sure they're all stopped.
-    # def _shutdown_detectors(self, detectors):
-    #     if isinstance(detectors, list):
-    #         for i in range(len(detectors)):
-    #             # Call nested lists iteratively.
-    #             if isinstance(detectors[i], list) or isinstance(detectors[i], dict):
-    #                 self._shutdown_detectors(detectors[i])
-    #             # If it's a Detector, it has shutdown, call it.
-    #             elif isinstance(detectors[i], Detector):
-    #                 detectors[i].shutdown()
-    #     elif isinstance(detectors, dict):
-    #         for item in detectors:
-    #             # Call nested lists and dicts iteratively.
-    #             if isinstance(detectors[item], list) or isinstance(detectors[item], dict):
-    #                 self._shutdown_detectors(detectors[item])
-    #             # If it's a Detector, it has shutdown, call it.
-    #             elif isinstance(detectors[item], Detector):
-    #                 detectors[item].shutdown()
-
-    @property
-    def id(self):
-        return self._bay_id
-
-    @id.setter
-    def id(self, input):
-        self._bay_id = input.replace(" ","_").lower()
-
-    @property
-    def bay_name(self):
-        return self._bay_name
-
-    @bay_name.setter
-    def bay_name(self, input):
-        self._bay_name = input
+            self._detectors[detector].status = target_status
 
     # Apply specific config options to the detectors.
     def _setup_detectors(self):

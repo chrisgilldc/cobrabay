@@ -173,11 +173,10 @@ class Detector:
     def _when_ready(self):
         pass
 
-
 # Single Detectors add wrappers around a single sensor. Sensor arrays are not currently supported, but may be in the
 # future.
 class SingleDetector(Detector):
-    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING", **kwargs):
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="DEBUG", **kwargs):
         super().__init__(detector_id=detector_id, name=name, log_level=log_level)
         self._logger.debug("Creating sensor object using options: {}".format(sensor_settings))
         if sensor_type == 'VL53L1X':
@@ -189,6 +188,7 @@ class SingleDetector(Detector):
         else:
             raise ValueError("Detector {} trying to use unknown sensor type {}".format(
                  self._name, sensor_settings))
+        self._status = None
 
     # Allow adjustment of timing.
     def timing(self, timing_input):
@@ -198,39 +198,38 @@ class SingleDetector(Detector):
         mt = timing_input.to('microseconds').magnitude
         self._sensor_obj.measurement_time = mt
 
-    # Called when the system needs to turn this sensor on.
-    def activate(self):
-        self._logger.debug("Detector starting sensor ranging.")
-        self._sensor_obj.start_ranging()
+    # The status of a single detector is definitionally the status of its enwrapped sensor.
+    @property
+    def status(self):
+        return self._sensor_obj.status
 
-    # Called when the system needs to go into idle mode and turn the sensor off.
-    def deactivate(self):
-        self._logger.debug("Detector stopping sensor ranging.")
-        self._sensor_obj.stop_ranging()
-
-    # Complete turn the sensor on or off using its enable pin.
-    def enable(self):
-        self._logger.debug("Enabling sensor.")
-        self._sensor_obj.enable()
-
-    def disable(self):
-        self._logger.warning("Setting sensor enable pin to false.")
-        self._sensor_obj.disable()
-
-    # Called *only* when the system is exiting. This is currently an alias for deactivating, but other types
-    # of hardware may need other behavior, ie: freeing devices.
-    def shutdown(self):
-        self.deactivate()
-        self.disable()
+    # Change the status of the detector.
+    @status.setter
+    def status(self, target_status):
+        """
+        :param target_status: Status to set the detector to. One of 'disabled', 'enabled', 'ranging'
+        :type target_status: str
+        :return:
+        """
+        if target_status.lower() not in ('disabled', 'enabled', 'ranging'):
+            raise ValueError("Target status '{}' not valid.".format(target_status))
+        else:
+            self._logger.debug("Target status: {}".format(target_status))
+        if target_status.lower() == self._sensor_obj.status:
+            self._logger.info("Detector already has status '{}'. Nothing to do.".format(self._sensor_obj.status))
+        else:
+            self._logger.debug("Setting sensor object status to '{}".format(target_status))
+            self._sensor_obj.status = target_status
 
     # Debugging methods to let the main system know a few things about the attached sensor.
     @property
     def sensor_type(self):
         return type(self._sensor_obj)
 
+    # Pass through for the operating state of the sensor object.
     @property
-    def status(self):
-        return self._sensor_obj.status
+    def state(self):
+        return self._sensor_obj.state
 
     @property
     def sensor_interface(self):
@@ -402,7 +401,7 @@ class Range(SingleDetector):
         try:
             self._sensor_obj.distance_mode = target_mode
         except ValueError:
-            print("Could not change distance mode to {}".format(target_mode))
+            self._logger.warning("Could not change distance mode to {}".format(target_mode))
 
     @property
     def bay_depth(self):
@@ -448,10 +447,6 @@ class Range(SingleDetector):
     def pct_crit(self, input):
         self._pct_crit = input / 100
 
-    # When object is declared ready, calculated derived distances.
-    def _when_ready(self):
-        self._derived_distances()
-
     # Pre-bake distances for warn and critical to make evaluations a little easier.
     def _derived_distances(self):
         self._logger.debug("Calculating derived distances.")
@@ -466,17 +461,20 @@ class Range(SingleDetector):
     # inherented.
 
     @property
-    def i2c_address(self):
-        return super().i2c_address
-
-    @property
     def offset(self):
         return super().offset
 
     @offset.setter
-    def offset(self, input):
-        super(Range, self.__class__).offset.fset(self, input)
+    def offset(self, new_offset):
+        super(Range, self.__class__).offset.fset(self, new_offset)
 
+    @property
+    def status(self):
+        return super().status
+
+    @status.setter
+    def status(self, target_status):
+        super(Range, self.__class__).status.fset(self, target_status)
 
 # Detector for lateral position
 class Lateral(SingleDetector):
@@ -573,7 +571,7 @@ class Lateral(SingleDetector):
 
     @property
     def i2c_address(self):
-        return super().i2c_address
+        return super()._i2c_address
 
     @property
     def offset(self):
@@ -583,3 +581,11 @@ class Lateral(SingleDetector):
     @check_ready
     def offset(self, m_input):
         super(Lateral, self.__class__).offset.fset(self, m_input)
+
+    @property
+    def status(self):
+        return super().status
+
+    @status.setter
+    def status(self, target_status):
+        super(Lateral, self.__class__).status.fset(self, target_status)
