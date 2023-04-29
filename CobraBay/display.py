@@ -258,7 +258,7 @@ class CBDisplay:
         draw.rectangle([(w-3, 0), (w-1, h-5)], width=1)
         return img
 
-    def _icon_network(self, net_status, mqtt_status, x_input=None, y_input=None):
+    def _icon_network(self, net_status=False, mqtt_status=False, x_input=None, y_input=None):
         # determine the network status color based on combined network and MQTT status.
         if net_status is False:
             net_color = 'red'
@@ -266,7 +266,7 @@ class CBDisplay:
         elif net_status is True:
             net_color = 'green'
             if mqtt_status is False:
-                net_color = 'red'
+                mqtt_color = 'red'
             elif mqtt_status is True:
                 mqtt_color = 'green'
             else:
