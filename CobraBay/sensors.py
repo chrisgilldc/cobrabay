@@ -57,18 +57,53 @@ class BaseSensor:
         if target_status not in ('disabled', 'enabled', 'ranging'):
             raise ValueError("Target status '{}' not valid".format(target_status))
         if target_status == 'disabled':
-            self._disable()
+            try:
+                self._disable()
+            except BaseException as e:
+                self._logger.error("Could not disable.")
+                self._logger.exception(e)
+            else:
+                self._logger.debug("Status is now 'disabled'")
+                self._status = 'disabled'
         elif target_status == 'enabled':
             # If returning to enabled from ranging, only need to stop ranging.
             if self._status == 'ranging':
-                self._stop_ranging()
+                try:
+                    self._stop_ranging()
+                except BaseException as e:
+                    self._logger.error("Could not stop ranging while changing to status 'enabled'")
+                    self._logger.exception(e)
+                else:
+                    self._logger.debug("Status is now 'enabled'")
+                    self._status = 'enabled'
             else:
-                self._enable()
+                try:
+                    self._enable()
+                except BaseException as e:
+                    self._logger.error("Could not enable.")
+                    self._logger.exception(e)
+                else:
+                    self._logger.debug("Status is now 'enabled'")
+                    self._status = 'enabled'
         elif target_status == 'ranging':
             # If sensor is disabled, enable before going straight to ranging.
             if self._status == 'disabled':
-                self._enable()
-            self._start_ranging()
+                try:
+                    self._enable()
+                except BaseException as e:
+                    self._logger.error("Could not perform implicit enable while changing status to ranging.")
+                    self._logger.exception(e)
+                    return
+                else:
+                    self._logger.debug("Successfully completed implicit enable to allow change to ranging")
+            try:
+                self._start_ranging()
+            except BaseException as e:
+                self._logger.error("Could not start ranging.")
+                self._logger.exception(e)
+            else:
+                self._logger.debug("Status is now ranging.")
+                self._status = 'ranging'
 
     # Dummy methods for the status setter. These should be overridden by specific sensor class implementations.
     # Turn off the sensor.
@@ -81,11 +116,11 @@ class BaseSensor:
 
     # Start actively returning readings.
     def _start_ranging(self):
-        return
+        raise NotImplementedError("Start Ranging method must be implemented by cose class.")
 
     # Stop the sensor from ranging but leave it enabled.
     def _stop_ranging(self):
-        return
+        raise NotImplementedError("Stop Ranging method must be implemented by core sensor class.")
 
 class I2CSensor(BaseSensor):
     def __init__(self, i2c_bus, i2c_address, logger, log_level='WARNING'):
@@ -243,18 +278,17 @@ class CB_VL53L1X(I2CSensor):
             'min_range': Quantity('30mm')
         }
 
-        # Bring up the sensor for a test reading.
-        self.enable()  # Enable self.
-
         # Start ranging.
         self.status = 'ranging'  # Start ranging.
         self.measurement_time = Quantity(timing).to('microseconds').magnitude
         self.distance_mode = 'long'
         self._previous_reading = self._sensor_obj.distance
         self._logger.debug("Test reading: {}".format(self._previous_reading))
+        self._logger.debug("Setting status back to enabled, stopping ranging.")
         self.status = 'enabled'
+        self._logger.debug("Initialization complete.")
 
-    def start_ranging(self):
+    def _start_ranging(self):
         self._logger.debug("Starting ranging")
         try:
             self._sensor_obj.start_ranging()
@@ -264,10 +298,10 @@ class CB_VL53L1X(I2CSensor):
         else:
             self._ranging = True
             # Clear the previous readings.
-            self._previous_reading = self._sensor_obj.distance
+            self._previous_reading = Quantity(self._sensor_obj.distance, 'cm')
             self._previous_timestamp = monotonic()
 
-    def stop_ranging(self):
+    def _stop_ranging(self):
         self._logger.debug("Stopping ranging.")
         try:
             self._sensor_obj.stop_ranging()
@@ -277,7 +311,7 @@ class CB_VL53L1X(I2CSensor):
             self._ranging = False
 
     # Enable the sensor.
-    def enable(self):
+    def _enable(self):
         # Set the pin true to turn on the board.
         self.enable_pin.value = True
         # Wait one second to make sure the bus has stabilized.
@@ -296,15 +330,15 @@ class CB_VL53L1X(I2CSensor):
                 self._logger.error(e, exc_info=True)
                 self._fault = True
             else:
-                self.disable()
-                self.enable()
+                self._disable()
+                self._enable()
         else:
             # Create the sensor object with the default address of 0x29
             self._sensor_obj = af_VL53L1X(i2c, address=0x29)
             # Change the address to the desired address.
             self._sensor_obj.set_address(self._i2c_address)
 
-    def disable(self):
+    def _disable(self):
         self.enable_pin.value = False
         # Also set the internal ranging variable to false, since by definition, when the board gets killed, we stop ranging.
         self._ranging = False
@@ -312,15 +346,16 @@ class CB_VL53L1X(I2CSensor):
     @property
     def timing_budget(self):
         if self._sensor_obj is not None:
-            return self._sensor_obj.timing_budget
+            return Quantity(self._sensor_obj.timing_budget, 'ms')
         elif self._timing_budget is not None:
-            return self._timing_budget
+            return Quantity(self._timing_budget, 'ms')
         else:
-            return 100
+            return Quantity('100 ms')
 
     @timing_budget.setter
     def timing_budget(self, timing_input):
-        timing_input = Quantity(timing_input).to('ms')
+        if not isinstance(timing_input, Quantity):
+            timing_input = Quantity(timing_input).to('ms')
         if timing_input.magnitude not in (20, 33, 50, 100, 200, 500):
             raise ValueError("Requested timing budget {} not valid. "
                              "Must be one of: 20, 33, 50, 100, 200 or 500 ms".format(input))
@@ -351,8 +386,9 @@ class CB_VL53L1X(I2CSensor):
 
     @property
     def range(self):
+        self._logger.debug("Range requsted. Sensor state is: {}".format(self.state))
         if self.state != 'ranging':
-            # Return 'No Reading' if the board isn't actively ranging, since, duh.
+            # Return 'Not ranging' if the board isn't actively ranging, since, duh.
             return 'Not ranging'
         elif monotonic() - self._previous_timestamp < 0.2:
             # Make sure to pace the readings properly, so we're not over-running the native readings.
@@ -391,22 +427,21 @@ class CB_VL53L1X(I2CSensor):
                     self._logger.debug("I2C bus after fault: {}".format(hex_list))
                     self._logger.debug("Resetting sensor to recover...")
                     # Disable the sensor.
-                    self.disable()
+                    self._disable()
                     # Re-enable the sensor. This will re-enable the sensor and put it back at its correct address.
-                    self.enable()
+                    self._enable()
                     hex_list = []
                     for address in self._i2c.scan():
                         hex_list.append(hex(address))
                     self._logger.debug("I2C bus after re-enabling: {}".format(hex_list))
-
-            # A "none" means the sensor had no response.
-            if reading is None:
-                return "No reading"
             else:
-                reading = Quantity(reading, self._ureg.centimeter)
-                self._previous_reading = reading
-                self._previous_timestamp = monotonic()
-                return self._previous_reading
+                # A "none" means the sensor had no response.
+                if reading is None:
+                    return "No reading"
+                else:
+                    self._previous_reading = Quantity(reading, 'cm')
+                    self._previous_timestamp = monotonic()
+                    return self._previous_reading
 
     # Method to find out if an address is on the I2C bus.
     def _addr_on_bus(self, i2c_address):
@@ -459,21 +494,20 @@ class CB_VL53L1X(I2CSensor):
         # Make sure this is an 'output' type pin.
         self._enable_pin.switch_to_output()
 
-    def shutdown(self):
-        # Stop from ranging
-        self.stop_ranging()
-
     @property
     def state(self):
         """
-        The current state of the sensor. This is what is actually happening, not necesarially what has been requested.
+        The current state of the sensor. This is what is actually happening, not necessarily what has been requested.
         :return: str
         """
         # If sensor is actively ranging, check for active vs. error states. These are VL53L1X specific
+        self._logger.debug("Evaluating state...")
         if self._fault is True:
             # Fault while enabling.
+            self._logger.debug("Fault found.")
             return 'fault'
         elif self.enable_pin.value is True:
+            self._logger.debug("Enable pin is on.")
             if self._ranging is True:
                 self._logger.debug("Previous reading: {} ({})".format(self._previous_reading, type(self._previous_reading)))
                 if isinstance(self._previous_reading,Quantity):
@@ -481,10 +515,13 @@ class CB_VL53L1X(I2CSensor):
                 else:
                     return 'unable to range'
             else:
+                self._logger.debug("Enabled but not ranging.")
                 return 'enabled'
         elif self.enable_pin.value is False:
+                self._logger.debug("Enable pin is off.")
                 return 'disabled'
         else:
+            self._logger.debug("Unknown fault state.")
             return 'fault'
 
 
@@ -582,4 +619,10 @@ class TFMini(SerialSensor):
         :param target_status:
         :return:
         """
-        return True
+        pass
+
+    @property
+    def timing_budget(self):
+        # The TFMini's default update rate is 100 Hz. 1s = 1000000000 ns / 100 = 10000000 ns.
+        # This is static and assuming it hasn't been changed, so return it.
+        return Quantity('10000000 ns')
