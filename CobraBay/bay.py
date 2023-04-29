@@ -122,7 +122,9 @@ class CBBay:
             self._logger.info("\t\t{} - {}".format(detector,addr))
 
         # Activate detectors.
+        self._logger.debug("Activating detectors...")
         self._detector_state('ranging')
+        self._logger.debug("Detectors activated.")
 
         # Dock timer.
         self._dock_timer = {
