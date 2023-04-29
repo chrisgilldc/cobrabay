@@ -69,10 +69,10 @@ class CBCore:
         self._logger.debug("Creating network object...")
         # Create Network object.
         network_config = self._cbconfig.network()
+        self._logger.debug("Using network config:")
+        self._logger.debug(pformat(network_config))
         self._network = CobraBay.CBNetwork(**network_config)
-        self._logger.info('Connecting to network...')
-        # Connect to the network.
-        self._network.connect()
+        self._network.register_pistatus(self._pistatus)
 
         # Queue for outbound messages.
         self._outbound_messages = []
@@ -100,12 +100,12 @@ class CBCore:
 
         # Register the bay with the network and display.
         for bay_id in self._bays:
-            self._network.register_bay(self._bays[bay_id].discovery_reg_info)
+            self._network.register_bay(self._bays[bay_id])
             self._display.register_bay(self._bays[bay_id].display_reg_info)
 
-        # Collect messages from the bays.
-        for bay_id in self._bays:
-            self._outbound_messages = self._outbound_messages + self._bays[bay_id].mqtt_messages(verify=True)
+        # # Collect messages from the bays.
+        # for bay_id in self._bays:
+        #     self._outbound_messages = self._outbound_messages + self._bays[bay_id].mqtt_messages(verify=True)
 
         # Create triggers.
         self._logger.debug("About to setup triggers.")
@@ -137,19 +137,17 @@ class CBCore:
             #         break
             #     target_bay.register_trigger(self._triggers[trigger_id])
 
-        # Poll to dispatch the message queue
-        self._logger.debug("Initial message queue: {}".format(self._outbound_messages))
-        self._network.poll(self._outbound_messages)
-        # Flush the queue.
-        self._outbound_messages = []
+        # Connect to the network.
+        self._logger.info('Connecting to network...')
+        self._network.connect()
+        # Do an initial poll.
+        self._network.poll()
         self._logger.info('System Initialization complete.')
 
     # Common network handler, pushes data to the network and makes sure the MQTT client can poll.
     def _network_handler(self):
-        # Add hardware status messages.
-        self._outbound_messages.extend(self._mqtt_hw())
         # Send the outbound message queue to the network module to handle. After, we empty the message queue.
-        network_data = self._network.poll(self._outbound_messages)
+        network_data = self._network.poll()
         # We've pushed the message out, so reset our current outbound message queue.
         self._outbound_messages = []
         return network_data
@@ -204,11 +202,11 @@ class CBCore:
             self._logger.debug("Returned to main loop from trigger check.")
 
             self._display.show(system_status, "clock")
-            # Push out the image to MQTT.
-            self._outbound_messages.append(
-                {'topic_type': 'system',
-                 'topic': 'display',
-                 'message': self._display.current, 'repeat': True})
+            # # Push out the image to MQTT.
+            # self._outbound_messages.append(
+            #     {'topic_type': 'system',
+            #      'topic': 'display',
+            #      'message': self._display.current, 'repeat': True})
 
     # Start sensors and display to guide parking.
     def _motion(self, bay_id, cmd):
@@ -229,17 +227,17 @@ class CBCore:
         while self._bays[bay_id].state == direction:
             # Collect the MQTT messages from the bay itself.
             self._logger.debug("Collecting MQTT messages from bay.")
-            bay_messages = self._bays[bay_id].mqtt_messages()
-            self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
-            self._outbound_messages = self._outbound_messages + bay_messages
+            # bay_messages = self._bays[bay_id].mqtt_messages()
+            # self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
+            # self._outbound_messages = self._outbound_messages + bay_messages
             # Collect the display data to send to the display.
             self._logger.debug("Collecting display data from bay.")
             display_data = self._bays[bay_id].display_data()
             self._logger.debug("Collected display data: {}".format(display_data))
             self._display.show_motion(direction, display_data)
             # Put the display image on the MQTT stack.
-            self._outbound_messages.append(
-                {'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': True})
+            # self._outbound_messages.append(
+            #     {'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': True})
             # Poll the network.
             self._logger.debug("Polling network.")
             self._network_handler()
@@ -249,27 +247,10 @@ class CBCore:
             self._trigger_check()
         self._logger.info("Bay state changed to {}. Returning to idle.".format(self._bays[bay_id].state))
         # Collect and send a final set of MQTT messages.
-        self._logger.debug("Collecting MQTT messages from bay.")
-        bay_messages = self._bays[bay_id].mqtt_messages()
-        self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
-        self._outbound_messages = self._outbound_messages + bay_messages
-
-    # Utility method to put the hardware status on the outbound message queue. This needs to be used from a few places.
-    def _mqtt_hw(self):
-        hw_messages = []
-        hw_messages.append(
-            {'topic_type': 'system', 'topic': 'cpu_pct', 'message': self._pistatus.status('cpu_pct'), 'repeat': False})
-        hw_messages.append(
-            {'topic_type': 'system', 'topic': 'cpu_temp', 'message': self._pistatus.status('cpu_temp'),
-             'repeat': False})
-        hw_messages.append(
-            {'topic_type': 'system', 'topic': 'mem_info', 'message': self._pistatus.status('mem_info'),
-             'repeat': False})
-        hw_messages.append(
-            {'topic_type': 'system', 'topic': 'undervoltage', 'message': self._pistatus.status('undervoltage'),
-             'repeat': False}
-        )
-        return hw_messages
+        # self._logger.debug("Collecting MQTT messages from bay.")
+        # bay_messages = self._bays[bay_id].mqtt_messages()
+        # self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
+        # self._outbound_messages = self._outbound_messages + bay_messages
 
     def undock(self):
         self._logger.info('CobraBay: Undock not yet implemented.')
@@ -284,8 +265,8 @@ class CBCore:
                 self._logger.critical("Shutting down bay {}".format(bay))
                 self._bays[bay].shutdown()
             for detector in self._detectors:
-                self._logger.critical("Shutting down detector: {}".format(detector))
-                self._detectors[detector].shutdown()
+                self._logger.critical("Disabling detector: {}".format(detector))
+                self._detectors[detector].status = 'disabled'
         except AttributeError:
             # Must be exiting before bays were defined. That's okay.
             pass

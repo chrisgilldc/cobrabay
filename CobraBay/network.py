@@ -8,6 +8,7 @@ import logging
 from json import dumps as json_dumps
 #from json import loads as json_loads
 import time
+from pprint import pformat
 
 # from getmac import get_mac_address
 import psutil
@@ -66,10 +67,13 @@ class CBNetwork:
         # Initialize variables
         self._reconnect_timestamp = None
         self._mqtt_connected = False
+        self._pistatus_timestamp = 0
         # Current device state. Will get updated every time we're polled.
         self._device_state = 'unknown'
         # List for commands received and to be passed upward.
         self._upward_commands = []
+        # History of payloads, to determine if we need to repeat.
+        self._topic_history = {}
         # Registry to keep extant bays.
         self._bay_registry = {}
         # Registry to keep triggers
@@ -295,15 +299,11 @@ class CBNetwork:
         }
         self._logger.info('Network: Initialization complete.')
 
+    # Registration methods
+    
     # Method to register a bay.
-    def register_bay(self, discovery_reg_info):
-        # We only need the names of things.
-        self._bay_registry[discovery_reg_info['bay_id']] = discovery_reg_info
-        self._logger.debug("Have registered new bay info: {}".format(self._bay_registry[discovery_reg_info['bay_id']]))
-        # If Home Assistant is enabled, and we're already connected, run just the Bay discovery.
-        if self._mqtt_connected and self._use_homeassistant:
-            self._logger.debug("Running HA discovery for bay {}".format(discovery_reg_info['bay_id']))
-            self._ha_discovery_bay(discovery_reg_info['bay_id'])
+    def register_bay(self, bay_obj):
+        self._bay_registry[bay_obj.id] = bay_obj
 
     def unregister_bay(self, bay_id):
         try:
@@ -328,6 +328,10 @@ class CBNetwork:
         self._mqtt_client.subscribe(trigger_obj.topic)
         self._logger.debug("Connecting callback...")
         self._mqtt_client.message_callback_add(trigger_obj.topic, trigger_obj.callback)
+
+    # Store a provided pistatus object. We can only need one, so this is easy.
+    def register_pistatus(self, pistatus_obj):
+        self._pistatus = pistatus_obj
 
     def _on_connect(self, userdata, flags, rc, properties=None):
         self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
@@ -360,89 +364,29 @@ class CBNetwork:
             message.topic, message.payload
         ))
 
-    # # Device Command callback
-    # def _cb_device_command(self, client, userdata, message):
-    #     self._logger_mqtt.debug("Received device command message: {}".format(message.payload))
-    #     # Try to decode the JSON.
-    #     try:
-    #         message = json_loads(message.payload)
-    #     except:
-    #         self._logger_mqtt.error(
-    #             "Could not decode JSON from MQTT message '{}' on topic '{}'".format(message.topic, message))
-    #         # Ignore the error itself, plow through.
-    #         return False
-    #
-    #     # Proceed on valid commands.
-    #     if 'cmd' not in message:
-    #         self._logger_mqtt.error("MQTT message for topic {} does not contain a 'cmd' directive".format(message.topic))
-    #     elif message['cmd'] == 'rediscover':
-    #         # Rerun Home Assistant discovery
-    #         self._ha_discovery()
-    #     elif message['cmd'] == 'display_sensor':
-    #         # If displaying a sensor, have to pass up other parameters as well.
-    #         # Remove the command, since we already have that, then put the rest into the options field.
-    #         del message['cmd']
-    #         self._upward_commands.append({'type': 'device', 'cmd': 'display_sensor', 'options': message})
-    #     elif message['cmd'] == 'rescan_sensors':
-    #         self._upward_commands.append({'type': 'device', 'cmd': 'rescan_sensors'})
-    #     else:
-    #         self._logger.info("Received unknown MQTT device command '{}'".format(message['cmd']))
-    #
-    # # Bay Command callback
-    # def _cb_bay_command(self, client, userdata, message):
-    #     self._logger_mqtt.debug("Received bay command message: {}".format(message.payload))
-    #     self._logger_mqtt.debug("Incoming topic: {}".format(message.topic))
-    #
-    #     # Pull out the bay ID.
-    #     bay_id = message.topic.split('/')[-2]
-    #     self._logger.debug("Using bay id: {}".format(bay_id))
-    #
-    #     # Try to decode the JSON.
-    #     try:
-    #         message = json_loads(message.payload)
-    #     except:
-    #         self._logger_mqtt.error("Could not decode JSON from MQTT message '{}' on topic '{}'"
-    #                            .format(message.topic, message.payload))
-    #         # Ignore the message and return, as if we never got int.
-    #         return
-    #
-    #     # Proceed on valid commands.
-    #     if 'cmd' not in message:
-    #         self._logger_mqtt.error(
-    #             "MQTT message for topic {} does not contain a cmd directive".format(message.topic))
-    #     elif message['cmd'] in ('dock', 'undock', 'complete', 'abort', 'verify', 'reset'):
-    #         # If it's a valid bay command, pass it upward.
-    #         self._upward_commands.append({'type': 'bay', 'bay_id': bay_id, 'cmd': message['cmd']})
-    #     else:
-    #         self._logger.info("Received unknown MQTT bay command '{}'".format(message['cmd']))
-
     # Message publishing method
-    def _pub_message(self, topic_type, topic, message, repeat=False, topic_mappings=None):
-        previous_state = self._topics[topic_type][topic]['previous_state']
-
-        # Send flag. Default to assuming we *won't* send. We'll send if either repeat is True (ie: send no matter what)
-        # or if repeat is false *and* content has been determined to have changed.
-        send = False
-
-        # If the topic is templated, take the topic_mappings and insert them.
-        # This is currently only used to put in bay_id.
-        # No real bounds checking, and could explode in strange ways.
-        if topic_mappings is not None:
-            target_topic = self._topics[topic_type][topic]['topic'].format(topic_mappings)
+    def _pub_message(self, topic, payload, repeat):
+        # Set the send flag initially. If we've never seen the topic before or we're set to repeat, go ahead and send.
+        # This skips some extra logic.
+        if topic not in self._topic_history or repeat:
+            send = True
         else:
-            target_topic = self._topics[topic_type][topic]['topic']
+            send = False
 
         # Put the message through conversion. This converts Quantities to proper units and then flattens to floats
         # that can be sent through MQTT and understood by Home Assistant
-        message = self._cv.convert(message)
-        # By default, check to see if the data changed before sending it.
-        if repeat is False:
-            # Both strings, compare, process if different
+        message = self._cv.convert(payload)
+
+        # If we're not already sending, then we've seen the topic before and should check for changes.
+        if send is False:
+            previous_state = self._topic_history[topic]
+            # Both strings, compare and send if different
             if isinstance(message, str) and isinstance(previous_state, str):
                 if message != previous_state:
                     send = True
                 else:
                     return
+            # For dictionaries, compare individual elements. This doesn't handle nested dicts, but those aren't used.
             elif isinstance(message, dict) and isinstance(previous_state, dict):
                 for item in message:
                     if item not in previous_state:
@@ -452,28 +396,25 @@ class CBNetwork:
                         send = True
                         break
             else:
-                # # If type has changed (and it shouldn't, usually), send it.
-                # print("Mesage type: {}".format(type(message)))
-                # print("Previous message type: {}".format(type(message)))
+                # If type has changed, which is odd,  (and it shouldn't, usually), send it.
                 if type(message) != type(previous_state):
                     send = True
-        elif repeat is True:
-            send = True
-        # The 'repeat' option can be used in cases when a caller wants to send no matter the changed state.
-        # Using this too much can make things super chatty.
+
+        # If we're sending do it.
         if send:
             # New message becomes the previous message.
-            self._topics[topic_type][topic]['previous_state'] = message
+            self._topic_history[topic] = message
             # Convert the message to JSON if it's a dict, otherwise just send it.
             if isinstance(message, dict):
                 outbound_message = json_dumps(message, default=str)
             else:
                 outbound_message = message
-            self._mqtt_client.publish(target_topic, outbound_message)
+            self._mqtt_client.publish(topic, outbound_message)
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
-    def poll(self, outbound_messages=None):
+    #def poll(self, outbound_messages=None):
+    def poll(self):
         # Set up the return data.
         return_data = {
             'online': self._iface_up(), # Is the interface up.
@@ -508,7 +449,7 @@ class CBNetwork:
         # Network/MQTT is up, proceed.
         if self._mqtt_connected:
             # Send all the messages outbound.
-            for message in outbound_messages:
+            for message in self._mqtt_messages():
                 self._logger_mqtt.debug("Publishing MQTT message: {}".format(message))
                 self._pub_message(**message)
             # Check for any incoming commands.
@@ -565,7 +506,7 @@ class CBNetwork:
         return None
 
     def disconnect(self, message=None):
-        self._logger.info('Network: Planned disconnect with message "' + str(message) + '"')
+        self._logger.info('Planned disconnect with message "' + str(message) + '"')
         # If we have a disconnect message, send it to the device topic.
         if message is not None:
             self._mqtt_client.publish(self._topics['system']['device_state']['topic'], message)
@@ -595,8 +536,8 @@ class CBNetwork:
                 self._logger.debug("Performing HA discovery for: {}".format(item))
                 self._ha_create(topic_type='system', topic_name=item)
 
-        for bay in self._bay_registry:
-            self._ha_discovery_bay(bay)
+        # for bay in self._bay_registry:
+        #     self._ha_discovery_bay(bay)
 
     # Method to do discovery for
     def _ha_discovery_bay(self,bay_id):
@@ -719,3 +660,71 @@ class CBNetwork:
         self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'],
                                   payload=self._topics['system']['device_connectivity']['ha_discovery']['payload_on'],
                                   retain=True)
+        
+    # MQTT Message generators. Network module creates MQTT messages from object states. This centralizes MQTT message
+    # creation.
+    def _mqtt_messages(self):
+        # Create the outbound list.
+        outbound_messages = []
+        # Send hardware status every 60 seconds.
+        if time.monotonic() - self._pistatus_timestamp >= 60:
+            self._logger.debug("Hardware status timer up, sending status.")
+            # Start the outbound messages with the hardware status.
+            outbound_messages.extend(self._mqtt_messages_pistatus(self._pistatus))
+            self._pistatus_timestamp = time.monotonic()
+        # Add in all bays.
+        self._logger.debug("Bay registry: {}".format(self._bay_registry))
+        for bay in self._bay_registry:
+            outbound_messages.extend(self._mqtt_messages_bay(self._bay_registry[bay]))
+        return outbound_messages
+    
+    def _mqtt_messages_pistatus(self, input_obj):
+        outbound_messages = [
+            {'topic': 'CobraBay/' + self._client_id + '/cpu_pct', 'payload': input_obj.status('cpu_pct'), 'repeat': False },
+            {'topic': 'CobraBay/' + self._client_id + '/cpu_temp', 'payload': input_obj.status('cpu_temp'), 'repeat': False},
+            {'topic': 'CobraBay/' + self._client_id + '/mem_info', 'payload': input_obj.status('mem_info'), 'repeat': False},
+            {'topic': 'CobraBay/' + self._client_id + '/undervoltage', 'payload': input_obj.status('undervoltage'), 'repeat': False}
+        ]
+        return outbound_messages
+    
+    def _mqtt_messages_bay(self, input_obj):
+        outbound_messages = []
+        # Topic base for convenience.
+        topic_base = 'CobraBay/' + self._client_id + '/' + input_obj.id + '/'
+        # Bay state
+        outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
+        # Bay occupancy
+        outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
+        # Bay vector
+        outbound_messages.append({'topic': topic_base + 'vector', 'payload': input_obj.vector, 'repeat': False})
+
+        detector_messages = []
+        for detector in input_obj.detectors:
+            detector_messages.extend(self._mqtt_messages_detector(input_obj.detectors[detector], topic_base + 'detectors/'))
+        # self._logger.debug("Built detector messages:")
+        # self._logger.debug(pformat(detector_messages))
+        outbound_messages.extend(detector_messages)
+        # self._logger.debug("Complete Bay Message Set:")
+        # self._logger.debug(pformat(outbound_messages))
+        return outbound_messages
+
+    def _mqtt_messages_detector(self, input_obj, topic_base=None):
+        self._logger.debug("Building MQTT messages for detector: {}".format(input_obj.id))
+        if topic_base is None:
+            topic_base = 'CobraBay/' + self._client_id + '/independent_detectors'
+        topic_base = topic_base + input_obj.id + '/'
+        outbound_messages = []
+        # Detector State, the assigned state of the detector by the system.
+        outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
+        # Detector status, its actual current state.
+        outbound_messages.append({'topic': topic_base + 'status', 'payload': input_obj.status, 'repeat': False})
+        # Is the detector in fault?
+        outbound_messages.append({'topic': topic_base + 'fault', 'payload': input_obj.fault, 'repeat': False})
+        # Detector Value.
+        outbound_messages.append({'topic': topic_base + 'reading', 'payload': input_obj.value, 'repeat': False})
+        # Detector reading unadjusted by depth.
+        outbound_messages.append({'topic': topic_base + 'raw_reading', 'payload': input_obj.value_raw, 'repeat': False})
+        # Detector Quality
+        outbound_messages.append({'topic': topic_base + 'quality', 'payload': input_obj.quality, 'repeat': False})
+        self._logger.debug("Have detector messages: {}".format(outbound_messages))
+        return outbound_messages
