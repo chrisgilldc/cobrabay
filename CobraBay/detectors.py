@@ -61,25 +61,29 @@ def use_value_cache(func):
             value = self._sensor_obj.range
         # Send whichever value it is into the function.
         return func(self, value)
-
     return wrapper
 
 
-# This decorator is used for methods that rely on sensor data. If the sensor data is determined to be stale, it will
-# trigger a new sensor read prior to executing the method.
+# Decorator for methods reading the sensor.
+# If it's been too long since the previous sensor check, check it and add it to the history.
+# The wrapped function should use the first element in the history, not the direct reading!
 def read_if_stale(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        read_sensor = False
-        # Assume we shouldn't read the sensor.
-        if len(self._history) > 0:
-            # Time difference between now and the most recent read.
-            time_delta = monotonic_ns() - self._history[0][1]
-            if time_delta > 1000000000:  # 1s is too long, read the sensor.
-                read_sensor = True
-        # If we have no history, ie: at startup, go ahead and read.
+        read_sensor = False  # Assume we won't read the sensor.
+        if self._sensor_obj.status != 'ranging':
+            # If sensor object isn't ranging, return immediately with a not_ranging result.
+            return 'not_ranging'
         else:
-            read_sensor = True  ## If there's no history, read the sensor, we must be on startup.
+            if len(self._history) > 0:
+                # Time difference between now and the most recent read.
+                time_delta = monotonic_ns() - self._history[0][1]
+                # Assume we can read the sensor every other pass of its set timing.
+                if time_delta > self._sensor_obj.timing_budget.to('ns').magnitude * 2:
+                    read_sensor = True
+            else:
+                read_sensor = True  ## Must read the sensor, there isn't any history. This should only happen on startup.
+
         # If flag is set, read the sensor and put its value into the history.
         if read_sensor:
             try:
@@ -96,7 +100,6 @@ def read_if_stale(func):
             self._history = self._history[:10]
         # Call the wrapped function.
         return func(self)
-
     return wrapper
 
 
@@ -218,18 +221,32 @@ class SingleDetector(Detector):
         if target_status.lower() == self._sensor_obj.status:
             self._logger.info("Detector already has status '{}'. Nothing to do.".format(self._sensor_obj.status))
         else:
-            self._logger.debug("Setting sensor object status to '{}".format(target_status))
+            self._logger.debug("Setting sensor object status to '{}'".format(target_status))
             self._sensor_obj.status = target_status
-
-    # Debugging methods to let the main system know a few things about the attached sensor.
-    @property
-    def sensor_type(self):
-        return type(self._sensor_obj)
 
     # Pass through for the operating state of the sensor object.
     @property
     def state(self):
         return self._sensor_obj.state
+
+    @property
+    def fault(self):
+        '''
+        Utility property for determining if the detector is in a fault state. The status and state should always match up,
+        so if they don't, something is wrong. More complex logic to figure out what the fault is and what action to take
+        should be implemented elsewhere.
+
+        :return: bool
+        '''
+        if self.status != self.state:
+            return True
+        else:
+            return False
+
+    # Debugging methods to let the main system know a few things about the attached sensor.
+    @property
+    def sensor_type(self):
+        return type(self._sensor_obj)
 
     @property
     def sensor_interface(self):
@@ -281,6 +298,7 @@ class Range(SingleDetector):
     @property
     @read_if_stale
     def value_raw(self):
+        # Note, the read_if_stale decorator will trap this if the sensor itself isn't ranging. Thus, we can assume it is.
         self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
         if isinstance(self._history[0][0], Quantity):
             return self._history[0][0]
@@ -488,9 +506,11 @@ class Lateral(SingleDetector):
     @property
     @read_if_stale
     def value(self):
-        self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
         if isinstance(self._history[0][0], Quantity):
-            return self._history[0][0] - self.offset
+            adjusted_value = self._history[0][0] - self.offset
+            self._logger.debug("Adjusted raw reading {} by offset {} for result {}".
+                               format(self._history[0][0], self.offset, adjusted_value))
+            return adjusted_value
         else:
             return None
 
