@@ -305,9 +305,8 @@ class CBConfig:
         except KeyError:
             config_dict['bay_name'] = self._config['bays'][bay_id]['bay_id']
 
-        # How long there should be no motion until we consider the bay to be parked. Convert to seconds and take out
-        # magnitude.
-        config_dict['park_time'] = Quantity(self._config['bays'][bay_id]['park_time']).to('second').magnitude
+        # How long there should be no motion until we consider the bay to be parked.
+        config_dict['motion_timeout'] = Quantity(self._config['bays'][bay_id]['motion_timeout']).to('second')
         # Actual bay depth, from the range sensor to the garage door.
         config_dict['bay_depth'] = Quantity(self._config['bays'][bay_id]['bay_depth']).to('cm')
         # Stop point, the distance from the sensor to the point where the vehicle should stop.

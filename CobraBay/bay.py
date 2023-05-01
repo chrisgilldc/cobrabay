@@ -13,52 +13,51 @@ from .exceptions import SensorValueException
 import CobraBay
 
 # Scan the detectors if we're asked for a property that needs a fresh can and we haven't scanned recently enough.
-def scan_if_stale(func):
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        time_delta = time.monotonic() - self._previous_scan_ts
-        if time_delta > 1:  # 1s is too long, read the sensor.
-            do_scan = True
-            self._logger.debug("Stale, do scan.")
-        else:
-            do_scan = False
-            self._logger.debug("Not stale, no scan needed.")
-
-        # If flag is set, read the sensor and put its value into the history.
-        if do_scan:
-            self._scan_detectors()
-            self._previous_scan_ts = time.monotonic()
-
-        # Send whichever value it is into the function.
-        return func(self)
-
-    return wrapper
-
+# def scan_if_stale(func):
+#     @wraps(func)
+#     def wrapper(self, *args, **kwargs):
+#         time_delta = time.monotonic() - self._previous_scan_ts
+#         if time_delta > 1:  # 1s is too long, read the sensor.
+#             do_scan = True
+#             self._logger.debug("Stale, do scan.")
+#         else:
+#             do_scan = False
+#             self._logger.debug("Not stale, no scan needed.")
+#
+#         # If flag is set, read the sensor and put its value into the history.
+#         if do_scan:
+#             self._scan_detectors()
+#             self._previous_scan_ts = time.monotonic()
+#
+#         # Send whichever value it is into the function.
+#         return func(self)
+#
+#     return wrapper
 
 class CBBay:
     def __init__(self, bay_id,
                  bay_name,
                  bay_depth,
                  stop_point,
-                 park_time,
+                 motion_timeout,
                  output_unit,
                  detectors,
                  detector_settings,
                  selected_range,
-                 lateral,
-                 longitudinal,
                  intercepts,
-                 log_level="DEBUG", **kwargs):
+                 cbcore,
+                 log_level="WARNING", **kwargs):
         """
         :param bay_id: ID for the bay. Cannot have spaces.
         :type bay_id: str
         :param bay_name: Long "friendly" name for the Bay, used in MQTT messages
         :type bay_name: str
         :param bay_depth: Absolute distance of the bay, from the range sensor to the end. Must be a linear Quantity.
-        :type bay_depth: Quantity
+        :type bay_depth: Quantity(Distance)
         :param stop_point: Distance from the sensor where the vehicle should stop
-        :type stop_point: Quantity
-        :param park_time: int
+        :type stop_point: Quantity(Distance)
+        :param motion_timer: During a movement, how long the bay must be still to be considered complete.
+        :type motion_timer: Quantity(Time)
         :param output_unit: Unit to output measurements in. Should be a distance unit understood by Pint (ie: 'in', 'cm', etc)
         :type output_unit: str
         :param detectors: Dictionary of detector objects.
@@ -73,27 +72,34 @@ class CBBay:
         :type lateral: list
         :param intercepts: For lateral sensors, the raw distance from the end of the bay each lateral crosses the parking area.
         :type intercepts: list
+        :param cbcore: Object reference to the CobraBay core.
+        :type cbcore: object
         :param log_level: Log level for the bay, must be a Logging level.
         :type log_level: str
         """
-        # Save parameters
-        self._bay_id = bay_id
-        self._bay_name = bay_name
-        self._bay_depth = bay_depth
-        self._stop_point = stop_point
-        self._park_time = park_time
-        self._output_unit = output_unit
-        self._detectors = detectors
-        self._detector_settings = detector_settings
-        self._lateral = lateral
-        self._longitudinal = longitudinal
-        self._intercepts = intercepts
-        self._selected_range = selected_range
-        # Create a logger.
+        # Must set ID before we can create the logger.
+        self._motion_timeout = None
+        self.id = bay_id
+
         self._logger = logging.getLogger("CobraBay").getChild(self.id)
         self._logger.setLevel(log_level)
         self._logger.info("Initializing bay: {}".format(bay_id))
         self._logger.debug("Bay received detectors: {}".format(detectors))
+
+        # Save the remaining parameters.
+        self._bay_name = bay_name
+        self._bay_depth = bay_depth
+        self._stop_point = stop_point
+        self.motion_timeout = motion_timeout
+        self._output_unit = output_unit
+        self._detectors = detectors
+        self._detector_settings = detector_settings
+        self._selected_range = selected_range
+        self._intercepts = intercepts
+        self._lateral_sorted = self._sort_lateral(intercepts)
+        self._cbcore = cbcore
+        # Create a logger.
+
 
         # Initialize variables.
         self._position = {}
@@ -126,10 +132,9 @@ class CBBay:
         self._detector_state('ranging')
         self._logger.debug("Detectors activated.")
 
-        # Dock timer.
-        self._dock_timer = {
-            'allowed': self._park_time,
-            'mark': None
+        # Motion timer for the current motion.
+        self._current_motion = {
+            'mark': time.monotonic() + 5
         }
 
         # Set our initial state.
@@ -137,11 +142,11 @@ class CBBay:
 
         self._logger.info("Bay '{}' initialization complete.".format(self.id))
 
-        self.state = "Ready"
+        self.state = "ready"
 
     # Abort gets called when we want to cancel a docking.
     def abort(self):
-        self.state = "Ready"
+        self.state = "ready"
 
     @property
     def bay_name(self):
@@ -154,6 +159,21 @@ class CBBay:
     @property
     def detectors(self):
         return self._detectors
+
+    def check_timer(self):
+        self._logger.debug("Evaluating for timer expiration.")
+        # Update the dock timer.
+        if self._detectors[self._selected_range].motion:
+            # If motion is detected, update the time mark to the current time.
+            self._logger.debug("Motion found, resetting dock timer.")
+            self._current_motion['mark'] = time.monotonic()
+        else:
+            self._logger.debug("No motion found, checking for dock timer expiry.")
+            # No motion, check for completion
+            if Quantity(time.monotonic() - self._current_motion['mark'], 's') >= self.motion_timer:
+                self._logger.info("Dock timer has expired and no motion found. Returning to ready.")
+                # Set self back to ready.
+                self.state = 'ready'
 
     # Method to get info to pass to the Network module and register.
     @property
@@ -177,7 +197,7 @@ class CBBay:
     def display_reg_info(self):
         return_dict = {
             'bay_id': self.id,
-            'lateral_order': self._lateral
+            'lateral_order': self._lateral_sorted
         }
         return return_dict
 
@@ -191,89 +211,101 @@ class CBBay:
 
     # Bay properties
     @property
-    @scan_if_stale
     def occupied(self):
         """
-        Occupancy state of the bay, derived from the State.
+        Occupancy state of the bay, determined based on what the sensors can hit.
         If positively occupied or not, returns that, otherwise 'unknown'.
 
         :returns: bay occupancy state
         :rtype: bool
         """
-        # Do a new scan and *don't* filter out non-intercepted laterals. We need to
-        self._scan_detectors(filter_lateral=False)
         self._logger.debug("Checking for occupancy.")
-        self._logger.debug("Longitudinal is {}".format(self._quality[self._selected_range]))
-        # First cut is the range.
-        if self._quality[self._selected_range] in ('No object', 'Door open'):
+        # Range detector is required to determine occupancy. If it's not ranging, return immediately.
+        if self._detectors[self._selected_range].state != 'ranging':
+            return 'unknown'
+        # Only hit the range quality once.
+        range_quality = self._detectors[self._selected_range].quality
+        if range_quality in ('No object', 'Door open'):
             # If the detector can hit the garage door, or the door is open, then clearly nothing is in the way, so
             # the bay is vacant.
-            self._logger.debug("Longitudinal quality is {}, not occupied.".
-                               format(self._quality[self._selected_range]))
-            return False
-        if self._quality[self._selected_range] in (
-                'Emergency!', 'Back up', 'Park', 'Final', 'Base'):
+            self._logger.debug("Longitudinal quality is {}, not occupied.".format(self._quality[self._selected_range]))
+            return "false"
+        elif range_quality in ('Emergency!', 'Back up', 'Park', 'Final', 'Base'):
             # If the detector is giving us any of the 'close enough' qualities, there's something being found that
             # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
             # the sensors or whatnot
-            self._logger.debug("Longitudinal quality is {}, could be occupied.".
-                               format(self._quality[self._selected_range]))
+            self._logger.debug("Longitudinal quality is {}, could be occupied.".format(self._quality[self._selected_range]))
             lat_score = 0
-            max_score = len(self._lateral)
-            for detector in self._lateral:
+            max_score = len(self._lateral_sorted)
+            for detector in self._lateral_sorted:
                 if self._quality[detector] in ('OK', 'Warning', 'Critical'):
                     # No matter how badly parked the vehicle is, it's still *there*
                     lat_score += 1
             self._logger.debug("Achieved lateral score {} of {}".format(lat_score, max_score))
             if lat_score == max_score:
                 # All sensors have found something more or less in the right place, so yes, we're occupied!
-                return True
+                return "true"
         # If for some reason we drop through to here, assume we're not occupied.
-        return False
+        self._logger.error("Occupancy found range quality {}, which is an unaccounted for response.".format(range_quality))
+        return "error"
+
+    @property
+    def motion_timeout(self):
+        return self._motion_timer
+
+    @motion_timeout.setter
+    def motion_timeout(self, mto_input):
+        if isinstance(mto_input, Quantity):
+            if not mto_input.check('[time]'):
+                raise ValueError("Motion timeout must have time dimensionality.")
+            else:
+                self._motion_timer = mto_input
+        else:
+            raise TypeError("Motion timeout must be a Quantity.")
+        
+    @property
+    def motion_timer(self):
+        '''
+        Reports time left on the current motion in M:S format. If no active motion, returns 'idle'.
+        
+        :return: 
+        '''
+        if self.state not in ('docking','undocking'):
+            return 'idle'
+        else:
+            return self.motion_timeout - Quantity(time.monotonic() - self._current_motion['mark'], 's')
 
     # How good is the parking job?
-    @property
-    @scan_if_stale
-    def quality(self):
-        return self._quality
+    # @property
+    # @scan_if_stale
+    # def quality(self):
+    #     return self._quality
+    #
+    # @property
+    # @scan_if_stale
+    # def position(self):
+    #     return self._position
 
-    @property
-    @scan_if_stale
-    def position(self):
-        return self._position
+    # # Get number of lateral detectors. This is used to pass to the display and set up layers correctly.
+    # @property
+    # def lateral_count(self):
+    #     self._logger.debug("Lateral count requested. Lateral detectors: {}".format(self._lateral_sorted))
+    #     return len(self._lateral_sorted)
 
-    # Get number of lateral detectors. This is used to pass to the display and set up layers correctly.
-    @property
-    def lateral_count(self):
-        self._logger.debug("Lateral count requested. Lateral detectors: {}".format(self._lateral))
-        return len(self._lateral)
-
-    def check_timer(self):
-        self._logger.debug("Evaluating for timer expiration.")
-        # Update the dock timer.
-        if self._detectors[self._selected_range].motion:
-            # If motion is detected, update the time mark to the current time.
-            self._logger.debug("Motion found, resetting dock timer.")
-            self._dock_timer['mark'] = time.monotonic()
-        else:
-            self._logger.debug("No motion found, checking for dock timer expiry.")
-            # No motion, check for completion
-            if time.monotonic() - self._dock_timer['mark'] >= self._dock_timer['allowed']:
-                self._logger.info("Dock timer has expired and no motion found. Returning to ready.")
-                # Set self back to ready.
-                self.state = 'Ready'
 
     # Method to check the range sensor for motion.
-    @scan_if_stale
-    def monitor(self):
-        vector = self._detectors[self._selected_range].vector
-        # If there's motion, change state.
-        if vector['direction'] == 'forward':
-            self.state = 'Docking'
-        elif vector['direction'] == 'reverse':
-            self.state = 'Undocking'
-        elif self._detectors[self._selected_range].value == 'Weak':
-            self.state = 'Docking'
+    # @scan_if_stale
+    # def monitor(self):
+    #     vector = self._detectors[self._selected_range].vector
+    #     # If there's motion, change state.
+    #     if vector['direction'] == 'forward':
+    #         self.state = 'Docking'
+    #     elif vector['direction'] == 'reverse':
+    #         self.state = 'Undocking'
+    #     elif self._detectors[self._selected_range].value == 'Weak':
+    #         self.state = 'Docking'
+
+
 
     # Method to be called when CobraBay it shutting down.
     def shutdown(self):
@@ -297,22 +329,22 @@ class CBBay:
     def state(self, m_input):
         self._logger.debug("State change requested to {} from {}".format(m_input, self._state))
         # Trap invalid bay states.
-        if m_input not in ('Ready', 'Docking', 'Undocking', 'Unavailable'):
+        if m_input not in ('ready', 'docking', 'undocking', 'unavailable'):
             raise ValueError("{} is not a valid bay state.".format(m_input))
         self._logger.debug("Old state: {}, new state: {}".format(self._state, m_input))
         if m_input == self._state:
             self._logger.debug("Requested state {} is also current state. No action.".format(m_input))
             return
-        if m_input in ('Docking', 'Undocking') and self._state not in ('Docking', 'Undocking'):
+        if m_input in ('docking', 'undocking') and self._state not in ('docking', 'undocking'):
             self._logger.debug("Entering state: {}".format(m_input))
-            self._dock_timer['mark'] = monotonic()
-            self._logger.debug("Start time: {}".format(self._dock_timer['mark']))
+            self._current_motion['mark'] = monotonic()
+            self._logger.debug("Start time: {}".format(self._current_motion['mark']))
             self._logger.debug("Detectors: {}".format(self._detectors))
-        if m_input not in ('Docking', 'Undocking') and self._state in ('Docking', 'Undocking'):
+        if m_input not in ('docking', 'undocking') and self._state in ('docking', 'undocking'):
             self._logger.debug("Entering state: {}".format(m_input))
             # Reset some variables.
             # Make the mark none to be sure there's not a stale value in here.
-            self._dock_timer['mark'] = None
+            self._current_motion['mark'] = None
         # Now store the state.
         self._state = m_input
 
@@ -369,7 +401,7 @@ class CBBay:
         if filter_lateral:
             # Pull the raw range value once, use it to test all the intercepts.
             raw_range = self._detectors[self._selected_range].value_raw
-            for lateral_name in self._lateral:
+            for lateral_name in self._lateral_sorted:
                 # If intercept range hasn't been met yet, we wipe out any value, it's meaningless.
                 # Have a bug where this is sometimes erroring out due to a None range value.
                 # Trapping and logging for now.
@@ -414,10 +446,10 @@ class CBBay:
     #     # Add detector values, if applicable.
     #     outbound_messages = outbound_messages + self._detector_status()
     #
-    #     if self._dock_timer['mark'] is None:
+    #     if self._current_motion['mark'] is None:
     #         message = 'Not running'
     #     else:
-    #         message = self._dock_timer['allowed'] - (monotonic() - self._dock_timer['mark'])
+    #         message = self._current_motion['allowed'] - (monotonic() - self._current_motion['mark'])
     #     outbound_messages.append(
     #         {'topic_type': 'bay',
     #          'topic': 'bay_dock_time',
@@ -445,12 +477,12 @@ class CBBay:
             return_data['range_pct'] = 0
         # List for lateral state.
         return_data['lateral'] = []
-        self._logger.debug("Using lateral order: {}".format(self._lateral))
+        self._logger.debug("Using lateral order: {}".format(self._lateral_sorted))
         # Assemble the lateral data with *closest first*.
         # This will result in the display putting things together top down.
         # Lateral ordering is determined by intercept range when bay is started up.
-        if self._lateral is not None:
-            for lateral_detector in self._lateral:
+        if self._lateral_sorted is not None:
+            for lateral_detector in self._lateral_sorted:
                 detector_dict = {
                     'name': lateral_detector,
                     'quality': self._quality[lateral_detector],
@@ -497,6 +529,26 @@ class CBBay:
         else:
             self._logger.debug("Not assembling laterals, lateral order is None.")
         return return_data
+
+    # Calculate the ordering of the lateral sensors.
+    def _sort_lateral(self, intercepts):
+        self._logger.debug("Sorting intercepts: {}".format(intercepts))
+        lateral_sorted = []
+        for detector_name in intercepts:
+            detector_intercept = intercepts[detector_name]
+            if len(lateral_sorted) == 0:
+                lateral_sorted.append(detector_name)
+            else:
+                i=0
+                while i < len(lateral_sorted):
+                    if detector_intercept < intercepts[lateral_sorted[i]]:
+                        lateral_sorted.insert(i, detector_name)
+                        break
+                    i += 1
+                if i == len(lateral_sorted):
+                    lateral_sorted.append(detector_name)
+        self._logger.debug("Lateral detectors sorted to order: {}".format(lateral_sorted))
+        return lateral_sorted
 
     # Traverse the detectors dict, activate everything that needs activating.
     def _detector_state(self, target_status):
