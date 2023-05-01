@@ -305,7 +305,7 @@ class CBDisplay:
                 range_string = "CLEAR!"
         elif input_range == 'Beyond range':
             range_string = "APPROACH"
-        elif self._settings['units'] == 'imperial':
+        elif self._settings['unit_system'] == 'imperial':
             as_inches = input_range.to('in')
             if as_inches.magnitude < 12:
                 range_string = "{}\"".format(round(as_inches.magnitude,1))
