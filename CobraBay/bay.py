@@ -138,7 +138,7 @@ class CBBay:
         }
 
         # Set our initial state.
-        self._scan_detectors()
+        # self._scan_detectors()
 
         self._logger.info("Bay '{}' initialization complete.".format(self.id))
 
@@ -234,11 +234,11 @@ class CBBay:
             # If the detector is giving us any of the 'close enough' qualities, there's something being found that
             # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
             # the sensors or whatnot
-            self._logger.debug("Longitudinal quality is {}, could be occupied.".format(self._quality[self._selected_range]))
+            self._logger.debug("Longitudinal quality is {}, could be occupied.".format(range_quality))
             lat_score = 0
             max_score = len(self._lateral_sorted)
             for detector in self._lateral_sorted:
-                if self._quality[detector] in ('OK', 'Warning', 'Critical'):
+                if self._detectors[detector].quality in ('OK', 'Warning', 'Critical'):
                     # No matter how badly parked the vehicle is, it's still *there*
                     lat_score += 1
             self._logger.debug("Achieved lateral score {} of {}".format(lat_score, max_score))
