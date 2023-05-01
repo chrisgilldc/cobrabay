@@ -37,6 +37,7 @@ class CBNetwork:
                  mqtt_port,
                  mqtt_username,
                  mqtt_password,
+                 cbcore,
                  homeassistant=True,
                  log_level="WARNING",
                  mqtt_log_level="WARNING"):
@@ -49,6 +50,7 @@ class CBNetwork:
         self._unit_system = unit_system
         self._system_name = system_name
         self._interface = interface
+        self._cbcore = cbcore
 
         # Set up logger.
         self._logger = logging.getLogger("CobraBay").getChild("Network")
@@ -693,10 +695,15 @@ class CBNetwork:
         topic_base = 'CobraBay/' + self._client_id + '/' + input_obj.id + '/'
         # Bay state
         outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
-        # Bay occupancy
-        outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
         # Bay vector
         outbound_messages.append({'topic': topic_base + 'vector', 'payload': input_obj.vector, 'repeat': False})
+        # Bay vector
+        outbound_messages.append({'topic': topic_base + 'motion_timer', 'payload': input_obj.motion_timer, 'repeat': False})
+
+
+        # Bay occupancy. This value can get wonky as detectors are shutting down, so don't update during shutdown.
+        if self._cbcore.system_state != 'shutdown':
+            outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
 
         detector_messages = []
         for detector in input_obj.detectors:
