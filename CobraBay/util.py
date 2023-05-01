@@ -6,6 +6,7 @@ from pint import Quantity
 import board
 import busio
 from time import sleep
+from datetime import timedelta
 import CobraBay
 
 
@@ -39,13 +40,17 @@ class Convertomatic:
             # Bytes don't have a dimensionality, so we check the unit name.
             elif str(input.units) == 'byte':
                 output = input.to("Mbyte")
+            elif str(input.units) == 'second':
+                output = str(timedelta(seconds=input.magnitude))
             # This should catch any dimensionless values.
             elif str(input.dimensionality) == 'dimensionless':
                 output = input
             # Anything else is out of left field, raise an error.
             else:
-                raise ValueError("Dimensionality of {} is not supported by Convertomatic.".format(input.dimensionality))
-            output = round(output.magnitude, 2)
+                raise ValueError("Dimensionality of {} and/or units of {} is not supported by Convertomatic.".format(input.dimensionality, input.units))
+            # If still a Quantity (ie: Not a string), take the magnitude, round and output as float.
+            if isinstance(output, Quantity):
+                output = round(output.magnitude, 2)
             return output
         if isinstance(input, dict):
             new_dict = {}
