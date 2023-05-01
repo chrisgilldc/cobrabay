@@ -168,6 +168,7 @@ class CBConfig:
 
     # Method to let modules get their proper logging levels.
     def get_loglevel(self, mod_id, mod_type=None):
+        requested_level = None
         if 'logging' not in self._config['system']:
             # If there's no logging section at all, return info.
             self._logger.error("No logging section in config, using INFO as default.")
@@ -188,16 +189,17 @@ class CBConfig:
                     mod_id = 'detectors'
                 except TypeError:
                     mod_id = 'detectors'
-            # Check for module-level setting.
-            try:
-                requested_level = self._config['system']['logging'][mod_id].lower()
-            except KeyError:
+            if requested_level is None:
+                # Check for module-level setting.
                 try:
-                    # No module-level logging, use the system default level.
-                    requested_level = self._config['system']['logging']['default_level'].lower()
+                    requested_level = self._config['system']['logging'][mod_id].lower()
                 except KeyError:
-                    # Not defined either, default to Warning.
-                    requested_level = "WARNING"
+                    try:
+                        # No module-level logging, use the system default level.
+                        requested_level = self._config['system']['logging']['default_level'].lower()
+                    except KeyError:
+                        # Not defined either, default to Warning.
+                        requested_level = "WARNING"
 
             # Ensure the requested log level if valid.
             if requested_level == "debug":
@@ -246,9 +248,13 @@ class CBConfig:
 
     # Return a settings dict to be used for the Network module.
     def network(self):
-        config_dict = {}
-        config_dict['unit_system'] = self._config['system']['unit_system']
-        config_dict['system_name'] = self._config['system']['system_name']
+        config_dict = {
+            'unit_system': self._config['system']['unit_system'],
+            'system_name': self._config['system']['system_name'],
+            'log_level': self.get_loglevel('network'),
+            'mqtt_log_level': self.get_loglevel('mqtt')
+        }
+
         try:
             config_dict['homeassistant'] = self._config['system']['homeassistant']
         except KeyError:
@@ -283,9 +289,8 @@ class CBConfig:
             'selected_range': None,
             'settings': {},
             'intercepts': {},
-            'longitudinal': [],
-            'lateral': [],
-            'detector_settings': {}
+            'detector_settings': {},
+            'log_level': self.get_loglevel(bay_id, mod_type='bay')
         }
         # If Imperial is defined, bay should output in inches.
         try:
@@ -314,6 +319,7 @@ class CBConfig:
         long_required = ['spread_park', 'pct_warn', 'pct_crit']
         lat_fallback = { 'offset': Quantity("0 cm"), 'spread_ok': '1 in', 'spread_warn': '3 in' }
         lat_required = ['side', 'intercept']
+        available_long = []  # We'll save available longitudinal sensors here to select a range sensor from later.
         for direction in ('longitudinal', 'lateral'):
             # Pull the defaults as a base. Otherwise, it's an empty dict.
             try:
@@ -334,13 +340,12 @@ class CBConfig:
                             raise ValueError("Required setting '{}' not present in configuration for detector '{}' in "
                                              "bay '{}'. Must be set directly or have default set.".
                                 format(setting, detector, bay_id ))
+                    available_long.append(detector['detector'])
                     # Calculate the offset for this detector
                     # This detector will be offset by the bay's stop point, adjusted by the original offset of the detector.
                     config_dict['detector_settings'][detector['detector']]['offset'] = \
                         Quantity(self._config['bays'][bay_id]['stop_point']) - \
                         Quantity(config_dict['detector_settings'][detector['detector']]['offset'])
-                    # Save the name of the detector to the longitudinal list.
-                    config_dict['longitudinal'].append(detector['detector'])
                 # Lateral check.
                 if direction == 'lateral':
                     # Merge in the fallback items. User-defined defaults take precedence.
@@ -353,18 +358,16 @@ class CBConfig:
                             raise ValueError("Required setting '{}' not present in configuration for detector '{}' in "
                                              "bay '{}'. Must be set directly or have default set.".
                                 format(setting, detector, bay_id ))
-                    # Save the name of the detector to the lateral list.
-                    config_dict['lateral'].append(detector['detector'])
                     # Add to the intercepts list.
                     config_dict['intercepts'][detector['detector']] = Quantity(detector['intercept'])
 
             # Pick a range sensor to use as 'primary'.
             if config_dict['selected_range'] is None:
                 # If there's only one longitudinal detector, that's the one to use for range.
-                if len(config_dict['longitudinal']) == 0:
+                if len(available_long) == 0:
                     raise ValueError("No longitudinal sensors defined, cannot select one for range!")
-                elif len(config_dict['longitudinal']) == 1:
-                    config_dict['selected_range'] = config_dict['longitudinal'][0]
+                elif len(available_long) == 1:
+                    config_dict['selected_range'] = available_long[0]
                 else:
                     raise NotImplementedError("Multiple longitudinal sensors not yet supported.")
         return config_dict

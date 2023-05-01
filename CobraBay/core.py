@@ -30,6 +30,7 @@ import sys
 
 class CBCore:
     def __init__(self, config_obj):
+        self.system_state = 'init'
         # Register the exit handler.
         atexit.register(self.system_exit)
 
@@ -71,7 +72,7 @@ class CBCore:
         network_config = self._cbconfig.network()
         self._logger.debug("Using network config:")
         self._logger.debug(pformat(network_config))
-        self._network = CobraBay.CBNetwork(**network_config)
+        self._network = CobraBay.CBNetwork(**network_config, cbcore=self)
         self._network.register_pistatus(self._pistatus)
 
         # Queue for outbound messages.
@@ -93,7 +94,7 @@ class CBCore:
             bay_config = self._cbconfig.bay(bay_id)
             self._logger.debug("Bay config:")
             self._logger.debug(pformat(bay_config))
-            self._bays[bay_id] = CobraBay.CBBay(**bay_config, detectors=self._detectors)
+            self._bays[bay_id] = CobraBay.CBBay(**bay_config, detectors=self._detectors, cbcore=self)
 
         self._logger.info('Creating display...')
         self._display = CobraBay.CBDisplay(self._cbconfig)
@@ -143,6 +144,7 @@ class CBCore:
         # Do an initial poll.
         self._network.poll()
         self._logger.info('System Initialization complete.')
+        self.system_state = 'running'
 
     # Common network handler, pushes data to the network and makes sure the MQTT client can poll.
     def _network_handler(self):
@@ -212,9 +214,9 @@ class CBCore:
     def _motion(self, bay_id, cmd):
         # Convert command to a state. Should have planned this better, but didn't.
         if cmd == 'dock':
-            direction = "Docking"
+            direction = "docking"
         elif cmd == 'undock':
-            direction = "Undocking"
+            direction = "undocking"
         else:
             raise ValueError("Motion command '{}' not valid.".format(cmd))
 
@@ -257,6 +259,7 @@ class CBCore:
         return
 
     def system_exit(self):
+        self.system_state = 'shutdown'
         # Wipe any previous messages. They don't matter now, we're going away!
         self._outbound_messages = []
         # Stop the ranging and close all the open sensors.
