@@ -284,7 +284,7 @@ class CBConfig:
             raise KeyError("No configuration defined for {}".format(bay_id))
         # Initialize the config dict. Include the bay ID, and default to metric.
         config_dict = {
-            'bay_id': bay_id,
+            'id': bay_id,
             'output_unit': 'm',
             'selected_range': None,
             'settings': {},
@@ -301,14 +301,14 @@ class CBConfig:
 
         # Set a 'friendly' name for use in HA discovery. If not defined, use the Bay ID.
         try:
-            config_dict['bay_name'] = self._config['bays'][bay_id]['name']
+            config_dict['name'] = self._config['bays'][bay_id]['name']
         except KeyError:
-            config_dict['bay_name'] = self._config['bays'][bay_id]['bay_id']
+            config_dict['name'] = self._config['bays'][bay_id]['id']
 
         # How long there should be no motion until we consider the bay to be parked.
         config_dict['motion_timeout'] = Quantity(self._config['bays'][bay_id]['motion_timeout']).to('second')
         # Actual bay depth, from the range sensor to the garage door.
-        config_dict['bay_depth'] = Quantity(self._config['bays'][bay_id]['bay_depth']).to('cm')
+        config_dict['depth'] = Quantity(self._config['bays'][bay_id]['depth']).to('cm')
         # Stop point, the distance from the sensor to the point where the vehicle should stop.
         config_dict['stop_point'] = Quantity(self._config['bays'][bay_id]['stop_point']).to('cm')
 
