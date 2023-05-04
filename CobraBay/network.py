@@ -42,6 +42,7 @@ class CBNetwork:
                  log_level="WARNING",
                  mqtt_log_level="WARNING"):
         # Save parameters.
+        self._display_obj = None
         self._mqtt_broker = mqtt_broker
         self._mqtt_port = mqtt_port
         self._mqtt_username = mqtt_username
@@ -519,6 +520,14 @@ class CBNetwork:
         # SEt the internal tracker to disconnected.
         self._mqtt_connected = False
 
+    @property
+    def display(self):
+        return self._display_obj
+
+    @display.setter
+    def display(self, display_obj):
+        self._display_obj = display_obj
+
     def _ha_discovery(self):
         self._logger.debug("HA Discovery has been called.")
         # Build the device JSON to include in other updates.
@@ -674,6 +683,9 @@ class CBNetwork:
             # Start the outbound messages with the hardware status.
             outbound_messages.extend(self._mqtt_messages_pistatus(self._pistatus))
             self._pistatus_timestamp = time.monotonic()
+        # Add the display.
+        outbound_messages.append(
+            {'topic': 'CobraBay/' + self._client_id + '/display', 'payload': self.display.current, 'repeat': True})
         # Add in all bays.
         self._logger.debug("Bay registry: {}".format(self._bay_registry))
         for bay in self._bay_registry:
