@@ -55,7 +55,7 @@ class CBDisplay:
 
     # Have a bay register. This creates layers for that bay's lateral.
     def register_bay(self, display_reg_info):
-        bay_id = display_reg_info['bay_id']
+        bay_id = display_reg_info['id']
         self._logger.debug("Registering bay ID {} to display".format(bay_id))
         self._logger.debug("Got registration input: {}".format(display_reg_info))
         # Initialize a dict for this bay_id.
@@ -150,8 +150,14 @@ class CBDisplay:
         self._output_image(img)
 
     # Specific displayer for docking.
-    def show_motion(self, direction, display_data):
-        self._logger.debug("Show Dock received data: {}".format(display_data))
+    def show_motion(self, direction, bay_obj):
+        self._logger.debug("Show Dock received bay '{}'".format(bay_obj.name))
+
+        # Don't do motion display if the bay isn't in a motion state.
+        if bay_obj.state not in ('docking','undocking'):
+            self._logger.error("Asked to show motion for bay that isn't performing a motion. Will not do!")
+            return
+
         # For easy reference.
         w = self._settings['matrix_width']
         h = self._settings['matrix_height']
@@ -159,34 +165,46 @@ class CBDisplay:
         final_image = Image.new("RGBA", (w, h), (0,0,0,255))
         ## Center area, the range number.
         range_layer = self._placard_range(
-            display_data['range'],
-            display_data['range_quality'],
-            display_data['bay_state']
+            bay_obj.range.value,
+            bay_obj.range.quality,
+            bay_obj.state
         )
         final_image = Image.alpha_composite(final_image, range_layer)
 
         ## Bottom strobe box.
-        final_image = Image.alpha_composite(final_image, self._strober(display_data))
+        final_image = Image.alpha_composite(final_image,
+                                            self._strobe(
+                                                range_quality=bay_obj.range.quality,
+                                                range_pct=bay_obj.range_pct
+                                            ))
 
         # IF lateral data is reported, show it.
-        self._logger.debug("Data has lateral entries: {}".format(len(display_data['lateral'])))
-        if len(display_data['lateral']) > 0:
-            # final_image = Image.alpha_composite(final_image, self._layers['frame_lateral'])
-            for reading in display_data['lateral']:
-                if reading['quality'] in ('OK','Warning', 'Critical'):
-                    self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(reading['name'], reading['side'], reading['quality']))
-                    selected_layer = self._layers[display_data['bay_id']][reading['name']][reading['side']][reading['quality']]
-                    final_image = Image.alpha_composite(final_image, selected_layer)
+        # self._logger.debug("Data has lateral entries: {}".format(len(display_data['lateral'])))
+        # if len(display_data['lateral']) > 0:
+        #     # final_image = Image.alpha_composite(final_image, self._layers['frame_lateral'])
+        #     for reading in display_data['lateral']:
+        #         if reading['quality'] in ('OK','Warning', 'Critical'):
+        #             self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(reading['name'], reading['side'], reading['quality']))
+        #             selected_layer = self._layers[display_data['bay_id']][reading['name']][reading['side']][reading['quality']]
+        #             final_image = Image.alpha_composite(final_image, selected_layer)
         self._output_image(final_image)
 
-    def _strober(self, display_data):
+    def _strobe(self, range_quality, range_pct):
+        '''
+        Construct a strober for the display.
+
+        :param range_quality: Quality value of the range detector.
+        :type range_quality: str
+        :param range_pct: Percentage of distance from garage door to the parking point.
+        :return:
+        '''
         w = self._settings['matrix_width']
         h = self._settings['matrix_height']
         # Set up a base image to draw on.
         img = Image.new("RGBA", (w, h), (0,0,0,0))
         draw = ImageDraw.Draw(img)
         # Back up and emergency distances, we flash the whole bar.
-        if display_data['range_quality'] in ('Back up','Emergency!'):
+        if range_quality in ('Back up','Emergency!'):
             if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
                 try:
                     if self._running['strobe_color'] == 'red':
@@ -200,16 +218,16 @@ class CBDisplay:
             draw.rectangle([(1,h-3),(w-2,h-1)], fill=self._running['strobe_color'])
         else:
             # If we're beyond range, always have the blockers be zero.
-            if display_data['range_quality'] == 'Back up':
+            if range_quality == 'Back up':
                 blocker_width = 0
             else:
                 # Calculate where the blockers need to be.
                 available_width = (w-2)/2
-                blocker_width = math.floor(available_width * (1-display_data['range_pct']))
+                blocker_width = math.floor(available_width * (1-range_pct))
             self._logger.debug("Strober blocker width: {}".format(blocker_width))
             # Because of rounding, we can wind up with an entirely closed bar if we're not fully parked.
             # Thus, fudge the space unless we're okay.
-            if display_data['range_quality'] != 'ok' and blocker_width > 28:
+            if range_quality != 'ok' and blocker_width > 28:
                 blocker_width = 28
             # Draw the blockers.
             #draw.line([(1, h-2),(blocker_width+1, h-2)], fill="white")
