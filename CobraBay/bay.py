@@ -35,9 +35,9 @@ import CobraBay
 #     return wrapper
 
 class CBBay:
-    def __init__(self, bay_id,
-                 bay_name,
-                 bay_depth,
+    def __init__(self, id,
+                 name,
+                 depth,
                  stop_point,
                  motion_timeout,
                  output_unit,
@@ -48,12 +48,12 @@ class CBBay:
                  cbcore,
                  log_level="WARNING", **kwargs):
         """
-        :param bay_id: ID for the bay. Cannot have spaces.
-        :type bay_id: str
-        :param bay_name: Long "friendly" name for the Bay, used in MQTT messages
-        :type bay_name: str
-        :param bay_depth: Absolute distance of the bay, from the range sensor to the end. Must be a linear Quantity.
-        :type bay_depth: Quantity(Distance)
+        :param id: ID for the bay. Cannot have spaces.
+        :type id: str
+        :param name: Long "friendly" name for the Bay, used in MQTT messages
+        :type name: str
+        :param depth: Absolute distance of the bay, from the range sensor to the end. Must be a linear Quantity.
+        :type depth: Quantity(Distance)
         :param stop_point: Distance from the sensor where the vehicle should stop
         :type stop_point: Quantity(Distance)
         :param motion_timer: During a movement, how long the bay must be still to be considered complete.
@@ -79,16 +79,16 @@ class CBBay:
         """
         # Must set ID before we can create the logger.
         self._motion_timeout = None
-        self.id = bay_id
+        self.id = id
 
         self._logger = logging.getLogger("CobraBay").getChild(self.id)
         self._logger.setLevel(log_level)
-        self._logger.info("Initializing bay: {}".format(bay_id))
+        self._logger.info("Initializing bay: {}".format(id))
         self._logger.debug("Bay received detectors: {}".format(detectors))
 
         # Save the remaining parameters.
-        self._bay_name = bay_name
-        self._bay_depth = bay_depth
+        self._name = name
+        self._depth = depth
         self._stop_point = stop_point
         self.motion_timeout = motion_timeout
         self._output_unit = output_unit
@@ -96,7 +96,7 @@ class CBBay:
         self._detector_settings = detector_settings
         self._selected_range = selected_range
         self._intercepts = intercepts
-        self._lateral_sorted = self._sort_lateral(intercepts)
+        self._lateral_sorted = self.lateral_order(intercepts)
         self._cbcore = cbcore
         # Create a logger.
 
@@ -110,7 +110,7 @@ class CBBay:
         self._occupancy = None
 
         # Calculate the adjusted depth.
-        self._adjusted_depth = self._bay_depth - self._stop_point
+        self._adjusted_depth = self._depth - self._stop_point
 
         # Create a unit registry.
         self._ureg = UnitRegistry
@@ -149,12 +149,12 @@ class CBBay:
         self.state = "ready"
 
     @property
-    def bay_name(self):
-        return self._bay_name
+    def name(self):
+        return self._name
 
-    @bay_name.setter
-    def bay_name(self, input):
-        self._bay_name = input
+    @name.setter
+    def name(self, name):
+        self._name = name
 
     @property
     def detectors(self):
@@ -180,7 +180,7 @@ class CBBay:
     def discovery_reg_info(self):
         # For discovery, the detector hierarchy doesn't matter, so we can flatten it.
         return_dict = {
-            'bay_id': self.id,
+            'id': self.id,
             'bay_name': self.bay_name,
             'detectors': []
         }
@@ -196,18 +196,44 @@ class CBBay:
     @property
     def display_reg_info(self):
         return_dict = {
-            'bay_id': self.id,
+            'id': self.id,
             'lateral_order': self._lateral_sorted
         }
         return return_dict
 
     @property
     def id(self):
-        return self._bay_id
+        return self._id
 
     @id.setter
     def id(self, input):
-        self._bay_id = input.replace(" ","_").lower()
+        self._id = input.replace(" ","_").lower()
+
+    @property
+    def motion_timeout(self):
+        return self._motion_timer
+
+    @motion_timeout.setter
+    def motion_timeout(self, mto_input):
+        if isinstance(mto_input, Quantity):
+            if not mto_input.check('[time]'):
+                raise ValueError("Motion timeout must have time dimensionality.")
+            else:
+                self._motion_timer = mto_input
+        else:
+            raise TypeError("Motion timeout must be a Quantity.")
+
+    @property
+    def motion_timer(self):
+        '''
+        Reports time left on the current motion in M:S format. If no active motion, returns 'idle'.
+
+        :return:
+        '''
+        if self.state not in ('docking', 'undocking'):
+            return 'idle'
+        else:
+            return self.motion_timeout - Quantity(time.monotonic() - self._current_motion['mark'], 's')
 
     # Bay properties
     @property
@@ -250,30 +276,28 @@ class CBBay:
         return "error"
 
     @property
-    def motion_timeout(self):
-        return self._motion_timer
+    def range(self):
+        '''
+        The selected range object for this bay.
 
-    @motion_timeout.setter
-    def motion_timeout(self, mto_input):
-        if isinstance(mto_input, Quantity):
-            if not mto_input.check('[time]'):
-                raise ValueError("Motion timeout must have time dimensionality.")
-            else:
-                self._motion_timer = mto_input
-        else:
-            raise TypeError("Motion timeout must be a Quantity.")
-        
+        :return: detectors.Range
+        '''
+        return self._detectors[self._selected_range]
+
     @property
-    def motion_timer(self):
+    def range_pct(self):
         '''
-        Reports time left on the current motion in M:S format. If no active motion, returns 'idle'.
-        
-        :return: 
+        Percentage of distance covered from the garage door to the stop point.
+        :return: float
         '''
-        if self.state not in ('docking','undocking'):
-            return 'idle'
+        # If it's not a Quantity, just return zero.
+        if isinstance(self.range.value, Quantity):
+            range_pct = self.range.value.to('cm') / self._adjusted_depth.to('cm')
+            # Singe this is dimensionless, just take the value and make it a Python scalar.
+            range_pct = range_pct.magnitude
+            return range_pct
         else:
-            return self.motion_timeout - Quantity(time.monotonic() - self._current_motion['mark'], 's')
+            return 0
 
     # How good is the parking job?
     # @property
@@ -362,7 +386,7 @@ class CBBay:
                                     'status': self._detectors[detector].status
                                 },
                                 'repeat': False,
-                                'topic_mappings': {'bay_id': self.id, 'detector_id': self._detectors[detector].id}
+                                'topic_mappings': {'id': self.id, 'detector_id': self._detectors[detector].id}
                                 }
 
             # If the detector is actively ranging, add the values.
@@ -426,22 +450,22 @@ class CBBay:
     #     # Initialize the outbound message list.
     #     # Always include the bay state and bay occupancy.
     #     outbound_messages = [{'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False,
-    #                           'topic_mappings': {'bay_id': self.id}},
+    #                           'topic_mappings': {'id': self.id}},
     #                          {'topic_type': 'bay',
     #                           'topic': 'bay_occupied',
     #                           'message': self.occupied,
     #                           'repeat': True,
-    #                           'topic_mappings': {'bay_id': self.id}},
+    #                           'topic_mappings': {'id': self.id}},
     #                          {'topic_type': 'bay',
     #                           'topic': 'bay_quality',
     #                           'message': self.quality,
     #                           'repeat': True,
-    #                           'topic_mappings': {'bay_id': self.id}},
+    #                           'topic_mappings': {'id': self.id}},
     #                          {'topic_type': 'bay',
     #                           'topic': 'bay_speed',
     #                           'message': self._detectors[self._selected_range].vector,
     #                           'repeat': True,
-    #                           'topic_mappings': {'bay_id': self.id}}]
+    #                           'topic_mappings': {'id': self.id}}]
     #
     #     # Add detector values, if applicable.
     #     outbound_messages = outbound_messages + self._detector_status()
@@ -455,83 +479,83 @@ class CBBay:
     #          'topic': 'bay_dock_time',
     #          'message': message,
     #          'repeat': True,
-    #          'topic_mappings': {'bay_id': self.id}}
+    #          'topic_mappings': {'id': self.id}}
     #     )
     #     self._logger.debug("Have compiled outbound messages. {}".format(outbound_messages))
     #     return outbound_messages
 
 
-    # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
-    def display_data(self):
-        self._logger.debug("Collecting bay data for display. Have quality: {}".format(self._quality))
-        return_data = {'bay_id': self.id, 'bay_state': self.state,
-                       'range': self._position[self._selected_range],
-                       'range_quality': self._quality[self._selected_range]}
-        # Percentage of range covered. This is used to construct the strobe.
-        # If it's not a Quantity, just return zero.
-        if isinstance(return_data['range'], Quantity):
-            return_data['range_pct'] = return_data['range'].to('cm') / self._adjusted_depth.to('cm')
-            # Singe this is dimensionless, just take the value and make it a Python scalar.
-            return_data['range_pct'] = return_data['range_pct'].magnitude
-        else:
-            return_data['range_pct'] = 0
-        # List for lateral state.
-        return_data['lateral'] = []
-        self._logger.debug("Using lateral order: {}".format(self._lateral_sorted))
-        # Assemble the lateral data with *closest first*.
-        # This will result in the display putting things together top down.
-        # Lateral ordering is determined by intercept range when bay is started up.
-        if self._lateral_sorted is not None:
-            for lateral_detector in self._lateral_sorted:
-                detector_dict = {
-                    'name': lateral_detector,
-                    'quality': self._quality[lateral_detector],
-                }
-
-                if self._position[lateral_detector] is None:
-                    detector_dict['side'] = 'None'
-                elif self._detectors[lateral_detector].side == 'Not Intercepted':
-                    detector_dict['side'] = "DND"
-                else:
-                    # This is a little confusing. The detector side is relative to the bay, ie: looking out from the range
-                    # sensor. The display position for indicator is relative to the display, ie: when looking (at) the
-                    # display. I arguably should have made it consistent, but not going to rewrite it now.
-
-                    if self._detectors[lateral_detector].side == 'R':
-                        # Sensor is mounted on the right side of the bay.
-                        if self._position[lateral_detector] > 0:
-                            # Vehicle is shifted to the left side of the bay
-                            # Put the indicators on the right side of the display (bay-left)
-                            detector_dict['side'] = 'R'
-                        elif self._position[lateral_detector] < 0:
-                            # Vehicle is shifted to the right side of the bay.
-                            # Pub the indicators on the left side of the display (bay-right)
-                            detector_dict['side'] = 'L'
-                        else:
-                            # It's exactly zero? What're the odd!?
-                            detector_dict['side'] = 'DND'
-                    elif self._detectors[lateral_detector].side == 'L':
-                        # Sensor is mounted on the left side of the bay.
-                        if self._position[lateral_detector] > 0:
-                            # Vehicle is shifted to the right side of the bay.
-                            # Put the indicators on the left side of the display (bay-right)
-                            detector_dict['side'] = 'L'
-                        elif self._position[lateral_detector] < 0:
-                            # Vehicle is shifted to the left side of the bay.
-                            # Put the indicators on the right side of the display (bay-left)
-                            detector_dict['side'] = 'R'
-                        else:
-                            detector_dict['side'] = 'DND'
-
-                return_data['lateral'].append(detector_dict)
-                # Calculate the side for placement.
-
-        else:
-            self._logger.debug("Not assembling laterals, lateral order is None.")
-        return return_data
+    # # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
+    # def display_data(self):
+    #     self._logger.debug("Collecting bay data for display. Have quality: {}".format(self._quality))
+    #     return_data = {'id': self.id, 'bay_state': self.state,
+    #                    'range': self._position[self._selected_range],
+    #                    'range_quality': self._quality[self._selected_range]}
+    #     # Percentage of range covered. This is used to construct the strobe.
+    #     # If it's not a Quantity, just return zero.
+    #     if isinstance(return_data['range'], Quantity):
+    #         return_data['range_pct'] = return_data['range'].to('cm') / self._adjusted_depth.to('cm')
+    #         # Singe this is dimensionless, just take the value and make it a Python scalar.
+    #         return_data['range_pct'] = return_data['range_pct'].magnitude
+    #     else:
+    #         return_data['range_pct'] = 0
+    #     # List for lateral state.
+    #     return_data['lateral'] = []
+    #     self._logger.debug("Using lateral order: {}".format(self._lateral_sorted))
+    #     # Assemble the lateral data with *closest first*.
+    #     # This will result in the display putting things together top down.
+    #     # Lateral ordering is determined by intercept range when bay is started up.
+    #     if self._lateral_sorted is not None:
+    #         for lateral_detector in self._lateral_sorted:
+    #             detector_dict = {
+    #                 'name': lateral_detector,
+    #                 'quality': self._quality[lateral_detector],
+    #             }
+    #
+    #             if self._position[lateral_detector] is None:
+    #                 detector_dict['side'] = 'None'
+    #             elif self._detectors[lateral_detector].side == 'Not Intercepted':
+    #                 detector_dict['side'] = "DND"
+    #             else:
+    #                 # This is a little confusing. The detector side is relative to the bay, ie: looking out from the range
+    #                 # sensor. The display position for indicator is relative to the display, ie: when looking (at) the
+    #                 # display. I arguably should have made it consistent, but not going to rewrite it now.
+    #
+    #                 if self._detectors[lateral_detector].side == 'R':
+    #                     # Sensor is mounted on the right side of the bay.
+    #                     if self._position[lateral_detector] > 0:
+    #                         # Vehicle is shifted to the left side of the bay
+    #                         # Put the indicators on the right side of the display (bay-left)
+    #                         detector_dict['side'] = 'R'
+    #                     elif self._position[lateral_detector] < 0:
+    #                         # Vehicle is shifted to the right side of the bay.
+    #                         # Pub the indicators on the left side of the display (bay-right)
+    #                         detector_dict['side'] = 'L'
+    #                     else:
+    #                         # It's exactly zero? What're the odd!?
+    #                         detector_dict['side'] = 'DND'
+    #                 elif self._detectors[lateral_detector].side == 'L':
+    #                     # Sensor is mounted on the left side of the bay.
+    #                     if self._position[lateral_detector] > 0:
+    #                         # Vehicle is shifted to the right side of the bay.
+    #                         # Put the indicators on the left side of the display (bay-right)
+    #                         detector_dict['side'] = 'L'
+    #                     elif self._position[lateral_detector] < 0:
+    #                         # Vehicle is shifted to the left side of the bay.
+    #                         # Put the indicators on the right side of the display (bay-left)
+    #                         detector_dict['side'] = 'R'
+    #                     else:
+    #                         detector_dict['side'] = 'DND'
+    #
+    #             return_data['lateral'].append(detector_dict)
+    #             # Calculate the side for placement.
+    #
+    #     else:
+    #         self._logger.debug("Not assembling laterals, lateral order is None.")
+    #     return return_data
 
     # Calculate the ordering of the lateral sensors.
-    def _sort_lateral(self, intercepts):
+    def lateral_order(self, intercepts):
         self._logger.debug("Sorting intercepts: {}".format(intercepts))
         lateral_sorted = []
         for detector_name in intercepts:
@@ -574,4 +598,4 @@ class CBBay:
                 setattr(self._detectors[dc], item, self._detector_settings[dc][item])
             # Bay depth is a bay global. For range sensors, this also needs to get applied.
             if isinstance(self._detectors[dc], CobraBay.detectors.Range):
-                setattr(self._detectors[dc], "bay_depth", self._bay_depth)
+                setattr(self._detectors[dc], "bay_depth", self._depth)
