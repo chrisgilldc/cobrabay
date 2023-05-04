@@ -98,6 +98,9 @@ class CBCore:
 
         self._logger.info('Creating display...')
         self._display = CobraBay.CBDisplay(self._cbconfig)
+        # Inform the network about the display. This is so the network can send display images. Nice to have, very
+        # useful for debugging!
+        self._network.display = self._display
 
         # Register the bay with the network and display.
         for bay_id in self._bays:
@@ -227,21 +230,11 @@ class CBCore:
 
         # As long as the bay is in the desired state, keep running.
         while self._bays[bay_id].state == direction:
-            # Collect the MQTT messages from the bay itself.
-            self._logger.debug("Collecting MQTT messages from bay.")
-            # bay_messages = self._bays[bay_id].mqtt_messages()
-            # self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
-            # self._outbound_messages = self._outbound_messages + bay_messages
-            # Collect the display data to send to the display.
-            self._logger.debug("Collecting display data from bay.")
-            display_data = self._bays[bay_id].display_data()
-            self._logger.debug("Collected display data: {}".format(display_data))
-            self._display.show_motion(direction, display_data)
-            # Put the display image on the MQTT stack.
-            # self._outbound_messages.append(
-            #     {'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': True})
+            self._logger.debug("{} motion - Displaying".format(cmd))
+            # Send the bay object reference to the display method.
+            self._display.show_motion(direction, self._bays[bay_id])
             # Poll the network.
-            self._logger.debug("Polling network.")
+            self._logger.debug("{} motion - Polling network.".format(cmd))
             self._network_handler()
             # Check for completion
             self._bays[bay_id].check_timer()
