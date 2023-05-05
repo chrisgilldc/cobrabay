@@ -204,7 +204,7 @@ class CBDisplay:
         img = Image.new("RGBA", (w, h), (0,0,0,0))
         draw = ImageDraw.Draw(img)
         # Back up and emergency distances, we flash the whole bar.
-        if range_quality in ('Back up','Emergency!'):
+        if range_quality in ('back_up','emergency'):
             if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
                 try:
                     if self._running['strobe_color'] == 'red':
@@ -217,8 +217,8 @@ class CBDisplay:
             # draw.line([(1,h-2),(w-2,h-2)], fill=self._running['strobe_color'])
             draw.rectangle([(1,h-3),(w-2,h-1)], fill=self._running['strobe_color'])
         else:
-            # If we're beyond range, always have the blockers be zero.
-            if range_quality == 'Back up':
+            # If we need to back up, have blockers be zero
+            if range_quality == 'back_up':
                 blocker_width = 0
             else:
                 # Calculate where the blockers need to be.
@@ -314,9 +314,9 @@ class CBDisplay:
         self._logger.debug("Creating range placard with range {} and quality {}".format(input_range, range_quality))
         range_string = "RANGE"
         # Some range quality statuses need a text output, not a distance.
-        if range_quality == 'Back up':
+        if range_quality == 'back_up':
             range_string = "BACK UP"
-        elif range_quality == 'Door open':
+        elif range_quality == 'door_open':
             if bay_state == 'Docking':
                 range_string = "APPROACH"
             elif bay_state == 'Undocking':
@@ -336,11 +336,11 @@ class CBDisplay:
             range_string = "{} m".format(as_meters)
 
         # Determine a color based on quality
-        if range_quality in ('Critical','Back up'):
+        if range_quality in ('critical','back_up'):
             text_color = 'red'
-        elif range_quality == 'Warning':
+        elif range_quality == 'warning':
             text_color = 'yellow'
-        elif range_quality in ('Beyond range', 'Door open'):
+        elif range_quality == 'door_open':
             text_color = 'blue'
         else:
             text_color = 'green'

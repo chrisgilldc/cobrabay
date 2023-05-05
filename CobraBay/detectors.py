@@ -320,35 +320,33 @@ class Range(SingleDetector):
         if isinstance(self._history[0][0], SensorValueException):
             # A weak reading from the sensor almost certainly means the door is open and nothing is blocking.
             if self._history[0][0].status == "Weak":
-                return "Door open"
-            elif self._history[0][0].status in ("Saturation", "Flood"):
-                # When saturated or flooded, just pass on those statuses.
-                return self._history[0][0]
+                qv = "door_open"
             else:
-                return "Unknown"
+                qv = "unknown"
         # All other exceptions.
         elif isinstance(self._history[0][0], BaseException):
-            return "Unknown"
+            qv = "unknown"
         else:
             # You're about to hit the wall!
             if self._history[0][0] < Quantity("2 in"):
-                return 'Emergency!'
+                qv = 'emergency'
             elif (self.bay_depth * 0.90) <= self._history[0][0]:
                 self._logger.debug(
                     "Reading is more than 90% of bay depth ({})".format(self.bay_depth * .9))
-                return 'No object'
+                qv = 'no_object'
             # Now consider the adjusted values.
             elif self.value < 0 and abs(self.value) > self.spread_park:
-                return 'Back up'
+                qv = 'back_up'
             elif abs(self.value) < self.spread_park:
-                return 'Park'
+                qv = 'park'
             elif self.value <= self._dist_crit:
-                self._logger.debug("Critical distance is {}, returning Final.".format(self._dist_crit))
-                return 'Final'
+                qv = 'final'
             elif self.value <= self._dist_warn:
-                return 'Base'
+                qv = 'base'
             else:
-                return 'OK'
+                qv = 'ok'
+        self._logger.debug("Quality {}")
+        return qv
 
     # Determine the rate of motion being measured by the detector.
     @property
@@ -535,20 +533,20 @@ class Lateral(SingleDetector):
             if self.value > Quantity('90 in'):
                 # A standard vehicle width (in the US, at least) is 96 inches. If we can reach across a significant
                 # proportion of the bay, we're not finding a vehicle, so deem it to be no vehicle.
-                qv = "No vehicle"
+                qv = "no_vehicle"
             elif abs(self.value) <= self.spread_ok:
-                qv = "OK"
+                qv = "ok"
             elif abs(self.value) <= self.spread_warn:
-                qv = "Warning"
+                qv = "warning"
             elif abs(self.value) > self.spread_warn:
-                qv = "Critical"
+                qv = "critical"
             else:
                 # Total failure to return a value means the light didn't reflect off anything. That *probably* means
                 # nothing is there, but it could be failing for other reasons.
-                qv = "Unknown"
+                qv = "unknown"
         else:
-            qv = "Unknown"
-        self._logger.debug("Quality returning {}".format(qv))
+            qv = "unknown"
+        self._logger.debug("Quality {}".format(qv))
         return qv
 
     @property

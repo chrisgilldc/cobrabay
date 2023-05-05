@@ -4,11 +4,12 @@
 import time
 from pint import UnitRegistry, Quantity
 from time import monotonic
-from .detectors import CB_VL53L1X
+from math import floor
+# from .detectors import CB_VL53L1X
 import logging
-from pprint import pformat, pprint
-from functools import wraps
-import sys
+# from pprint import pformat, pprint
+# from functools import wraps
+# import sys
 from .exceptions import SensorValueException
 import CobraBay
 
@@ -235,6 +236,15 @@ class CBBay:
         else:
             return self.motion_timeout - Quantity(time.monotonic() - self._current_motion['mark'], 's')
 
+    @property
+    def _occupancy_score(self):
+        max_score = len(self._lateral_sorted)
+        score = floor(max_score * (2/3))
+        # Never let score be less than one detector, because that makes no sense.
+        if score < 1:
+            score = 1
+        return score
+
     # Bay properties
     @property
     def occupied(self):
@@ -246,34 +256,37 @@ class CBBay:
         :rtype: bool
         """
         self._logger.debug("Checking for occupancy.")
+        occ = 'unknown'
         # Range detector is required to determine occupancy. If it's not ranging, return immediately.
         if self._detectors[self._selected_range].state != 'ranging':
-            return 'unknown'
+            occ = 'unknown'
         # Only hit the range quality once.
         range_quality = self._detectors[self._selected_range].quality
-        if range_quality in ('No object', 'Door open'):
+        if range_quality in ('no_object', 'door_open'):
             # If the detector can hit the garage door, or the door is open, then clearly nothing is in the way, so
             # the bay is vacant.
-            self._logger.debug("Longitudinal quality is {}, not occupied.".format(self._quality[self._selected_range]))
+            self._logger.debug("Longitudinal quality is {}, not occupied.".format(self._detectors[self._selected_range].quality))
             return "false"
-        elif range_quality in ('Emergency!', 'Back up', 'Park', 'Final', 'Base'):
+        elif range_quality in ('emergency', 'back_up', 'park', 'final', 'base'):
+            self._logger.debug("Matched range quality: {}".format(range_quality))
             # If the detector is giving us any of the 'close enough' qualities, there's something being found that
             # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
             # the sensors or whatnot
-            self._logger.debug("Longitudinal quality is {}, could be occupied.".format(range_quality))
             lat_score = 0
-            max_score = len(self._lateral_sorted)
             for detector in self._lateral_sorted:
-                if self._detectors[detector].quality in ('OK', 'Warning', 'Critical'):
+                if self._detectors[detector].quality in ('ok', 'warning', 'critical'):
                     # No matter how badly parked the vehicle is, it's still *there*
                     lat_score += 1
-            self._logger.debug("Achieved lateral score {} of {}".format(lat_score, max_score))
-            if lat_score == max_score:
+            self._logger.debug("Achieved lateral score {} of {}".format(lat_score, self._occupancy_score))
+            if lat_score >= self._occupancy_score:
                 # All sensors have found something more or less in the right place, so yes, we're occupied!
-                return "true"
-        # If for some reason we drop through to here, assume we're not occupied.
-        self._logger.error("Occupancy found range quality {}, which is an unaccounted for response.".format(range_quality))
-        return "error"
+                occ = 'true'
+            else:
+                occ = 'false'
+        else:
+            occ = 'error'
+        self._logger.debug("Occupancy determined to be '{}'".format(occ))
+        return occ
 
     @property
     def range(self):
