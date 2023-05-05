@@ -242,7 +242,6 @@ class MQTTSensor(MQTTTrigger):
     def callback(self, client, userdata, message):
         # Convert to a flat string
         message_text = str(message.payload, 'utf-8').lower()
-        print("MQTT Sensor trigger caught message: {}".format(message_text))
 
         # Check the message text against our trigger value.
         # For 'to' type, previous value doesn't matter, just check it!
