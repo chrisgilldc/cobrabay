@@ -8,7 +8,7 @@ from math import floor
 # from .detectors import CB_VL53L1X
 import logging
 # from pprint import pformat, pprint
-# from functools import wraps
+from functools import wraps
 # import sys
 from .exceptions import SensorValueException
 import CobraBay
@@ -34,6 +34,26 @@ import CobraBay
 #         return func(self)
 #
 #     return wrapper
+
+def log_changes(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        # Call the function.
+        retval = func(self, *args, **kwargs)
+        if self._logger.level <= 20:
+            if func.__name__ in self._previous:
+                if self._previous[func.__name__] != retval:
+                    self._logger.info("{} changed from '{}' ({}) to '{}' ({})".
+                        format(func.__name__,
+                               self._previous[func.__name__],
+                               type(self._previous[func.__name__]),
+                               retval,
+                               type(retval)))
+            else:
+                self._logger.info("Initial value of '{}' set to '{}' ({})".format(func.__name__, retval, type(retval)))
+        self._previous[func.__name__] = retval
+        return retval
+    return wrapper
 
 class CBBay:
     def __init__(self, id,
@@ -87,6 +107,7 @@ class CBBay:
         self._logger.info("Initializing bay: {}".format(id))
         self._logger.debug("Bay received detectors: {}".format(detectors))
 
+
         # Save the remaining parameters.
         self._name = name
         self._depth = depth
@@ -109,7 +130,9 @@ class CBBay:
         self._previous_scan_ts = 0
         self._state = None
         self._occupancy = None
+        self._previous = {
 
+        }
         # Calculate the adjusted depth.
         self._adjusted_depth = self._depth - self._stop_point
 
@@ -247,6 +270,7 @@ class CBBay:
 
     # Bay properties
     @property
+    @log_changes
     def occupied(self):
         """
         Occupancy state of the bay, determined based on what the sensors can hit.
@@ -352,6 +376,7 @@ class CBBay:
         self._logger.critical("Shutdown complete. Exiting.")
 
     @property
+    @log_changes
     def state(self):
         """
         Operating state of the bay.
@@ -386,6 +411,7 @@ class CBBay:
         self._state = m_input
 
     @property
+    @log_changes
     def vector(self):
         return self._detectors[self._selected_range].vector
 
