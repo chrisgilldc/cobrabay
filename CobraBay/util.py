@@ -63,7 +63,7 @@ class Convertomatic:
                 new_list.append(self.convert(item))
             return new_list
         if isinstance(input, bool):
-            return str(input)
+            return str(input).lower()
         else:
             try:
                 # If this can be rounded, round it, otherwise, pass it through.
