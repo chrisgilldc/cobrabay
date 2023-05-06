@@ -326,7 +326,7 @@ class Range(SingleDetector):
         # All other exceptions.
         elif isinstance(self._history[0][0], BaseException):
             qv = "unknown"
-        else:
+        elif type(self.value) in (int, float, Quantity):
             # You're about to hit the wall!
             if self._history[0][0] < Quantity("2 in"):
                 qv = 'emergency'
@@ -345,7 +345,10 @@ class Range(SingleDetector):
                 qv = 'base'
             else:
                 qv = 'ok'
-        self._logger.debug("Quality {}")
+        else:
+            self._logger.warning("Could not evaluate quality, value was unexpected '{}' ({})".format(self.value, type(self.value)))
+            qv = 'unknown'
+        self._logger.debug("Quality {}".format(qv))
         return qv
 
     # Determine the rate of motion being measured by the detector.
