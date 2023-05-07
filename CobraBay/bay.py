@@ -401,12 +401,13 @@ class CBBay:
             self._logger.debug("Requested state {} is also current state. No action.".format(m_input))
             return
         if m_input in ('docking', 'undocking') and self._state not in ('docking', 'undocking'):
-            self._logger.debug("Entering state: {}".format(m_input))
+            self._logger.info("Entering state: {}".format(m_input))
+            self._logger.info("Start time: {}".format(self._current_motion['mark']))
+            self._logger.debug("Setting all detectors to ranging.")
+            self._detector_state('ranging')
             self._current_motion['mark'] = monotonic()
-            self._logger.debug("Start time: {}".format(self._current_motion['mark']))
-            self._logger.debug("Detectors: {}".format(self._detectors))
         if m_input not in ('docking', 'undocking') and self._state in ('docking', 'undocking'):
-            self._logger.debug("Entering state: {}".format(m_input))
+            self._logger.info("Entering state: {}".format(m_input))
             # Reset some variables.
             # Make the mark none to be sure there's not a stale value in here.
             self._current_motion['mark'] = None
@@ -486,116 +487,6 @@ class CBBay:
         self._position = position
         self._quality = quality
 
-
-    # # MQTT status methods. These generate payloads the core network handler can send upward.
-    # def mqtt_messages(self, verify=False):
-    #     # Initialize the outbound message list.
-    #     # Always include the bay state and bay occupancy.
-    #     outbound_messages = [{'topic_type': 'bay', 'topic': 'bay_state', 'message': self.state, 'repeat': False,
-    #                           'topic_mappings': {'id': self.id}},
-    #                          {'topic_type': 'bay',
-    #                           'topic': 'bay_occupied',
-    #                           'message': self.occupied,
-    #                           'repeat': True,
-    #                           'topic_mappings': {'id': self.id}},
-    #                          {'topic_type': 'bay',
-    #                           'topic': 'bay_quality',
-    #                           'message': self.quality,
-    #                           'repeat': True,
-    #                           'topic_mappings': {'id': self.id}},
-    #                          {'topic_type': 'bay',
-    #                           'topic': 'bay_speed',
-    #                           'message': self._detectors[self._selected_range].vector,
-    #                           'repeat': True,
-    #                           'topic_mappings': {'id': self.id}}]
-    #
-    #     # Add detector values, if applicable.
-    #     outbound_messages = outbound_messages + self._detector_status()
-    #
-    #     if self._current_motion['mark'] is None:
-    #         message = 'Not running'
-    #     else:
-    #         message = self._current_motion['allowed'] - (monotonic() - self._current_motion['mark'])
-    #     outbound_messages.append(
-    #         {'topic_type': 'bay',
-    #          'topic': 'bay_dock_time',
-    #          'message': message,
-    #          'repeat': True,
-    #          'topic_mappings': {'id': self.id}}
-    #     )
-    #     self._logger.debug("Have compiled outbound messages. {}".format(outbound_messages))
-    #     return outbound_messages
-
-
-    # # Send collect data needed to send to the display. This is syntactically shorter than the MQTT messages.
-    # def display_data(self):
-    #     self._logger.debug("Collecting bay data for display. Have quality: {}".format(self._quality))
-    #     return_data = {'id': self.id, 'bay_state': self.state,
-    #                    'range': self._position[self._selected_range],
-    #                    'range_quality': self._quality[self._selected_range]}
-    #     # Percentage of range covered. This is used to construct the strobe.
-    #     # If it's not a Quantity, just return zero.
-    #     if isinstance(return_data['range'], Quantity):
-    #         return_data['range_pct'] = return_data['range'].to('cm') / self._adjusted_depth.to('cm')
-    #         # Singe this is dimensionless, just take the value and make it a Python scalar.
-    #         return_data['range_pct'] = return_data['range_pct'].magnitude
-    #     else:
-    #         return_data['range_pct'] = 0
-    #     # List for lateral state.
-    #     return_data['lateral'] = []
-    #     self._logger.debug("Using lateral order: {}".format(self._lateral_sorted))
-    #     # Assemble the lateral data with *closest first*.
-    #     # This will result in the display putting things together top down.
-    #     # Lateral ordering is determined by intercept range when bay is started up.
-    #     if self._lateral_sorted is not None:
-    #         for lateral_detector in self._lateral_sorted:
-    #             detector_dict = {
-    #                 'name': lateral_detector,
-    #                 'quality': self._quality[lateral_detector],
-    #             }
-    #
-    #             if self._position[lateral_detector] is None:
-    #                 detector_dict['side'] = 'None'
-    #             elif self._detectors[lateral_detector].side == 'Not Intercepted':
-    #                 detector_dict['side'] = "DND"
-    #             else:
-    #                 # This is a little confusing. The detector side is relative to the bay, ie: looking out from the range
-    #                 # sensor. The display position for indicator is relative to the display, ie: when looking (at) the
-    #                 # display. I arguably should have made it consistent, but not going to rewrite it now.
-    #
-    #                 if self._detectors[lateral_detector].side == 'R':
-    #                     # Sensor is mounted on the right side of the bay.
-    #                     if self._position[lateral_detector] > 0:
-    #                         # Vehicle is shifted to the left side of the bay
-    #                         # Put the indicators on the right side of the display (bay-left)
-    #                         detector_dict['side'] = 'R'
-    #                     elif self._position[lateral_detector] < 0:
-    #                         # Vehicle is shifted to the right side of the bay.
-    #                         # Pub the indicators on the left side of the display (bay-right)
-    #                         detector_dict['side'] = 'L'
-    #                     else:
-    #                         # It's exactly zero? What're the odd!?
-    #                         detector_dict['side'] = 'DND'
-    #                 elif self._detectors[lateral_detector].side == 'L':
-    #                     # Sensor is mounted on the left side of the bay.
-    #                     if self._position[lateral_detector] > 0:
-    #                         # Vehicle is shifted to the right side of the bay.
-    #                         # Put the indicators on the left side of the display (bay-right)
-    #                         detector_dict['side'] = 'L'
-    #                     elif self._position[lateral_detector] < 0:
-    #                         # Vehicle is shifted to the left side of the bay.
-    #                         # Put the indicators on the right side of the display (bay-left)
-    #                         detector_dict['side'] = 'R'
-    #                     else:
-    #                         detector_dict['side'] = 'DND'
-    #
-    #             return_data['lateral'].append(detector_dict)
-    #             # Calculate the side for placement.
-    #
-    #     else:
-    #         self._logger.debug("Not assembling laterals, lateral order is None.")
-    #     return return_data
-
     # Calculate the ordering of the lateral sensors.
     def lateral_order(self, intercepts):
         self._logger.debug("Sorting intercepts: {}".format(intercepts))
@@ -618,13 +509,14 @@ class CBBay:
 
     # Traverse the detectors dict, activate everything that needs activating.
     def _detector_state(self, target_status):
-        if target_status not in ('disabled','enabled','ranging'):
+        if target_status in ('disabled','enabled','ranging'):
+            self._logger.debug("Traversing detectors to set status to '{}'".format(target_status))
+            # Traverse the dict looking for detectors that need activation.
+            for detector in self._detectors:
+                self._logger.debug("Changing detector {}".format(detector))
+                self._detectors[detector].status = target_status
+        else:
             raise ValueError("'{}' not a valid state for detectors.".format(target_status))
-        self._logger.debug("Traversing detectors to set status to '{}'".format(target_status))
-        # Traverse the dict looking for detectors that need activation.
-        for detector in self._detectors:
-            self._logger.debug("Changing detector {}".format(detector))
-            self._detectors[detector].status = target_status
 
     # Apply specific config options to the detectors.
     def _setup_detectors(self):

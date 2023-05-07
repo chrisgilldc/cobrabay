@@ -3,10 +3,12 @@
 ####
 
 import logging
-import weakref
-from time import monotonic, sleep
+from weakref import WeakValueDictionary, WeakSet
+from time import monotonic, monotonic_ns, sleep
+from math import floor
 import board
 import busio
+import csv
 from adafruit_aw9523 import AW9523
 from adafruit_vl53l1x import VL53L1X as af_VL53L1X
 from pint import Quantity
@@ -192,7 +194,7 @@ class SerialSensor(BaseSensor):
         self._name = "{}-{}".format(type(self).__name__, port)
         self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
         self._logger.info("Initializing sensor...")
-        self._logger.setLevel("WARNING")
+        self._logger.setLevel(log_level)
         self._serial_port = None
         self._baud_rate = None
         self.serial_port = port
@@ -231,7 +233,7 @@ class CB_VL53L1X(I2CSensor):
     _i2c_address: int
     _i2c_bus: int
 
-    instances = weakref.WeakSet()
+    instances = WeakSet()
 
     def __init__(self, i2c_bus, i2c_address, enable_board, enable_pin, timing, logger, distance_mode ="long",
                  log_level="WARNING"):
@@ -389,7 +391,7 @@ class CB_VL53L1X(I2CSensor):
         self._logger.debug("Range requsted. Sensor state is: {}".format(self.state))
         if self.state != 'ranging':
             # Return 'Not ranging' if the board isn't actively ranging, since, duh.
-            return 'Not ranging'
+            return 'not_ranging'
         elif monotonic() - self._previous_timestamp < 0.2:
             # Make sure to pace the readings properly, so we're not over-running the native readings.
             # If a request comes in before the sleep time (200ms), return the previous reading.
@@ -437,7 +439,7 @@ class CB_VL53L1X(I2CSensor):
             else:
                 # A "none" means the sensor had no response.
                 if reading is None:
-                    return "No reading"
+                    return "no_reading"
                 else:
                     self._previous_reading = Quantity(reading, 'cm')
                     self._previous_timestamp = monotonic()
@@ -566,7 +568,7 @@ class TFMini(SerialSensor):
             self._previous_timestamp = monotonic()
             return self._previous_reading
         else:
-            raise CobraBay.exceptions.SensorValueException(reading.status)
+            raise CobraBay.exceptions.SensorValueException(status=reading.status)
 
     # When this was tested in I2C mode, the TFMini could return unstable answers, even at rest. Unsure if
     # this is still true in serial mode, keeping this clustering method for the moment.
@@ -626,3 +628,74 @@ class TFMini(SerialSensor):
         # The TFMini's default update rate is 100 Hz. 1s = 1000000000 ns / 100 = 10000000 ns.
         # This is static and assuming it hasn't been changed, so return it.
         return Quantity('10000000 ns')
+
+class FileSensor(BaseSensor):
+    def __init__(self, csv_file, sensor, rate, direction, unit, logger, log_level='WARNING'):
+        try:
+            super().__init__(logger, log_level)
+        except ValueError:
+            raise
+
+        # Create the sensor name, based on the file.
+        self._name = 'FileSensor-' + Path(csv_file).stem + '-' + sensor
+        self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
+        self._logger.info("Initializing sensor...")
+        self._logger.setLevel(log_level)
+        self._source_file = Path(csv_file)
+        self._logger.info("Loading file '{}'".format(self._source_file))
+
+        try:
+            with open(self._source_file) as source_file:
+                reader = csv.DictReader(source_file, delimiter=",")
+                self._data = list(reader)
+                self._logger.info("Found data headers: {}".format(reader.fieldnames))
+        except:
+            raise
+
+        self._rate = Quantity(rate)
+        self._direction = direction
+        self._sensor = sensor
+        self._unit = unit
+
+    def file(self):
+        return self._source_file
+
+    def name(self):
+        return self._name
+
+    @property
+    def range(self):
+        if self._time_mark is not None:
+            motion_time = Quantity(monotonic_ns() - self._time_mark,'ns').to('ms')
+            index = floor( motion_time / self._rate )
+        else:
+            motion_time = None
+            index = 1
+        try:
+            value = self._data[index][self._sensor]
+        except IndexError:
+            return 'unknown'
+        self._logger.debug("Motion time {}, Index {}, Value {}".format(motion_time, index, value))
+        try:
+            value = float(value)
+        except ValueError:
+            pass
+        else:
+            value = Quantity(value, self._unit)
+        return value
+
+    @property
+    def state(self):
+        # IF the file loaded, we're ranging, by definition.
+        return 'ranging'
+
+    def _start_ranging(self):
+        self._logger.debug("Starting ranging.")
+        self._time_mark = monotonic_ns()
+
+    def _stop_ranging(self):
+        self._time_mark = None
+
+    @property
+    def timing_budget(self):
+        return self._rate

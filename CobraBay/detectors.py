@@ -3,7 +3,7 @@
 ####
 import pint.errors
 
-from .sensors import CB_VL53L1X, TFMini, I2CSensor, SerialSensor
+from .sensors import CB_VL53L1X, TFMini, FileSensor, I2CSensor, SerialSensor
 # Import all the CobraBay Exceptions.
 from .exceptions import CobraBayException, SensorValueException
 from pint import UnitRegistry, Quantity, DimensionalityError
@@ -188,6 +188,9 @@ class SingleDetector(Detector):
         elif sensor_type == 'TFMini':
             self._logger.debug("Setting up TFMini with sensor settings: {}".format(sensor_settings))
             self._sensor_obj = TFMini(**sensor_settings, log_level=log_level)
+        elif sensor_type == 'FileSensor':
+            self._logger.debug("Setting up FileSensor with sensor settings: {}".format(sensor_settings))
+            self._sensor_obj = FileSensor(**sensor_settings, sensor=detector_id, log_level=log_level)
         else:
             raise ValueError("Detector {} trying to use unknown sensor type {}".format(
                  self._name, sensor_settings))
@@ -231,13 +234,13 @@ class SingleDetector(Detector):
 
     @property
     def fault(self):
-        '''
+        """
         Utility property for determining if the detector is in a fault state. The status and state should always match up,
         so if they don't, something is wrong. More complex logic to figure out what the fault is and what action to take
         should be implemented elsewhere.
 
         :return: bool
-        '''
+        """
         if self.status != self.state:
             return True
         else:
@@ -253,11 +256,13 @@ class SingleDetector(Detector):
         iface_info = namedtuple("iface_info", ['type', 'addr'])
         if isinstance(self._sensor_obj, SerialSensor):
             iface = iface_info("serial", self._sensor_obj.serial_port)
-            return iface
         elif isinstance(self._sensor_obj, I2CSensor):
             iface = iface_info("i2c", self._sensor_obj.i2c_address)
-            return iface
-        return None
+        elif isinstance(self._sensor_obj, FileSensor):
+            iface = iface_info("file", self._sensor_obj.file)
+        else:
+            iface = iface_info("unknown","unknown")
+        return iface
 
 
 # Detector that measures range progress.
