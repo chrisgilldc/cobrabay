@@ -77,8 +77,8 @@ class CBBay:
         :type depth: Quantity(Distance)
         :param stop_point: Distance from the sensor where the vehicle should stop
         :type stop_point: Quantity(Distance)
-        :param motion_timer: During a movement, how long the bay must be still to be considered complete.
-        :type motion_timer: Quantity(Time)
+        :param motion_timeout: During a movement, how long the bay must be still to be considered complete.
+        :type motion_timeout: Quantity(Time)
         :param output_unit: Unit to output measurements in. Should be a distance unit understood by Pint (ie: 'in', 'cm', etc)
         :type output_unit: str
         :param detectors: Dictionary of detector objects.
@@ -189,13 +189,16 @@ class CBBay:
         # Update the dock timer.
         if self._detectors[self._selected_range].motion:
             # If motion is detected, update the time mark to the current time.
-            self._logger.debug("Motion found, resetting dock timer.")
+            self._logger.info("Motion found, resetting dock timer.")
             self._current_motion['mark'] = time.monotonic()
         else:
-            self._logger.debug("No motion found, checking for dock timer expiry.")
+            # Report the timer every 15s, to the info log level.
+            time_elapsed = Quantity(time.monotonic() - self._current_motion['mark'], 's')
+            if floor(time_elapsed.magnitude) % 15 == 0:
+                self._logger.info("Motion timer at {} vs allowed {}".format(time_elapsed, self.motion_timeout))
             # No motion, check for completion
-            if Quantity(time.monotonic() - self._current_motion['mark'], 's') >= self.motion_timer:
-                self._logger.info("Dock timer has expired and no motion found. Returning to ready.")
+            if time_elapsed >= self.motion_timeout:
+                self._logger.info("Dock timer has expired, returning to ready")
                 # Set self back to ready.
                 self.state = 'ready'
 
@@ -235,7 +238,7 @@ class CBBay:
 
     @property
     def motion_timeout(self):
-        return self._motion_timer
+        return self._motion_timeout
 
     @motion_timeout.setter
     def motion_timeout(self, mto_input):
@@ -243,7 +246,7 @@ class CBBay:
             if not mto_input.check('[time]'):
                 raise ValueError("Motion timeout must have time dimensionality.")
             else:
-                self._motion_timer = mto_input
+                self._motion_timeout = mto_input
         else:
             raise TypeError("Motion timeout must be a Quantity.")
 
