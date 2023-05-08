@@ -42,6 +42,7 @@ class CBNetwork:
                  log_level="WARNING",
                  mqtt_log_level="WARNING"):
         # Save parameters.
+        self._pistatus = None
         self._display_obj = None
         self._mqtt_broker = mqtt_broker
         self._mqtt_port = mqtt_port
@@ -683,7 +684,7 @@ class CBNetwork:
             # Start the outbound messages with the hardware status.
             outbound_messages.extend(self._mqtt_messages_pistatus(self._pistatus))
             self._pistatus_timestamp = time.monotonic()
-        # Add the display.
+        # Add the display. System can't seem to validly compare, so we should always send.
         outbound_messages.append(
             {'topic': 'CobraBay/' + self._client_id + '/display', 'payload': self.display.current, 'repeat': True})
         # Add in all bays.
