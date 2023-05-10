@@ -286,18 +286,12 @@ class Range(SingleDetector):
 
     # Return the adjusted reading of the sensor.
     @property
-    @read_if_stale
     def value(self):
-        self._logger.debug("Creating adjusted value from latest value: {}".format(self._history[0][0]))
-        if isinstance(self._history[0][0], Quantity):
-            return self._history[0][0] - self.offset
-        elif self._history[0][0] is None:
-            return None
-        elif isinstance(self._history[0][0], str):
-            if self._history[0][0] == 'No reading':
-                return "No reading"
+        self._logger.debug("Creating adjusted value from latest value: {}".format(self.value_raw))
+        if isinstance(self.value_raw, Quantity):
+            return self.value_raw - self.offset
         else:
-            return "Error"
+            return self.value_raw
 
     # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
@@ -305,15 +299,17 @@ class Range(SingleDetector):
     def value_raw(self):
         # Note, the read_if_stale decorator will trap this if the sensor itself isn't ranging. Thus, we can assume it is.
         self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
-        if isinstance(self._history[0][0], Quantity):
+        if isinstance(self._history[0][0], Quantity) or isinstance(self._history[0][0], BaseException):
             return self._history[0][0]
         elif self._history[0][0] is None:
-            return "Unknown"
+            self._logger.debug("Latest reading was None. Returning 'unknown'")
+            return "unknown"
         elif isinstance(self._history[0][0], str):
-            if self._history[0][0] == 'No reading':
-                return "No reading"
+            self._logger.debug("History had string '{}'. Returning 'no_reading'".format(self._history[0][0]))
+            return "no_reading"
         else:
-            return "Error"
+            self._logger.debug("Unknown reading state, returning 'error'")
+            return "error"
 
     # Assess the quality of the sensor
     @property
@@ -329,7 +325,7 @@ class Range(SingleDetector):
             else:
                 qv = "unknown"
         # All other exceptions.
-        elif isinstance(self._history[0][0], BaseException):
+        elif isinstance(self.value, BaseException):
             qv = "unknown"
         elif type(self.value) in (int, float, Quantity):
             # You're about to hit the wall!
