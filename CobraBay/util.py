@@ -7,7 +7,7 @@ import board
 import busio
 from time import sleep
 from datetime import timedelta
-import CobraBay
+from CobraBay.exceptions import SensorValueException
 
 
 # General purpose converter.
@@ -15,80 +15,86 @@ class Convertomatic:
     def __init__(self, unit_system):
         self._unit_system = unit_system
 
-    def convert(self, input):
-        if isinstance(input, Quantity):
+    def convert(self, input_value):
+        result = None
+        if isinstance(input_value, Quantity):
             # Check for various dimensionalities and convert as appropriate.
             # Distance
-            if input.check('[length]'):
+            if input_value.check('[length]'):
                 # self._logger.debug("Quantity is a length.")
                 if self._unit_system == "imperial":
-                    output = input.to("in")
+                    output = input_value.to("in")
                 else:
-                    output = input.to("cm")
+                    output = input_value.to("cm")
             # Temperature
-            elif input.check('[temperature]'):
+            elif input_value.check('[temperature]'):
                 if self._unit_system == "imperial":
-                    output = input.to("degF")
+                    output = input_value.to("degF")
                 else:
-                    output = input.to("degC")
+                    output = input_value.to("degC")
             # Speed, ie: length over time
-            elif input.check('[velocity]'):
+            elif input_value.check('[velocity]'):
                 if self._unit_system == "imperial":
-                    output = input.to("mph")
+                    output = input_value.to("mph")
                 else:
-                    output = input.to("kph")
+                    output = input_value.to("kph")
             # Bytes don't have a dimensionality, so we check the unit name.
-            elif str(input.units) == 'byte':
-                output = input.to("Mbyte")
-            elif str(input.units) == 'second':
-                output = str(timedelta(seconds=input.magnitude))
+            elif str(input_value.units) == 'byte':
+                output = input_value.to("Mbyte")
+            elif str(input_value.units) == 'second':
+                output = str(timedelta(seconds=input_value.magnitude))
             # This should catch any dimensionless values.
-            elif str(input.dimensionality) == 'dimensionless':
-                output = input
+            elif str(input_value.dimensionality) == 'dimensionless':
+                output = input_value
             # Anything else is out of left field, raise an error.
             else:
-                raise ValueError("Dimensionality of {} and/or units of {} is not supported by Convertomatic.".format(input.dimensionality, input.units))
+                raise ValueError("Dimensionality of {} and/or units of {} is not supported by Convertomatic.".format(input_value.dimensionality, input_value.units))
             # If still a Quantity (ie: Not a string), take the magnitude, round and output as float.
             if isinstance(output, Quantity):
                 output = round(output.magnitude, 2)
-            return output
-        if isinstance(input, dict):
+            result = output
+        elif isinstance(input_value, dict):
             new_dict = {}
-            for key in input:
-                new_dict[key] = self.convert(input[key])
-            return new_dict
-        if isinstance(input, list):
+            for key in input_value:
+                new_dict[key] = self.convert(input_value[key])
+            result = new_dict
+        elif isinstance(input_value, list):
             new_list = []
-            for item in input:
+            for item in input_value:
                 new_list.append(self.convert(item))
-            return new_list
-        if isinstance(input, bool):
-            return str(input).lower()
+            result = new_list
+        elif isinstance(input_value, bool):
+            result = str(input_value).lower()
+        elif isinstance(input_value, SensorValueException):
+            result = "Sensor Value Exception: {}".format(input_value.status)
+        elif isinstance(input_value, BaseException):
+            print("Cannot convert {}: {}".format(type(input_value), str(input_value)))
         else:
             try:
                 # If this can be rounded, round it, otherwise, pass it through.
-                return round(float(input), 2)
-            except:
-                return input
+                result = round(float(input_value), 2)
+            except (ValueError, TypeError):
+                result = input_value
+        return result
 
     @property
     def unit_system(self):
         return self._unit_system
 
     @unit_system.setter
-    def unit_system(self, input):
-        if input.lower() in ('imperial', 'metric'):
-            self._unit_system = input.lower()
+    def unit_system(self, input_value):
+        if input_value.lower() in ('imperial', 'metric'):
+            self._unit_system = input_value.lower()
         else:
             raise ValueError("Convertomatic unit system must be 'imperial' or 'metric'")
 
 
-def mqtt_message_search(input, element, value, extract=None):
-    if not isinstance(input, list):
+def mqtt_message_search(input_value, element, value, extract=None):
+    if not isinstance(input_value, list):
         raise TypeError("MQTT Message Search expects a list of dicts.")
     matching_messages = []
     # Iterate the messages.
-    for mqtt_message in input:
+    for mqtt_message in input_value:
         try:
             # If the message's search element has the value we want, put it on the matching list.
             if mqtt_message[element] == value:
