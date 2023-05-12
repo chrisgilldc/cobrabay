@@ -48,9 +48,9 @@ class CBPiStatus:
     def _undervoltage(self):
         under_voltage = new_under_voltage()
         if under_voltage is None:
-            return "Not Supported"
+            return "unavailable"
         elif under_voltage.get():
-            return "Under voltage detected"
+            return "true"
         else:
-            return "Voltage normal"
+            return "false"
 
