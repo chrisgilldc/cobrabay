@@ -118,7 +118,7 @@ class CBBay:
         self._detector_settings = detector_settings
         self._selected_range = selected_range
         self._intercepts = intercepts
-        self._lateral_sorted = self.lateral_order(intercepts)
+        self.lateral_sorted = self._sort_lateral(intercepts)
         self._cbcore = cbcore
         # Create a logger.
 
@@ -224,7 +224,7 @@ class CBBay:
     def display_reg_info(self):
         return_dict = {
             'id': self.id,
-            'lateral_order': self._lateral_sorted
+            'lateral_order': self.lateral_sorted
         }
         return return_dict
 
@@ -264,7 +264,7 @@ class CBBay:
 
     @property
     def _occupancy_score(self):
-        max_score = len(self._lateral_sorted)
+        max_score = len(self.lateral_sorted)
         score = floor(max_score * (2/3))
         # Never let score be less than one detector, because that makes no sense.
         if score < 1:
@@ -300,7 +300,7 @@ class CBBay:
             # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
             # the sensors or whatnot
             lat_score = 0
-            for detector in self._lateral_sorted:
+            for detector in self.lateral_sorted:
                 if self._detectors[detector].quality in ('ok', 'warning', 'critical'):
                     # No matter how badly parked the vehicle is, it's still *there*
                     lat_score += 1
@@ -468,7 +468,7 @@ class CBBay:
         if filter_lateral:
             # Pull the raw range value once, use it to test all the intercepts.
             raw_range = self._detectors[self._selected_range].value_raw
-            for lateral_name in self._lateral_sorted:
+            for lateral_name in self.lateral_sorted:
                 # If intercept range hasn't been met yet, we wipe out any value, it's meaningless.
                 # Have a bug where this is sometimes erroring out due to a None range value.
                 # Trapping and logging for now.
@@ -488,7 +488,7 @@ class CBBay:
         self._quality = quality
 
     # Calculate the ordering of the lateral sensors.
-    def lateral_order(self, intercepts):
+    def _sort_lateral(self, intercepts):
         self._logger.debug("Sorting intercepts: {}".format(intercepts))
         lateral_sorted = []
         for detector_name in intercepts:

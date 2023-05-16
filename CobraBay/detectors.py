@@ -318,7 +318,7 @@ class Range(SingleDetector):
         self._logger.debug("Creating quality from latest value: {}".format(self._history[0][0]))
         self._logger.debug("90% of bay depth is: {}".format(self.bay_depth * .9))
         # Is there one of our own exceptions? These we can *probably* handle and get some useful information from.
-        if isinstance(self._history[0][0], SensorValueException):
+        if isinstance(self.value, SensorValueException):
             # A weak reading from the sensor almost certainly means the door is open and nothing is blocking.
             if self._history[0][0].status == "Weak":
                 qv = "door_open"

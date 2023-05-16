@@ -71,6 +71,7 @@ class CBNetwork:
         # Initialize variables
         self._reconnect_timestamp = None
         self._mqtt_connected = False
+        self._discovery_sent = False
         self._pistatus_timestamp = 0
         # Current device state. Will get updated every time we're polled.
         self._device_state = 'unknown'
@@ -90,6 +91,16 @@ class CBNetwork:
                 self._client_id = address.address.replace(':', '').upper()
                 break
 
+        # Device info to include in all Home Assistant discovery messages.
+        self._device_info = dict(
+            name=self._system_name,
+            identifiers=[self._client_id],
+            suggested_area='Garage',
+            manufacturer='ConHugeCo',
+            model='CobraBay Parking System',
+            sw_version=str(__version__)
+        )
+
         self._logger.info("Defined Client ID: {}".format(self._client_id))
 
         # Create the MQTT Client.
@@ -108,199 +119,6 @@ class CBNetwork:
         # Disconnect callback
         self._mqtt_client.on_disconnect = self._on_disconnect
 
-        # Define topic reference.
-        self._topics = {
-            'system': {
-                'device_connectivity': {
-                    'topic': 'CobraBay/' + self._client_id + '/connectivity',
-                    'previous_state': {},
-                    'enabled': True,
-                    'ha_discovery': {
-                        'name': '{} Connectivity'.format(self._system_name),
-                        'type': 'binary_sensor',
-                        'entity': '{}_connectivity'.format(self._system_name.lower()),
-                        'device_class': 'connectivity',
-                        'payload_on': 'Online',
-                        'payload_off': 'Offline'
-                    }
-                },
-                'cpu_pct': {
-                    'topic': 'CobraBay/' + self._client_id + '/cpu_pct',
-                    'previous_state': {},
-                    'enabled': True,
-                    'ha_discovery': {
-                        'name': '{} CPU Use'.format(self._system_name),
-                        'type': 'sensor',
-                        'entity': '{}_cpu_pct'.format(self._system_name.lower()),
-                        'unit_of_measurement': '%',
-                        'icon': 'mdi:chip'
-                    }
-                },
-                'cpu_temp': {
-                    'topic': 'CobraBay/' + self._client_id + '/cpu_temp',
-                    'previous_state': {},
-                    'enabled': True,
-                    'ha_discovery': {
-                        'name': '{} CPU Temperature'.format(self._system_name),
-                        'type': 'sensor',
-                        'entity': '{}_cpu_temp'.format(self._system_name.lower()),
-                        'device_class': 'temperature',
-                        'unit_of_measurement': self._uom('temp')
-                    }
-                },
-                'mem_info': {
-                    'topic': 'CobraBay/' + self._client_id + '/mem_info',
-                    'previous_state': {},
-                    'enabled': True,
-                    'ha_discovery': {
-                        'name': '{} Memory Use'.format(self._system_name),
-                        'type': 'sensor',
-                        'entity': '{}_mem_info'.format(self._system_name.lower()),
-                        'value_template': "{{{{ value_json.mem_pct }}}}",
-                        'unit_of_measurement': '%',
-                        'icon': 'mdi:memory',
-                        'json_attributes_topic': 'CobraBay/' + self._client_id + '/mem_info'
-                    }
-                },
-                'undervoltage': {
-                    'topic': 'CobraBay/' + self._client_id + '/undervoltage',
-                    'previous_state': {},
-                    'ha_discovery': {
-                        'name': '{} Undervoltage'.format(self._system_name),
-                        'type': 'binary_sensor',
-                        'entity': '{}_undervoltage'.format(self._system_name.lower()),
-                        'payload_on': 'Under voltage detected',
-                        'payload_off': 'Voltage normal',
-                        'icon': 'mdi:lightning-bolt'
-                    }
-                },
-                # 'device_command': {
-                #     'topic': 'CobraBay/' + self._client_id + '/cmd',
-                #     'enabled': False,
-                #     'callback': self._cb_device_command
-                #     # May eventually do discovery here to create selectors, but not yet.
-                # },
-                'display': {
-                    'topic': 'CobraBay/' + self._client_id + '/display',
-                    'previous_state': {},
-                    'ha_discovery': {
-                        'name': '{} Display'.format(self._system_name),
-                        'type': 'camera',
-                        'entity': '{}_display'.format(self._system_name.lower()),
-                        'icon': 'mdi:monitor',
-                        'image_encoding': 'b64'
-                    }
-                },
-            },
-            'bay': {
-                'bay_occupied': {
-                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/occupancy',
-                    'previous_state': 'Unknown',
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} Occupied',
-                        'type': 'binary_sensor',
-                        'entity': '{0[bay_id]}_occupied',
-                        'class': 'occupancy',
-                        'payload_on': 'Occupied',
-                        'payload_off': 'Unoccupied',
-                        'payload_not_available': 'Unknown'
-                    }
-                },
-                'bay_state': {
-                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/state',
-                    'previous_state': None,
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} State',
-                        'type': 'sensor',
-                        'entity': '{0[bay_id]}_state'
-                    }
-                },
-                'bay_laterals': {
-                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/{0[lateral]/display',
-                    'previous_state': {},
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} {0[lateral]} Display',
-                        'type': 'camera',
-                        'entity': '{0[bay_id]}_{0[lateral]}_display',
-                        'encoding': 'b64'
-                    }
-                },
-                'bay_detector': {
-                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/{0[detector_id]}',
-                    'previous_state': None,
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} Detector Position: {0[detector_name]}',
-                        'type': 'sensor',
-                        'entity': '{0[bay_id]}_position_{0[detector_id]}',
-                        'value_template': '{{{{ value_json.adjusted_reading }}}}',
-                        'unit_of_measurement': self._uom('length'),
-                        'icon': 'mdi:ruler',
-                        'json_attributes_topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/{0[detector_id]}'
-                    }
-                },
-                # How good the parking job is.
-                'bay_quality': {
-                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/quality',
-                    'previous_state': None,
-                    'enabled': True,
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} Detector Quality: {0[detector_name]}',
-                        'type': 'sensor',
-                        'entity': '{0[bay_id]}_quality_{0[detector_id]}',
-                        'value_template': '{{{{ value_json.{0[detector_id]} }}}}',
-                        'icon': 'mdi:traffic-light'
-                    }
-                },
-                'bay_speed': {
-                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/vector',
-                    'previous_state': None,
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} Speed',
-                        'type': 'sensor',
-                        'entity': '{0[bay_id]}_speed',
-                        'value_template': '{{{{ value_json.speed }}}}',
-                        'class': 'speed',
-                        'unit_of_measurement': self._uom('speed')
-                    }
-                },
-                # Motion binary sensor. Keys off the 'direction' value in the Vector topic.
-                'bay_motion': {
-                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/vector',
-                    'previous_state': 'Unknown',
-                    'enabled': True,
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} Motion',
-                        'type': 'binary_sensor',
-                        'entity': '{0[bay_id]}_motion',
-                        'class': 'motion',
-                        'value_template': "{{% if value_json.direction in ('forward','reverse') %}} ON {{% else %}} OFF {{% endif %}}"
-                    }
-                },
-                'bay_dock_time': {
-                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/motion_timeout',
-                    'previous_state': None,
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} Motion Timeout',
-                        'type': 'sensor',
-                        'entity': '{0[bay_id]}_motion_timeout',
-                        'unit_of_measurement': 'seconds',
-                        'payload_not_available': 'Not running'
-                    }
-                },
-                # Set up the command selector
-                'bay_command': {
-                    'topic': 'CobraBay/' + self._client_id + '/{0[bay_id]}/cmd',
-                    'ha_discovery': {
-                        'name': '{0[bay_name]} Command',
-                        'type': 'select',
-                        'entity': '{0[bay_id]}_command',
-                        'options': "['Dock', 'Undock', 'Verify', 'Abort']",
-                        'command_template': "{% if value == 'Dock' %}dock{% elif value == 'Undock' %}undock{% elif value == 'Verify' %}verify{% elif value == 'Abort' %}abort{% endif %}",
-                        'value_template': "{% if value == 'dock' %}Dock{% elif value == 'undock' %}Undock{% elif value == 'verify' %}Verify{% elif value == 'abort' %}Abort{% endif %}"
-                    },
-                }
-            }
-        }
         self._logger.info('Network: Initialization complete.')
 
     # Registration methods
@@ -351,6 +169,10 @@ class CBNetwork:
             self._trigger_subscribe(trigger_id)
         # Attach the fallback message trapper.
         self._mqtt_client.on_message = self._on_message
+        # Send the System HA discovery
+        if not self._discovery_sent:
+            self._ha_discovery_system()
+            self._discovery_sent = True
         self._mqtt_connected = True
 
     def _on_disconnect(self, client, userdata, rc):
@@ -475,8 +297,8 @@ class CBNetwork:
         # Set the last will prior to connecting.
         self._logger.info("Creating last will.")
         self._mqtt_client.will_set(
-            self._topics['system']['device_connectivity']['topic'],
-            payload='Offline', qos=0, retain=True)
+            "CobraBay" + self._client_id + "/connectivity",
+            payload='offline', qos=0, retain=True)
         try:
             self._mqtt_client.connect(host=self._mqtt_broker, port=self._mqtt_port)
         except Exception as e:
@@ -529,49 +351,32 @@ class CBNetwork:
     def display(self, display_obj):
         self._display_obj = display_obj
 
-    def _ha_discovery(self):
-        self._logger.debug("HA Discovery has been called.")
-        # Build the device JSON to include in other updates.
-        self._device_info = dict(
-            name=self._system_name,
-            identifiers=[self._client_id],
-            suggested_area='Garage',
-            manufacturer='ConHugeCo',
-            model='CobraBay Parking System',
-            sw_version=str(__version__)
-        )
 
-        # Always do discovery for the system topics.
-        for item in self._topics['system']:
-            # Create items that have HA Discovery, and are enabled. Enabled/disabled is really 100% for development.
-            if 'ha_discovery' in self._topics['system'][item]:
-                self._logger.debug("Performing HA discovery for: {}".format(item))
-                self._ha_create(topic_type='system', topic_name=item)
 
-        # for bay in self._bay_registry:
-        #     self._ha_discovery_bay(bay)
-
-    # Method to do discovery for
-    def _ha_discovery_bay(self,bay_id):
-        self._logger.debug("HA Discovery for Bay ID {} has been called.".format(bay_id))
-        # Get the bay name
-        bay_name = self._bay_registry[bay_id]['bay_name']
-        self._logger.debug("Have registry data: {}".format(self._bay_registry[bay_id]))
-        # Create the single entities. There's one of these per bay.
-        for entity in ('bay_occupied','bay_state', 'bay_speed', 'bay_motion', 'bay_dock_time', 'bay_command'):
-            self._ha_create(topic_type='bay',
-                            topic_name=entity,
-                            fields={'bay_id': bay_id, 'bay_name': bay_name})
-        for detector in self._bay_registry[bay_id]['detectors']:
-            for entity in ('bay_detector','bay_quality'):
-                self._ha_create(
-                    topic_type='bay',
-                    topic_name=entity,
-                    fields={'bay_id': bay_id,
-                            'bay_name': bay_name,
-                            'detector_id': detector['detector_id'],
-                            'detector_name': detector['name'] }
-                )
+    # # Method to do discovery for
+    # def _ha_discovery_bay(self, bay_obj:
+    #     self._logger.debug("HA Discovery for Bay ID {} has been called.".format(bay_obj.id))
+    #     # Get the bay name
+    #     bay_name = self._bay_registry[bay_id]['bay_name']
+    #     self._logger.debug("Have registry data: {}".format(self._bay_registry[bay_id]))
+    #     # Create the single entities. There's one of these per bay.
+    #     for entity in ('bay_occupied','bay_state', 'bay_speed', 'bay_motion', 'bay_dock_time', 'bay_command'):
+    #         self._ha_create(topic_type='bay',
+    #                         topic_name=entity,
+    #                         fields={'bay_id': bay_id, 'bay_name': bay_name})
+    #     for detector in self._bay_registry[bay_id]['detectors']:
+    #         for entity in ('bay_detector','bay_quality'):
+    #             self._ha_create(
+    #                 topic_type='bay',
+    #                 topic_name=entity,
+    #                 fields={'bay_id': bay_id,
+    #                         'bay_name': bay_name,
+    #                         'detector_id': detector['detector_id'],
+    #                         'detector_name': detector['name'] }
+    #             )
+    #
+    # def _ha_discover_detector(self, detector_obj):
+    #     pass
 
     # Method to create a properly formatted HA discovery message.
     # This expects *either* a complete config dict passed in as ha_config, or a topic_type and topic, from which
@@ -664,14 +469,13 @@ class CBNetwork:
 
     # Quick helper methods to send online/offline messages correctly.
     def _send_online(self):
-        self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'],
-                                  payload=self._topics['system']['device_connectivity']['ha_discovery']['payload_on'],
+        self._mqtt_client.publish("CobraBay/" + self._client_id + "/connectivity",
+                                  payload="online",
                                   retain=True)
 
     def _send_offline(self):
-        self._mqtt_client.publish(self._topics['system']['device_connectivity']['topic'],
-                                  payload=self._topics['system']['device_connectivity']['ha_discovery']['payload_on'],
-                                  retain=True)
+        self._mqtt_client.publish("CobraBay/" + self._client_id + "/connectivity",
+                                  payload="offline",retain=True)
         
     # MQTT Message generators. Network module creates MQTT messages from object states. This centralizes MQTT message
     # creation.
@@ -740,11 +544,82 @@ class CBNetwork:
         outbound_messages.append({'topic': topic_base + 'status', 'payload': input_obj.status, 'repeat': False})
         # Is the detector in fault?
         outbound_messages.append({'topic': topic_base + 'fault', 'payload': input_obj.fault, 'repeat': False})
-        # Detector Value.
-        outbound_messages.append({'topic': topic_base + 'reading', 'payload': input_obj.value, 'repeat': False})
-        # Detector reading unadjusted by depth.
-        outbound_messages.append({'topic': topic_base + 'raw_reading', 'payload': input_obj.value_raw, 'repeat': False})
-        # Detector Quality
-        outbound_messages.append({'topic': topic_base + 'quality', 'payload': input_obj.quality, 'repeat': False})
+        # Send value, raw value and quality if detector is ranging.
+        if input_obj.state == 'ranging':
+            # Detector Value.
+            outbound_messages.append({'topic': topic_base + 'reading', 'payload': input_obj.value, 'repeat': False})
+            # Detector reading unadjusted by depth.
+            outbound_messages.append({'topic': topic_base + 'raw_reading', 'payload': input_obj.value_raw, 'repeat': False})
+            # Detector Quality
+            outbound_messages.append({'topic': topic_base + 'quality', 'payload': input_obj.quality, 'repeat': False})
         self._logger.debug("Have detector messages: {}".format(outbound_messages))
         return outbound_messages
+
+    # Create HA discovery message.
+    def _ha_discover(self, name, type, topic, entity, device_info=True, **kwargs):
+
+        # Trap unknown types.
+        if type not in ('camera','binary_sensor','sensor'):
+            raise ValueError("Type must be 'camera','binary_sensor' or 'sensor'")
+
+        # Adjust the topic key based on the type, because the syntax varries.
+        if type == 'camera':
+            topic_key = 'topic'
+        else:
+            topic_key = 'state_topic'
+
+        # Set up the initial discovery dictionary for all types.
+        discovery_dict = {
+            topic_key: topic,
+            'type': type,
+            'name': name,
+            'object_id': entity,
+            'unique_id': self._client_id + '.' + entity
+        }
+        # Add device info.
+        if device_info:
+            discovery_dict['device'] = self._device_info
+
+        if type == 'camera':
+            pass
+        elif type == 'binary_sensor':
+            required_parameters = ['device_class','payload_on','payload_off']
+            optional_parameters = []
+        elif type == 'sensor':
+            pass
+
+        for param in required_parameters:
+            try:
+                discovery_dict[param] = kwargs[param]
+            except KeyError as e:
+                raise e
+
+        for param in optional_parameters:
+            try:
+                discovery_dict[param] = kwargs[param]
+            except KeyError:
+                pass
+
+        discovery_json = json_dumps(discovery_dict)
+        discovery_topic = "homeassistant/{}/CobraBay-{}/{}/config".\
+            format(type,self._client_id,discovery_dict['object_id'])
+        self._logger.debug("Publishing HA discovery to topic '{}'\n\t{}".format(discovery_topic, discovery_json))
+        self._mqtt_client.publish(discovery_topic, discovery_json)
+
+    def _ha_discovery_system(self):
+        self._logger.debug("Performing system HA discovery")
+        # Device connectivity
+        self._ha_discover(
+            name="{} Connectivity".format(self._system_name),
+            topic="CobraBay/" + self._client_id + "/connectivity",
+            type='binary_sensor',
+            entity='{}_connectivity'.format(self._system_name.lower()),
+            device_class='connectivity',
+            payload_on='online',
+            payload_off='offline',
+        )
+        # CPU Percentage
+        # CPU Temperature
+        # Memory Info
+        # Undervoltage
+        # Display

@@ -53,7 +53,7 @@ class CBDisplay:
         self._layers['approach'] = self._placard('APPROACH','blue')
         self._layers['error'] = self._placard('ERROR','red')
 
-    # Have a bay register. This creates layers for that bay's lateral.
+    # Have a bay register. This creates layers for the bay in advance so they can be composited faster.
     def register_bay(self, display_reg_info):
         bay_id = display_reg_info['id']
         self._logger.debug("Registering bay ID {} to display".format(bay_id))
@@ -75,9 +75,9 @@ class CBDisplay:
                            format(avail_height,len(display_reg_info['lateral_order']),pixel_lengths))
 
         status_lookup = (
-            ['OK',(0,128,0,255)],
-            ['Warning',(255,255,0,255)],
-            ['Critical',(255,0,0,255)]
+            ['ok',(0,128,0,255)],
+            ['warning',(255,255,0,255)],
+            ['critical',(255,0,0,255)]
         )
 
         i = 0
@@ -178,15 +178,12 @@ class CBDisplay:
                                                 range_pct=bay_obj.range_pct
                                             ))
 
-        # IF lateral data is reported, show it.
-        # self._logger.debug("Data has lateral entries: {}".format(len(display_data['lateral'])))
-        # if len(display_data['lateral']) > 0:
-        #     # final_image = Image.alpha_composite(final_image, self._layers['frame_lateral'])
-        #     for reading in display_data['lateral']:
-        #         if reading['quality'] in ('OK','Warning', 'Critical'):
-        #             self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(reading['name'], reading['side'], reading['quality']))
-        #             selected_layer = self._layers[display_data['bay_id']][reading['name']][reading['side']][reading['quality']]
-        #             final_image = Image.alpha_composite(final_image, selected_layer)
+        for lateral_detector in bay_obj.lateral_sorted:
+            detector = bay_obj.detectors[lateral_detector]
+            if detector.quality in ('ok','warning','critical'):
+                self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(detector.name, detector.side, detector.quality))
+                selected_layer = self._layers[bay_obj.id][detector.id][detector.side][detector.quality]
+                final_image = Image.alpha_composite(final_image, selected_layer)
         self._output_image(final_image)
 
     def _strobe(self, range_quality, range_pct):
