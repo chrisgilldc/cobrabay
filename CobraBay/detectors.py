@@ -347,7 +347,7 @@ class Range(SingleDetector):
             else:
                 qv = 'ok'
         else:
-            self._logger.warning("Could not evaluate quality, value was unexpected '{}' ({})".format(self.value, type(self.value)))
+            # self._logger.warning("Could not evaluate quality, value was unexpected '{}' ({})".format(self.value, type(self.value)))
             qv = 'unknown'
         self._logger.debug("Quality {}".format(qv))
         return qv

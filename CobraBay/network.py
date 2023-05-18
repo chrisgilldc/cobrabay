@@ -8,7 +8,7 @@ import logging
 from json import dumps as json_dumps
 #from json import loads as json_loads
 import time
-from pprint import pformat
+import sys
 
 # from getmac import get_mac_address
 import psutil
@@ -137,7 +137,7 @@ class CBNetwork:
         self._logger.debug("Received trigger registration for {}".format(trigger_obj.id))
         # Store the object!
         self._trigger_registry[trigger_obj.id] = trigger_obj
-        self._logger.debug("Stored trigger object {}".format(trigger_obj.id))
+        self._logger.info("Stored trigger object '{}'".format(trigger_obj.id))
         # Add the MQTT Prefix to use to the object. Triggers set to override this will just ignore it.
         trigger_obj.topic_prefix = "CobraBay/" + self._client_id
         # Since it's possible we're already connected to MQTT, we call subscribe here separately.
@@ -171,6 +171,7 @@ class CBNetwork:
         self._mqtt_client.on_message = self._on_message
         # Send the System HA discovery
         if not self._discovery_sent:
+            self._logger.info("Sending Home Assistant discovery.")
             self._ha_discovery_system()
             self._discovery_sent = True
         self._mqtt_connected = True
@@ -556,7 +557,7 @@ class CBNetwork:
         return outbound_messages
 
     # Create HA discovery message.
-    def _ha_discover(self, name, type, topic, entity, device_info=True, **kwargs):
+    def _ha_discover(self, name, topic, type, entity, device_info=True, **kwargs):
 
         # Trap unknown types.
         if type not in ('camera','binary_sensor','sensor'):
@@ -581,18 +582,31 @@ class CBNetwork:
             discovery_dict['device'] = self._device_info
 
         if type == 'camera':
-            pass
+            required_parameters = []
+            nullable_parameters = []
+            optional_parameters = ['icon']
         elif type == 'binary_sensor':
-            required_parameters = ['device_class','payload_on','payload_off']
-            optional_parameters = []
+            required_parameters = ['payload_on','payload_off']
+            nullable_parameters = ['device_class']
+            optional_parameters = ['icon']
         elif type == 'sensor':
-            pass
+            required_parameters = ['unit_of_measurement']
+            nullable_parameters = []
+            optional_parameters = ['icon']
+        else:
+            raise
 
         for param in required_parameters:
             try:
                 discovery_dict[param] = kwargs[param]
             except KeyError as e:
                 raise e
+
+        for param in nullable_parameters:
+            try:
+                discovery_dict[param] = kwargs[param]
+            except KeyError:
+                discovery_dict[param] = None
 
         for param in optional_parameters:
             try:
@@ -601,9 +615,9 @@ class CBNetwork:
                 pass
 
         discovery_json = json_dumps(discovery_dict)
-        discovery_topic = "homeassistant/{}/CobraBay-{}/{}/config".\
+        discovery_topic = "homeassistant/{}/CobraBay_{}/{}/config".\
             format(type,self._client_id,discovery_dict['object_id'])
-        self._logger.debug("Publishing HA discovery to topic '{}'\n\t{}".format(discovery_topic, discovery_json))
+        self._logger.info("Publishing HA discovery to topic '{}'\n\t{}".format(discovery_topic, discovery_json))
         self._mqtt_client.publish(discovery_topic, discovery_json)
 
     def _ha_discovery_system(self):
@@ -619,7 +633,32 @@ class CBNetwork:
             payload_off='offline',
         )
         # CPU Percentage
+        self._ha_discover(
+            name="{} CPU Use".format(self._system_name),
+            topic="CobraBay/" + self._client_id + "/cpu_pct",
+            type="sensor",
+            entity="{}_cpu_pct".format(self._system_name.lower()),
+            unit_of_measurement="%",
+            icon="mdi:chip"
+        )
         # CPU Temperature
+        self._ha_discover(
+            name="{} CPU Temperature".format(self._system_name),
+            topic="CobraBay/" + self._client_id + "/cpu_temp",
+            type="sensor",
+            entity="{}_cpu_temp".format(self._system_name.lower()),
+            unit_of_measurement=self._uom('temp'),
+            icon="mdi:thermometer"
+        )
         # Memory Info
         # Undervoltage
+        self._ha_discover(
+            name="{} Undervoltage".format(self._system_name),
+            topic="CobraBay/" + self._client_id + "/undervoltage",
+            type="binary_sensor",
+            entity="{}_undervoltage".format(self._system_name.lower()),
+            payload_on="true",
+            payload_off="false",
+            icon="mdi:alert-octagram"
+        )
         # Display
