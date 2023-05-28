@@ -71,8 +71,10 @@ class CBNetwork:
         # Initialize variables
         self._reconnect_timestamp = None
         self._mqtt_connected = False
-        self._discovery_sent = False
+        self._discovery_log = { 'system': False }
         self._pistatus_timestamp = 0
+        self._ha_repeat_override = False
+        self._ha_timestamp = 0
         # Current device state. Will get updated every time we're polled.
         self._device_state = 'unknown'
         # List for commands received and to be passed upward.
@@ -126,12 +128,14 @@ class CBNetwork:
     # Method to register a bay.
     def register_bay(self, bay_obj):
         self._bay_registry[bay_obj.id] = bay_obj
+        self._discovery_log[bay_obj.id] = False
 
     def unregister_bay(self, bay_id):
         try:
             del self._bay_registry[bay_id]
+            del self._discovery_log[bay_id]
         except KeyError:
-            self._logger.error("Asked to Unregister bay ID {} but bay by that ID does not exist.".format(bay_id))
+            self._logger.error("Asked to Unregister bay ID '{}' but bay by that ID does not exist.".format(bay_id))
 
     def register_trigger(self, trigger_obj):
         self._logger.debug("Received trigger registration for {}".format(trigger_obj.id))
@@ -169,11 +173,8 @@ class CBNetwork:
             self._trigger_subscribe(trigger_id)
         # Attach the fallback message trapper.
         self._mqtt_client.on_message = self._on_message
-        # Send the System HA discovery
-        if not self._discovery_sent:
-            self._logger.info("Sending Home Assistant discovery.")
-            self._ha_discovery_system()
-            self._discovery_sent = True
+        # Run Home Assistant Discovery
+        self._ha_discovery()
         self._mqtt_connected = True
 
     def _on_disconnect(self, client, userdata, rc):
@@ -185,9 +186,6 @@ class CBNetwork:
     # Catchall for MQTT messages. Don't act, just log.
     def _on_message(self, client, user, message):
         self._logger.debug("Received message on topic {} with payload {}. No other handler, no action.".format(
-            message.topic, message.payload
-        ))
-        print("Received message on topic {} with payload {}. No other handler, no action.".format(
             message.topic, message.payload
         ))
 
@@ -276,7 +274,19 @@ class CBNetwork:
         # Network/MQTT is up, proceed.
         if self._mqtt_connected:
             # Send all the messages outbound.
-            for message in self._mqtt_messages():
+            # For the first 100 polls after HA discovery, send everything. This makes sure
+            # that values actually show up in HA.
+            if self._ha_repeat_override:
+                if time.monotonic() - self._ha_timestamp <= 15:
+                    self._logger.debug("HA discovery {}s ago, sending all".format(time.monotonic() - self._ha_timestamp))
+                    force_repeat = True
+                else:
+                    self._logger.debug("Have sent all messages for 15s after HA discovery. Disabling.")
+                    self._ha_repeat_override = False
+                    force_repeat = False
+            else:
+                force_repeat = False
+            for message in self._mqtt_messages(force_repeat=force_repeat):
                 self._logger_mqtt.debug("Publishing MQTT message: {}".format(message))
                 self._pub_message(**message)
             # Check for any incoming commands.
@@ -298,7 +308,7 @@ class CBNetwork:
         # Set the last will prior to connecting.
         self._logger.info("Creating last will.")
         self._mqtt_client.will_set(
-            "CobraBay" + self._client_id + "/connectivity",
+            "CobraBay/" + self._client_id + "/connectivity",
             payload='offline', qos=0, retain=True)
         try:
             self._mqtt_client.connect(host=self._mqtt_broker, port=self._mqtt_port)
@@ -307,18 +317,11 @@ class CBNetwork:
             self._logger.warning('Network: ' + str(e))
             return False
 
-        # for type in self._topics:
-        #     for item in self._topics[type]:
-        #         if 'callback' in self._topics[type][item]:
-        #             try:
-        #                 self._mqtt_client.subscribe(self._topics[type][item]['topic'])
-        #             except RuntimeError as e:
-        #                 self._logger.error("Caught error while subscribing to topic {}".format(item))
-        #                 self._logger.error(e, exc_info=True)
-
         # Send a discovery message and an online notification.
         if self._use_homeassistant:
             self._ha_discovery()
+            # Reset the topic history so any newly discovered entities get sent to.
+            self._topic_history = {}
         self._send_online()
         # Set the internal MQTT tracker to True. Surprisingly, the client doesn't have a way to track this itself!
         self._mqtt_connected = True
@@ -382,69 +385,70 @@ class CBNetwork:
     # Method to create a properly formatted HA discovery message.
     # This expects *either* a complete config dict passed in as ha_config, or a topic_type and topic, from which
     # it will fetch the ha_discovery configuration.
-    def _ha_create(self, topic_type=None, topic_name=None, fields=None):
-        self._logger.debug("HA Create input:\n\tTopic Type: {}\n\tTopic Name: {}\n\tFields: {}".format(topic_type,topic_name,fields))
-        # Run all the items through a formatting filter. Static fields will just have nothing happen. If fields were
-        # provided and strings have replacement, they'll get replaced, ie: for bay items.
-        self._logger.debug("State topic:")
-        self._logger.debug(self._topics[topic_type][topic_name]['topic'])
-        # Camera uses 'topic', while everything else uses 'state_topic'.
-        if self._topics[topic_type][topic_name]['ha_discovery']['type'] == 'camera':
-            topic_key = 'topic'
-        else:
-            topic_key = 'state_topic'
-        try:
-            config_dict = {
-                topic_key: self._topics[topic_type][topic_name]['topic'].format(fields),
-                'type': self._topics[topic_type][topic_name]['ha_discovery']['type'],  ## Type shouldn't ever be templated.
-                'name': self._topics[topic_type][topic_name]['ha_discovery']['name'].format(fields),
-                'object_id': self._topics[topic_type][topic_name]['ha_discovery']['entity'].format(fields)
-            }
-        except KeyError:
-            raise
+    # def _ha_create(self, topic_type=None, topic_name=None, fields=None):
+    #     self._logger.debug("HA Create input:\n\tTopic Type: {}\n\tTopic Name: {}\n\tFields: {}".format(topic_type,topic_name,fields))
+    #     # Run all the items through a formatting filter. Static fields will just have nothing happen. If fields were
+    #     # provided and strings have replacement, they'll get replaced, ie: for bay items.
+    #     self._logger.debug("State topic:")
+    #     self._logger.debug(self._topics[topic_type][topic_name]['topic'])
+    #     # Camera uses 'topic', while everything else uses 'state_topic'.
+    #     if self._topics[topic_type][topic_name]['ha_discovery']['type'] == 'camera':
+    #         topic_key = 'topic'
+    #     else:
+    #         topic_key = 'state_topic'
+    #     try:
+    #         config_dict = {
+    #             topic_key: self._topics[topic_type][topic_name]['topic'].format(fields),
+    #             'type': self._topics[topic_type][topic_name]['ha_discovery']['type'],  ## Type shouldn't ever be templated.
+    #             'name': self._topics[topic_type][topic_name]['ha_discovery']['name'].format(fields),
+    #             'object_id': self._topics[topic_type][topic_name]['ha_discovery']['entity'].format(fields)
+    #         }
+    #     except KeyError:
+    #         raise
+    #
+    #     # Set the Unique ID, which is the client ID plus the object ID.
+    #     config_dict['unique_id'] = self._client_id + '.' + config_dict['object_id']
+    #     # Always include the device info.
+    #     config_dict['device'] = self._device_info
+    #
+    #     optional_params = (
+    #         'command_template',
+    #         'device_class',
+    #         'image_encoding',
+    #         'icon',
+    #         'json_attributes_topic',
+    #         'unit_of_measurement',
+    #         'options',
+    #         'payload_on',
+    #         'payload_off',
+    #         'payload_not_available',
+    #         'value_template')
+    #
+    #     # Optional parameters
+    #     for par in optional_params:
+    #         try:
+    #             config_dict[par] = self._topics[topic_type][topic_name]['ha_discovery'][par].format(fields)
+    #         except KeyError:
+    #             pass
+    #
+    #     # Set availability. Everything depends on device_connectivity, so we don't set this for device_connectivity.
+    #
+    #     # If this isn't device connectivity itself, make the entity depend on device connectivity
+    #     if topic_name != 'device_connectivity':
+    #         config_dict['availability_topic'] = self._topics['system']['device_connectivity']['topic']
+    #         config_dict['payload_available'] = self._topics['system']['device_connectivity']['ha_discovery']['payload_on']
+    #         config_dict['payload_not_available'] = self._topics['system']['device_connectivity']['ha_discovery']['payload_off']
+    #
+    #     # Configuration topic to which we'll send this configuration. This is based on the entity type and entity ID.
+    #     config_topic = "homeassistant/{}/CobraBay-{}/{}/config".\
+    #         format(config_dict['type'],
+    #                self._client_id,
+    #                config_dict['object_id'])
+    #     # Send it!
+    #     ha_json = json_dumps(config_dict)
+    #     self._logger.debug("Publishing HA discovery to topic {}\n\t{}".format(config_topic, ha_json))
+    #     self._mqtt_client.publish(config_topic, ha_json)
 
-        # Set the Unique ID, which is the client ID plus the object ID.
-        config_dict['unique_id'] = self._client_id + '.' + config_dict['object_id']
-        # Always include the device info.
-        config_dict['device'] = self._device_info
-
-        optional_params = (
-            'command_template',
-            'device_class',
-            'image_encoding',
-            'icon',
-            'json_attributes_topic',
-            'unit_of_measurement',
-            'options',
-            'payload_on',
-            'payload_off',
-            'payload_not_available',
-            'value_template')
-
-        # Optional parameters
-        for par in optional_params:
-            try:
-                config_dict[par] = self._topics[topic_type][topic_name]['ha_discovery'][par].format(fields)
-            except KeyError:
-                pass
-
-        # Set availability. Everything depends on device_connectivity, so we don't set this for device_connectivity.
-
-        # If this isn't device connectivity itself, make the entity depend on device connectivity
-        if topic_name != 'device_connectivity':
-            config_dict['availability_topic'] = self._topics['system']['device_connectivity']['topic']
-            config_dict['payload_available'] = self._topics['system']['device_connectivity']['ha_discovery']['payload_on']
-            config_dict['payload_not_available'] = self._topics['system']['device_connectivity']['ha_discovery']['payload_off']
-
-        # Configuration topic to which we'll send this configuration. This is based on the entity type and entity ID.
-        config_topic = "homeassistant/{}/CobraBay-{}/{}/config".\
-            format(config_dict['type'],
-                   self._client_id,
-                   config_dict['object_id'])
-        # Send it!
-        ha_json = json_dumps(config_dict)
-        self._logger.debug("Publishing HA discovery to topic {}\n\t{}".format(config_topic, ha_json))
-        self._mqtt_client.publish(config_topic, ha_json)
 
     # Helper method to determine the correct unit of measure to use. When we have reported sensor units, we use
     # this method to ensure the correct unit is being put in.
@@ -480,7 +484,7 @@ class CBNetwork:
         
     # MQTT Message generators. Network module creates MQTT messages from object states. This centralizes MQTT message
     # creation.
-    def _mqtt_messages(self):
+    def _mqtt_messages(self, force_repeat=False):
         # Create the outbound list.
         outbound_messages = []
         # Send hardware status every 60 seconds.
@@ -493,9 +497,15 @@ class CBNetwork:
         outbound_messages.append(
             {'topic': 'CobraBay/' + self._client_id + '/display', 'payload': self.display.current, 'repeat': True})
         # Add in all bays.
-        self._logger.debug("Bay registry: {}".format(self._bay_registry))
+        self._logger.debug("Generating messages for bays: {}".format(self._bay_registry))
         for bay in self._bay_registry:
             outbound_messages.extend(self._mqtt_messages_bay(self._bay_registry[bay]))
+
+        # If repeat has been set to override, go through and replace the default with the override value.
+        if force_repeat:
+            self._logger.debug("Overriding MQTT message repeat state to True")
+            for i in range(0,len(outbound_messages)):
+                outbound_messages[i]['repeat'] = True
         return outbound_messages
     
     def _mqtt_messages_pistatus(self, input_obj):
@@ -534,7 +544,7 @@ class CBNetwork:
         return outbound_messages
 
     def _mqtt_messages_detector(self, input_obj, topic_base=None):
-        self._logger.debug("Building MQTT messages for detector: {}".format(input_obj.id))
+        self._logger_mqtt.debug("Building MQTT messages for detector: {}".format(input_obj.id))
         if topic_base is None:
             topic_base = 'CobraBay/' + self._client_id + '/independent_detectors'
         topic_base = topic_base + input_obj.id + '/'
@@ -553,11 +563,27 @@ class CBNetwork:
             outbound_messages.append({'topic': topic_base + 'raw_reading', 'payload': input_obj.value_raw, 'repeat': False})
             # Detector Quality
             outbound_messages.append({'topic': topic_base + 'quality', 'payload': input_obj.quality, 'repeat': False})
-        self._logger.debug("Have detector messages: {}".format(outbound_messages))
+        self._logger_mqtt.debug("Have detector messages: {}".format(outbound_messages))
         return outbound_messages
 
+    def _ha_discovery(self, force=False):
+        for item in self._discovery_log:
+            self._logger.debug("Discovery Log: {}".format(self._discovery_log))
+            self._logger.debug("Checking discovery for: {}".format(item))
+            # Run the discovery if we haven't before, or if force is requested.
+            if not self._discovery_log[item] or force:
+                if item == 'system':
+                    self._logger.info("Sending Home Assistant discovery for '{}'.".format(item))
+                    self._ha_discovery_system()
+                else:
+                    self._logger.info("Sending home assistant discovery for bay ID: {}".format(item))
+                    self._ha_discovery_bay(item)
+                self._discovery_log['system'] = True
+        self._ha_repeat_override = True
+        self._ha_timestamp = time.monotonic()
+
     # Create HA discovery message.
-    def _ha_discover(self, name, topic, type, entity, device_info=True, **kwargs):
+    def _ha_discover(self, name, topic, type, entity, device_info=True, system_avail=True, avail=None, avail_mode=None, **kwargs):
 
         # Trap unknown types.
         if type not in ('camera','binary_sensor','sensor'):
@@ -575,24 +601,25 @@ class CBNetwork:
             'type': type,
             'name': name,
             'object_id': entity,
-            'unique_id': self._client_id + '.' + entity
+            'unique_id': self._client_id + '.' + entity,
+            'availability': []
         }
         # Add device info.
         if device_info:
             discovery_dict['device'] = self._device_info
 
         if type == 'camera':
-            required_parameters = []
+            required_parameters = ['image_encoding']
             nullable_parameters = []
             optional_parameters = ['icon']
         elif type == 'binary_sensor':
             required_parameters = ['payload_on','payload_off']
             nullable_parameters = ['device_class']
-            optional_parameters = ['icon']
+            optional_parameters = ['icon','value_template']
         elif type == 'sensor':
-            required_parameters = ['unit_of_measurement']
+            required_parameters = []
             nullable_parameters = []
-            optional_parameters = ['icon']
+            optional_parameters = ['icon','unit_of_measurement', 'value_template']
         else:
             raise
 
@@ -614,14 +641,49 @@ class CBNetwork:
             except KeyError:
                 pass
 
+        # Should we include the system availability? Obviously, we exclude this for the system availability itself!
+        # May want to exclude in certain other cases.
+        if system_avail:
+            sa = {
+                'topic': 'CobraBay/' + self._client_id + '/connectivity',
+                'payload_available': 'online',
+                'payload_not_available': 'offline' }
+            discovery_dict['availability'].append(sa)
+
+        # Are other availability topics defined? If so, check and include.
+        if avail is not None:
+            # If other avai
+            for item in avail:
+                # Must be a dict.
+                if not isinstance(item,dict):
+                    self._logger.warning("Additional availability '{}' not a dict, skipping.".format(item))
+                    continue
+                elif 'topic' not in item:
+                    self._logger.warning("Additional availability '{}' does not have a topic defined.".format(item))
+                else:
+                    self._logger.debug("Adding additional availability '{}'".format(item))
+                    discovery_dict['availability'].append(item)
+
+        # Determine the availability mode automatically if not explicitly set.
+        if avail_mode is None:
+            discovery_dict['availability_mode'] = 'all'
+        else:
+            discovery_dict['availability_mode'] = avail_mode
+
         discovery_json = json_dumps(discovery_dict)
         discovery_topic = "homeassistant/{}/CobraBay_{}/{}/config".\
             format(type,self._client_id,discovery_dict['object_id'])
         self._logger.info("Publishing HA discovery to topic '{}'\n\t{}".format(discovery_topic, discovery_json))
         self._mqtt_client.publish(discovery_topic, discovery_json)
+        # Remove this topic from the topic history if it exists.
+        try:
+            self._logger.debug("Removed previous value '{}' for topic '{}'".format(self._topic_history[topic], topic))
+            self._topic_history[topic] = None
+        except KeyError:
+            self._logger.debug("Topic '{}' had no previous state to remove.".format(topic))
 
     def _ha_discovery_system(self):
-        self._logger.debug("Performing system HA discovery")
+        self._logger.info("Performing HA discovery for system")
         # Device connectivity
         self._ha_discover(
             name="{} Connectivity".format(self._system_name),
@@ -651,6 +713,15 @@ class CBNetwork:
             icon="mdi:thermometer"
         )
         # Memory Info
+        self._ha_discover(
+            name="{} Memory Free".format(self._system_name),
+            topic="CobraBay/" + self._client_id + "/mem_info",
+            type="sensor",
+            entity="{}_mem_info".format(self._system_name.lower()),
+            value_template='{{ value_json.mem_pct }}',
+            unit_of_measurement='%',
+            icon="mdi:memory"
+        )
         # Undervoltage
         self._ha_discover(
             name="{} Undervoltage".format(self._system_name),
@@ -662,3 +733,95 @@ class CBNetwork:
             icon="mdi:alert-octagram"
         )
         # Display
+        self._ha_discover(
+            name="{} Display".format(self._system_name),
+            topic="CobraBay/" + self._client_id + "/display",
+            type="camera",
+            entity="{}_display".format(self._system_name.lower()),
+            image_encoding='b64',
+            icon="mdi:image-area"
+        )
+
+    def _ha_discovery_bay(self, bay_id):
+        bay_obj = self._bay_registry[bay_id]
+        topic_base = "CobraBay/" + self._client_id + "/" + bay_obj.id + "/"
+        # Discover the Bay level status items.
+        # Bay State
+        self._ha_discover(
+            name="{} State".format(bay_obj.name),
+            topic=topic_base + "state",
+            type="sensor",
+            entity="{}_state".format(bay_obj.id),
+            value_template="{{ value|capitalize }}"
+        )
+        # Bay Vector
+        self._ha_discover(
+            name="{} Speed".format(bay_obj.name),
+            topic=topic_base + "vector",
+            type="sensor",
+            entity="{}_speed".format(bay_obj.id),
+            value_template="{{ value_json.speed }}",
+            unit_of_measurement=self._uom('speed')
+
+        )
+        self._ha_discover(
+            name="{} Direction".format(bay_obj.name),
+            topic=topic_base + "vector",
+            type="sensor",
+            entity="{}_direction".format(bay_obj.id),
+            value_template="{{ value_json.direction|capitalize }}",
+        )
+
+        # # Bay Motion Timer
+        #
+        # # Bay Occupancy
+        self._ha_discover(
+            name="{} Occupied".format(bay_obj.name),
+            topic=topic_base + "occupancy",
+            type="binary_sensor",
+            entity="{}_occupied".format(bay_obj.id),
+            payload_on="true",
+            payload_off="false",
+            payload_not_available="error"
+        )
+
+        # Discover the detectors....
+        print(bay_obj.detectors)
+        for detector in bay_obj.detectors:
+            det_obj = bay_obj.detectors[detector]
+            detector_base = topic_base + "detectors/" + det_obj.id + "/"
+            # Detector reading.
+            self._ha_discover(
+                name="Detector - {} State".format(det_obj.name),
+                topic=detector_base + "state",
+                type="sensor",
+                entity="{}_{}_{}_state".format(self._system_name, bay_obj.id, det_obj.id),
+                value_template="{{ value|capitalize }}"
+            )
+            self._ha_discover(
+                name="Detector - {} Status".format(det_obj.name),
+                topic=detector_base + "status",
+                type="sensor",
+                entity="{}_{}_status".format(bay_obj.id, det_obj.id),
+                value_template="{{ value|capitalize }}"
+            )
+            self._ha_discover(
+                name="Detector - {} Fault".format(det_obj.name),
+                topic=detector_base + "fault",
+                type="binary_sensor",
+                entity="{}_{}_{}_state".format(self._system_name, bay_obj.id, det_obj.id),
+                payload_on = "true",
+                payload_off = "false"
+            )
+            self._ha_discover(
+                name="Detector - {} Reading".format(det_obj.name),
+                topic=detector_base + "reading",
+                type="sensor",
+                entity="{}_{}_{}_reading".format(self._system_name, bay_obj.id, det_obj.id),
+            )
+            self._ha_discover(
+                name="Detector - {} Raw Reading".format(det_obj.name),
+                topic=detector_base + "raw_reading",
+                type="sensor",
+                entity="{}_{}_{}_raw_reading".format(self._system_name, bay_obj.id, det_obj.id),
+            )
