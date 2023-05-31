@@ -403,7 +403,7 @@ class CB_VL53L1X(I2CSensor):
     def range(self):
         self._logger.debug("Range requsted. Sensor state is: {}".format(self.state))
         if self.state != 'ranging':
-            raise CobraBay.exceptions.SensorNotRangingException
+            raise CobraBay.exceptions.SensorNotRangingWarning
         elif monotonic() - self._previous_timestamp < 0.2:
             # Make sure to pace the readings properly, so we're not over-running the native readings.
             # If a request comes in before the sleep time (200ms), return the previous reading.
@@ -451,7 +451,9 @@ class CB_VL53L1X(I2CSensor):
             else:
                 # A "none" means the sensor had no response.
                 if reading is None:
-                    raise CobraBay.exceptions.SensorValueNoReading
+                    self._previous_reading = CobraBay.exceptions.SensorNoReadingWarning
+                    self._previous_timestamp = monotonic()
+                    raise CobraBay.exceptions.SensorNoReadingWarning
                 else:
                     self._previous_reading = Quantity(reading, 'cm')
                     self._previous_timestamp = monotonic()
@@ -526,8 +528,12 @@ class CB_VL53L1X(I2CSensor):
                 self._logger.debug("Previous reading: {} ({})".format(self._previous_reading, type(self._previous_reading)))
                 if isinstance(self._previous_reading,Quantity):
                     return 'ranging'
+                elif isinstance(self._previous_reading,CobraBay.exceptions.SensorWarning):
+                    # Pass up any warning state to be evaluated.
+                    return self._previous_reading
                 else:
-                    return 'unable to range'
+                    self._logger.debug("No match, will return 'unknown error'")
+                    return 'unknown error'
             else:
                 self._logger.debug("Enabled, not ranging.")
                 return 'enabled'
@@ -556,7 +562,7 @@ class TFMini(SerialSensor):
         self._sensor_obj = TFMP(self.serial_port, self.baud_rate)
         try:
             self._logger.debug("Test reading: {}".format(self.range))
-        except CobraBay.exceptions.SensorValueException as e:
+        except CobraBay.exceptions.SensorNoReadingWarning as e:
             self._logger.warning("During sensor setup, received abnormal reading '{}'.".format(e))
 
     # TFMini is always ranging, so enable here is just a dummy method.
@@ -579,8 +585,12 @@ class TFMini(SerialSensor):
             self._previous_reading = reading.distance
             self._previous_timestamp = monotonic()
             return self._previous_reading
+        elif reading.status == "Weak":
+            raise CobraBay.exceptions.SensorWeakWarning
+        elif reading.status == "Flood":
+            raise CobraBay.exceptions.SensorFloodWarning
         else:
-            raise CobraBay.exceptions.SensorValueException(status=reading.status)
+            raise CobraBay.exceptions.SensorException
 
     # When this was tested in I2C mode, the TFMini could return unstable answers, even at rest. Unsure if
     # this is still true in serial mode, keeping this clustering method for the moment.

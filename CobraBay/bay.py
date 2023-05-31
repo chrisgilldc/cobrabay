@@ -10,7 +10,7 @@ import logging
 # from pprint import pformat, pprint
 from functools import wraps
 # import sys
-from .exceptions import SensorValueException
+from .exceptions import SensorException
 import CobraBay
 
 # Scan the detectors if we're asked for a property that needs a fresh can and we haven't scanned recently enough.
@@ -456,7 +456,7 @@ class CBBay:
         for detector_name in self._detectors:
             try:
                 position[detector_name] = self._detectors[detector_name].value
-            except SensorValueException:
+            except SensorException:
                 # For now, pass. Need to add logic here to actually set the overall bay status.
                 pass
 
