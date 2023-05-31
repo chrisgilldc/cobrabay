@@ -320,7 +320,7 @@ class Range(SingleDetector):
         # Is there one of our own exceptions? These we can *probably* handle and get some useful information from.
         if isinstance(self.value, SensorValueException):
             # A weak reading from the sensor almost certainly means the door is open and nothing is blocking.
-            if self._history[0][0].status == "Weak":
+            if self._history[0][0].status.lower() == "weak":
                 qv = "door_open"
             else:
                 qv = "unknown"

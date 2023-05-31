@@ -7,12 +7,20 @@
 class CobraBayException(Exception):
     """CobraBay Exceptions"""
 
-class SensorValueException(CobraBayException):
-    """Raised when a sensor reads a value that indicates a non-range state."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args)
-        self._status = kwargs['status']
+class SensorException(CobraBayException):
+    """Sensor failure"""
 
-    @property
-    def status(self):
-        return self._status
+class SensorWarning(CobraBayException):
+    """Non-fatal sensor states"""
+
+class SensorNotRangingWarning(SensorWarning):
+    """Sensor reading when not ranging"""
+
+class SensorFloodWarning(SensorWarning):
+    """Sensor has been flooded"""
+
+class SensorNoReadingWarning(SensorWarning):
+    """Sensor returned no value"""
+
+class SensorWeakWarning(SensorWarning):
+    """Sensor is weak"""

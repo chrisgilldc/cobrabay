@@ -100,6 +100,8 @@ class BaseSensor:
                     self._logger.debug("Successfully completed implicit enable to allow change to ranging")
             try:
                 self._start_ranging()
+            except TypeError as e:
+                self._logger.warning("Could not start ranging. Sensor returned value that could not be interpreted.")
             except BaseException as e:
                 self._logger.error("Could not start ranging.")
                 self._logger.exception(e)
@@ -299,8 +301,14 @@ class CB_VL53L1X(I2CSensor):
             raise e
         else:
             self._ranging = True
-            # Clear the previous readings.
-            self._previous_reading = Quantity(self._sensor_obj.distance, 'cm')
+            # Get new readings.
+            try:
+                self._previous_reading = Quantity(self._sensor_obj.distance, 'cm')
+            except TypeError:
+                if self._sensor_obj.distance is None:
+                    self._previous_reading = None
+                else:
+                    raise
             self._previous_timestamp = monotonic()
 
     def _stop_ranging(self):
@@ -335,10 +343,15 @@ class CB_VL53L1X(I2CSensor):
                 self._disable()
                 self._enable()
         else:
-            # Create the sensor object with the default address of 0x29
-            self._sensor_obj = af_VL53L1X(i2c, address=0x29)
-            # Change the address to the desired address.
-            self._sensor_obj.set_address(self._i2c_address)
+            try:
+                # Try to create fundamental object at the expected address. If the device has been left on, it should
+                # still appear here.
+                self._sensor_obj = af_VL53L1X(i2c, address=0x29)
+            except OSError:
+                # If that fails, create the sensor object with the default address of 0x29
+                self._sensor_obj = af_VL53L1X(i2c, address=0x29)
+                # Change the address to the desired address.
+                self._sensor_obj.set_address(self._i2c_address)
 
     def _disable(self):
         self.enable_pin.value = False
@@ -390,8 +403,7 @@ class CB_VL53L1X(I2CSensor):
     def range(self):
         self._logger.debug("Range requsted. Sensor state is: {}".format(self.state))
         if self.state != 'ranging':
-            # Return 'Not ranging' if the board isn't actively ranging, since, duh.
-            return 'not_ranging'
+            raise CobraBay.exceptions.SensorNotRangingException
         elif monotonic() - self._previous_timestamp < 0.2:
             # Make sure to pace the readings properly, so we're not over-running the native readings.
             # If a request comes in before the sleep time (200ms), return the previous reading.
@@ -439,7 +451,7 @@ class CB_VL53L1X(I2CSensor):
             else:
                 # A "none" means the sensor had no response.
                 if reading is None:
-                    return "no_reading"
+                    raise CobraBay.exceptions.SensorValueNoReading
                 else:
                     self._previous_reading = Quantity(reading, 'cm')
                     self._previous_timestamp = monotonic()
@@ -517,7 +529,7 @@ class CB_VL53L1X(I2CSensor):
                 else:
                     return 'unable to range'
             else:
-                self._logger.debug("Enabled but not ranging.")
+                self._logger.debug("Enabled, not ranging.")
                 return 'enabled'
         elif self.enable_pin.value is False:
                 self._logger.debug("Enable pin is off.")
