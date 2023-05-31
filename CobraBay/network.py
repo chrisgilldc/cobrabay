@@ -802,7 +802,7 @@ class CBNetwork:
                 name="Detector - {} Status".format(det_obj.name),
                 topic=detector_base + "status",
                 type="sensor",
-                entity="{}_{}_status".format(bay_obj.id, det_obj.id),
+                entity="{}_{}_{}_status".format(self._system_name, bay_obj.id, det_obj.id),
                 value_template="{{ value|capitalize }}"
             )
             self._ha_discover(
