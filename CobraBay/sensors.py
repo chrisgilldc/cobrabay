@@ -18,6 +18,7 @@ from pathlib import Path
 from pprint import pformat
 import sys
 import CobraBay.exceptions
+import CobraBay.util
 
 
 class BaseSensor:
@@ -90,14 +91,14 @@ class BaseSensor:
         elif target_status == 'ranging':
             # If sensor is disabled, enable before going straight to ranging.
             if self._status == 'disabled':
-                try:
-                    self._enable()
-                except BaseException as e:
-                    self._logger.error("Could not perform implicit enable while changing status to ranging.")
-                    self._logger.exception(e)
-                    return
-                else:
-                    self._logger.debug("Successfully completed implicit enable to allow change to ranging")
+                # try:
+                self._enable()
+                # except BaseException as e:
+                #     self._logger.error("Could not perform implicit enable while changing status to ranging.")
+                #     self._logger.exception(e)
+                #     return
+                # else:
+                #     self._logger.debug("Successfully completed implicit enable to allow change to ranging")
             try:
                 self._start_ranging()
             except TypeError as e:
@@ -322,10 +323,12 @@ class CB_VL53L1X(I2CSensor):
 
     # Enable the sensor.
     def _enable(self):
-        # Set the pin true to turn on the board.
+        self._logger.debug("I2C devices before enable: {}".format(CobraBay.util.scan_i2c()))
+        # Re-enable the board to get it back on the default address.
         self.enable_pin.value = True
         # Wait one second to make sure the bus has stabilized.
         sleep(1)
+        self._logger.debug("I2C devices after enable: {}".format(CobraBay.util.scan_i2c()))
         try:
             i2c = busio.I2C(board.SCL, board.SDA)
         except PermissionError as e:
@@ -343,15 +346,16 @@ class CB_VL53L1X(I2CSensor):
                 self._disable()
                 self._enable()
         else:
-            try:
-                # Try to create fundamental object at the expected address. If the device has been left on, it should
-                # still appear here.
-                self._sensor_obj = af_VL53L1X(i2c, address=0x29)
-            except OSError:
-                # If that fails, create the sensor object with the default address of 0x29
-                self._sensor_obj = af_VL53L1X(i2c, address=0x29)
-                # Change the address to the desired address.
-                self._sensor_obj.set_address(self._i2c_address)
+            # try:
+            #     # Try to create fundamental object at the expected address. If the device has been left on, it should
+            #     # still appear here.
+            self._sensor_obj = af_VL53L1X(i2c, address=self._i2c_address)
+            # except OSError:
+            #     self._logger.warning("Sensor not found on assigned address of '{}'. Trying default of '0x29'".format(self._i2c_address))
+            #     # If that fails, create the sensor object with the default address of 0x29
+            #     self._sensor_obj = af_VL53L1X(i2c, address=0x29)
+            #     # Change the address to the desired address.
+            #     self._sensor_obj.set_address(new_address=self._i2c_address)
 
     def _disable(self):
         self.enable_pin.value = False
@@ -562,7 +566,7 @@ class TFMini(SerialSensor):
         self._sensor_obj = TFMP(self.serial_port, self.baud_rate)
         try:
             self._logger.debug("Test reading: {}".format(self.range))
-        except CobraBay.exceptions.SensorNoReadingWarning as e:
+        except CobraBay.exceptions.SensorWarning as e:
             self._logger.warning("During sensor setup, received abnormal reading '{}'.".format(e))
 
     # TFMini is always ranging, so enable here is just a dummy method.
