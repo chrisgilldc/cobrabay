@@ -292,7 +292,7 @@ class CBBay:
         if range_quality in ('no_object', 'door_open'):
             # If the detector can hit the garage door, or the door is open, then clearly nothing is in the way, so
             # the bay is vacant.
-            self._logger.debug("Longitudinal quality is {}, not occupied.".format(self._detectors[self._selected_range].quality))
+            self._logger.debug("Longitudinal quality is {}, not occupied.".format(range_quality))
             return "false"
         elif range_quality in ('emergency', 'back_up', 'park', 'final', 'base'):
             self._logger.debug("Matched range quality: {}".format(range_quality))
