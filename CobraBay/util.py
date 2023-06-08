@@ -7,7 +7,7 @@ import board
 import busio
 from time import sleep
 from datetime import timedelta
-from CobraBay.exceptions import SensorValueException
+import CobraBay.exceptions
 
 
 # General purpose converter.
@@ -65,8 +65,19 @@ class Convertomatic:
             result = new_list
         elif isinstance(input_value, bool):
             result = str(input_value).lower()
-        elif isinstance(input_value, SensorValueException):
-            result = "Sensor Value Exception: {}".format(input_value.status)
+        # Convert sensor warning exceptions....
+        elif isinstance(input_value, CobraBay.exceptions.SensorNotRangingWarning):
+            result = "not_ranging"
+        elif isinstance(input_value, CobraBay.exceptions.SensorFloodWarning):
+            result = "flood"
+        elif isinstance(input_value, CobraBay.exceptions.SensorNoReadingWarning):
+            result = "no_reading"
+        elif isinstance(input_value, CobraBay.exceptions.SensorWeakWarning):
+            result = "weak"
+        elif isinstance(input_value, CobraBay.exceptions.SensorWarning):
+            result = "unknown_sensor_warning"
+        elif isinstance(input_value, CobraBay.exceptions.SensorException):
+            result = "sensor_error"
         elif isinstance(input_value, BaseException):
             print("Cannot convert {}: {}".format(type(input_value), str(input_value)))
         else:
