@@ -5,7 +5,7 @@ import pint.errors
 
 from .sensors import CB_VL53L1X, TFMini, FileSensor, I2CSensor, SerialSensor
 # Import all the CobraBay Exceptions.
-from .exceptions import CobraBayException, SensorException, SensorWarning, SensorNotRangingWarning, SensorFloodWarning, SensorNoReadingWarning, SensorWeakWarning
+import CobraBay.exceptions
 from pint import UnitRegistry, Quantity, DimensionalityError
 from time import monotonic_ns
 from functools import wraps
@@ -89,16 +89,19 @@ def read_if_stale(func):
             try:
                 value = self._sensor_obj.range
                 self._logger.debug("Triggered sensor reading. Got: {} ({})".format(value, type(value)))
-            except CobraBayException as e:
-                # For our own exceptions, we can save and process.
+            except CobraBay.exceptions.SensorWarning as e:
+                # SensorWarnings we can save and process because those may have meaning.
                 value = e
-                self._logger.debug("Triggered sensor reading. Got CobraBayException: '{}'".format(type(value)))
-            except BaseException as e:
-                # Anything else we have to re-raise.
-                raise e
+                self._logger.debug("Sensor reading received Warning exception: '{}'".format(type(value)))
+            except BaseException:
+                # Any other exception, raise immediately.
+                raise
             # Add value to the history and truncate history to ten records.
             self._history.insert(0, (value, monotonic_ns()))
             self._history = self._history[:10]
+            # If a SensorWarning was received, raise it.
+            # if isinstance(value, CobraBay.exceptions.SensorWarning):
+            #     raise value
         # Call the wrapped function.
         return func(self)
     return wrapper
@@ -265,6 +268,22 @@ class SingleDetector(Detector):
             iface = iface_info("unknown","unknown")
         return iface
 
+    @property
+    def value(self):
+        """
+        Returns the adjusted measurement of the detector. Calls the "value_raw" method of the detector, which must
+        be defined on a per-class basis.
+        :return:
+        """
+        self._logger.debug("Creating adjusted value from latest value: {}".format(self.value_raw))
+        if isinstance(self.value_raw, Quantity):
+            return self.value_raw - self.offset
+        else:
+            return self.value_raw
+
+    @property
+    def value_raw(self):
+        raise NotImplementedError("Raw value method should be implemented on a class basis.")
 
 # Detector that measures range progress.
 class Range(SingleDetector):
@@ -285,14 +304,7 @@ class Range(SingleDetector):
         self._dist_warn = None
         self._dist_crit = None
 
-    # Return the adjusted reading of the sensor.
-    @property
-    def value(self):
-        self._logger.debug("Creating adjusted value from latest value: {}".format(self.value_raw))
-        if isinstance(self.value_raw, Quantity):
-            return self.value_raw - self.offset
-        else:
-            return self.value_raw
+
 
     # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
@@ -316,69 +328,46 @@ class Range(SingleDetector):
     @property
     @read_if_stale
     def quality(self):
-        self._logger.debug("Creating quality from latest value: {}".format(self._history[0][0]))
+        self._logger.debug("Creating quality from latest value: {} ({})".format(self._history[0][0], type(self._history[0][0])))
         self._logger.debug("90% of bay depth is: {}".format(self.bay_depth * .9))
-        try:
-            if self.value < Quantity("2 in"):
+        current_value = self._history[0][0]
+        if isinstance(current_value, Quantity):
+            # Actual reading, evaluate.
+            if current_value < Quantity("2 in"):
                 qv = 'emergency'
-            elif (self.bay_depth * 0.90) <= self.value:
+            elif (self.bay_depth * 0.90) <= current_value:
                 self._logger.debug(
                     "Reading is more than 90% of bay depth ({})".format(self.bay_depth * .9))
                 qv = 'no_object'
             # Now consider the adjusted values.
-            elif self.value < 0 and abs(self.value) > self.spread_park:
+            elif current_value < 0 and abs(current_value) > self.spread_park:
                 qv = 'back_up'
-            elif abs(self.value) < self.spread_park:
+            elif abs(current_value) < self.spread_park:
                 qv = 'park'
-            elif self.value <= self._dist_crit:
+            elif current_value <= self._dist_crit:
                 qv = 'final'
-            elif self.value <= self._dist_warn:
+            elif current_value <= self._dist_warn:
                 qv = 'base'
             else:
                 qv = 'ok'
-        except SensorWeakWarning:
-            # A 'weak' response almost certainly means the door is open.
-            qv = 'door_open'
-        except SensorFloodWarning:
-            qv = 'flooded'
-        except SensorNoReadingWarning:
-            qv = 'no_reading'
+        elif isinstance(current_value, CobraBay.exceptions.SensorWarning):
+            # Some type of manageable state.
+            if isinstance(current_value, CobraBay.exceptions.SensorWeakWarning):
+                # A 'weak' response almost certainly means the door is open.
+                qv = 'door_open'
+            elif isinstance(current_value, CobraBay.exceptions.SensorFloodWarning):
+                qv = 'flooded'
+            elif isinstance(current_value, CobraBay.exceptions.SensorNoReadingWarning):
+                qv = 'no_reading'
+            else:
+                qv = 'unknown_warning'
+        elif isinstance(current_value, CobraBay.exceptions.SensorException):
+                qv = 'failure'
+        else:
+                qv = 'unknown_error'
+
         self._logger.debug("Quality: {}".format(qv))
         return(qv)
-        # # Is there one of our own exceptions? These we can *probably* handle and get some useful information from.
-        # if isinstance(self.value, SensorValueException):
-        #     # A weak reading from the sensor almost certainly means the door is open and nothing is blocking.
-        #     if self._history[0][0].status.lower() == "weak":
-        #         qv = "door_open"
-        #     else:
-        #         qv = "unknown"
-        # # All other exceptions.
-        # elif isinstance(self.value, BaseException):
-        #     qv = "unknown"
-        # elif type(self.value) in (int, float, Quantity):
-        #     # You're about to hit the wall!
-        #     if self._history[0][0] < Quantity("2 in"):
-        #         qv = 'emergency'
-        #     elif (self.bay_depth * 0.90) <= self._history[0][0]:
-        #         self._logger.debug(
-        #             "Reading is more than 90% of bay depth ({})".format(self.bay_depth * .9))
-        #         qv = 'no_object'
-        #     # Now consider the adjusted values.
-        #     elif self.value < 0 and abs(self.value) > self.spread_park:
-        #         qv = 'back_up'
-        #     elif abs(self.value) < self.spread_park:
-        #         qv = 'park'
-        #     elif self.value <= self._dist_crit:
-        #         qv = 'final'
-        #     elif self.value <= self._dist_warn:
-        #         qv = 'base'
-        #     else:
-        #         qv = 'ok'
-        # else:
-        #     # self._logger.warning("Could not evaluate quality, value was unexpected '{}' ({})".format(self.value, type(self.value)))
-        #     qv = 'unknown'
-        # self._logger.debug("Quality {}".format(qv))
-        # return qv
 
     # Determine the rate of motion being measured by the detector.
     @property
@@ -391,9 +380,8 @@ class Range(SingleDetector):
                 history.append(entry)
         # If we don't have at least two data points, can't measure, return none.
         if len(history) < 2:
-            return None
-        elif history[0][0] == 'Weak':
-            return None
+            return 'unknown'
+
         # If the sensor is reading beyond range, speed and direction can't be known, so return immediately.
         last_element = len(history) - 1
         self._logger.debug("First history: {}".format(history[0]))
@@ -403,7 +391,7 @@ class Range(SingleDetector):
             net_time = Quantity(history[0][1] - history[last_element][1], 'nanoseconds').to('seconds')
         except pint.errors.DimensionalityError:
             # If we're trying to subtract a non-Quantity value, then return unknown for these.
-            return None
+            return 'unknown'
         self._logger.debug("Moved {} in {}s".format(net_dist, net_time))
         speed = (net_dist / net_time).to('kph')
         # Since we've processed all this already, return all three values.
@@ -423,14 +411,18 @@ class Range(SingleDetector):
             return False
 
     @property
-    @read_if_stale
     def vector(self):
+
         # Grab the movement value.
-        movement = self._movement
+        try:
+            movement = self._movement
+        except CobraBay.exceptions.SensorWarning:
+            return {"speed": "unknown", "direction": "unknown"}
         # Determine a direction.
-        if movement is None:
+        if movement == 'unknown':
             # If movement couldn't be determined, we also can't determine vector, so this is unknown.
-            return {"speed": "Unknown", "direction": "Unknown"}
+            return {"speed": "unknown", "direction": "unknown"}
+
         # Okay, not none, so has value!
         if movement['net_dist'] > Quantity(self._error_margin):
             return {'speed': abs(movement['speed']), 'direction': 'forward'}
@@ -533,36 +525,21 @@ class Lateral(SingleDetector):
         self._spread_ok = None
         self._spread_warn = None
 
-    @property
-    def value(self):
-        try:
-            raw_value = self.value_raw
-        except BaseException:
-            raise
-        else:
-            if isinstance(raw_value, Quantity):
-                adjusted_value = self._history[0][0] - self.offset
-                self._logger.debug("Adjusted raw reading {} by offset {} for result {}".
-                                   format(self._history[0][0], self.offset, adjusted_value))
-                return adjusted_value
-            else:
-                return raw_value
-
     # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
     @read_if_stale
     def value_raw(self):
         if isinstance(self._history[0][0], Quantity):
             return self._history[0][0]
-        elif isinstance(self._history[0][0], SensorWarning):
+        elif isinstance(self._history[0][0], CobraBay.exceptions.SensorWarning):
             # Any Sensor *Warning* we can pass on, because that may have meaning.
             return self._history[0][0]
-        elif isinstance(self._history[0][0], SensorException):
+        elif isinstance(self._history[0][0], CobraBay.exceptions.SensorException):
             # If the sensor has already errored, raise that.
             raise self._history[0][0]
         else:
             # Anything else, treat it as the sensor returning no reading.
-            raise SensorNoReadingWarning
+            raise CobraBay.exceptions.SensorNoReadingWarning
 
     @property
     @read_if_stale
