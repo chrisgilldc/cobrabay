@@ -556,7 +556,7 @@ class CBNetwork:
         # Is the detector in fault?
         outbound_messages.append({'topic': topic_base + 'fault', 'payload': input_obj.fault, 'repeat': False})
         # Send value, raw value and quality if detector is ranging.
-        if input_obj.state == 'ranging':
+        if input_obj.status == 'ranging':
             # Detector Value.
             outbound_messages.append({'topic': topic_base + 'reading', 'payload': input_obj.value, 'repeat': False})
             # Detector reading unadjusted by depth.
