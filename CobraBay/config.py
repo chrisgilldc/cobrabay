@@ -327,6 +327,7 @@ class CBConfig:
             except KeyError:
                 # If no defined defaults, empty list.
                 direction_defaults = {}
+
             for detector in self._config['bays'][bay_id][direction]['detectors']:
                 # Longitudinal check.
                 if direction == 'longitudinal':
