@@ -91,14 +91,14 @@ class BaseSensor:
         elif target_status == 'ranging':
             # If sensor is disabled, enable before going straight to ranging.
             if self._status == 'disabled':
-                # try:
-                self._enable()
-                # except BaseException as e:
-                #     self._logger.error("Could not perform implicit enable while changing status to ranging.")
-                #     self._logger.exception(e)
-                #     return
-                # else:
-                #     self._logger.debug("Successfully completed implicit enable to allow change to ranging")
+                try:
+                    self._enable()
+                except BaseException as e:
+                    self._logger.error("Could not perform implicit enable while changing status to ranging.")
+                    self._logger.exception(e)
+                    return
+                else:
+                    self._logger.debug("Successfully completed implicit enable to allow change to ranging")
             try:
                 self._start_ranging()
             except TypeError as e:
@@ -141,10 +141,9 @@ class I2CSensor(BaseSensor):
         self._logger.info("Initializing sensor...")
 
         # Set the I2C bus and I2C Address
-        self._logger.debug("Setting I2C Properties...")
         self.i2c_bus = i2c_bus
         self.i2c_address = i2c_address
-        self._logger.debug("Now have I2C Bus {} and Address {}".format(self.i2c_bus, hex(self.i2c_address)))
+        self._logger.debug("Configured for I2C Bus {} and Address {}".format(self.i2c_bus, hex(self.i2c_address)))
 
         # How many times, in the lifetime of the sensor, have we hit a fault.
         self._lifetime_faults = 0
@@ -259,8 +258,9 @@ class CB_VL53L1X(I2CSensor):
         # Create access to the I2C bus
         try:
             self._i2c = busio.I2C(board.SCL, board.SDA)
-        except ValueError:
-            raise
+        except PermissionError as e:
+            self._logger.warning("No access to I2C Bus.")
+            raise e
 
         # Initialize variables.
         self._sensor_obj = None  # Sensor object from base library.
@@ -285,20 +285,23 @@ class CB_VL53L1X(I2CSensor):
 
         # Start ranging.
         self.status = 'ranging'  # Start ranging.
-        self.measurement_time = Quantity(timing).to('microseconds').magnitude
-        self.distance_mode = 'long'
-        self._previous_reading = self._sensor_obj.distance
-        self._logger.debug("Test reading: {}".format(self._previous_reading))
-        self._logger.debug("Setting status back to enabled, stopping ranging.")
-        self.status = 'enabled'
+        try:
+            self.measurement_time = Quantity(timing).to('microseconds').magnitude
+            self.distance_mode = 'long'
+            self._previous_reading = self._sensor_obj.distance
+            self._logger.debug("Test reading: {}".format(self._previous_reading))
+            self._logger.debug("Setting status back to enabled, stopping ranging.")
+            self.status = 'enabled'
+        except AttributeError:
+            pass
         self._logger.debug("Initialization complete.")
 
     def _start_ranging(self):
         self._logger.debug("Starting ranging")
         try:
             self._sensor_obj.start_ranging()
-        except BaseException as e:
-            self._logger.error("Encountered error when trying to start ranging! '{}'".format(str(e)))
+        except AttributeError as e:
+            self._logger.error("Cannot start ranging on sensor.")
             raise e
         else:
             self._ranging = True
@@ -323,39 +326,44 @@ class CB_VL53L1X(I2CSensor):
 
     # Enable the sensor.
     def _enable(self):
-        self._logger.debug("I2C devices before enable: {}".format(CobraBay.util.scan_i2c()))
-        # Re-enable the board to get it back on the default address.
-        self.enable_pin.value = True
-        # Wait one second to make sure the bus has stabilized.
-        sleep(1)
-        self._logger.debug("I2C devices after enable: {}".format(CobraBay.util.scan_i2c()))
-        try:
-            i2c = busio.I2C(board.SCL, board.SDA)
-        except PermissionError as e:
-            # If the OS doesn't give us permissions, udev might still be setting things up.
-            # Try up to three times, then raise the exception again.
-            self._enable_attempt_counter = self._enable_attempt_counter + 1
-            self._logger.warning("Sensor enabled but not yet ready on attempt {}.".format(self._enable_attempt_counter))
-            if self._enable_attempt_counter == 3:
-                self._logger.error("Sensor reached enable failure limit. This is likely a hardware error that will "
-                                   "need physical intervention.")
-                self._logger.error("Marking faulty. Exception follows.")
-                self._logger.error(e, exc_info=True)
-                self._fault = True
+        devices_prior = CobraBay.util.scan_i2c()
+        self._logger.debug("I2C devices before enable: {}".format(devices_prior))
+
+        # Set enable pin if necessary.
+        if not self.enable_pin:
+            self._logger.info("Setting enable pin true.")
+            self.enable_pin.value = True
+            sleep(1)
+            devices_subsequent = CobraBay.util.scan_i2c()
+            self._logger.debug("I2C devices after enable: {}".format(devices_subsequent))
+            if len(devices_subsequent) > len(devices_prior):
+                # Create the sensor at the default address.
+                try:
+                    self._sensor_obj = af_VL53L1X(self._i2c, address=0x29)
+                except ValueError:
+                    self._logger.error("Sensor not found at default address '0x29'. Check for configuration and hardware errors!")
+                else:
+                    # Change the I2C address to the target address.
+                    self._sensor_obj.set_address(new_address=self._i2c_address)
+                    return
             else:
-                self._disable()
-                self._enable()
+                self._logger.error("Device did not appear on I2C bus! Check configuration and for hardware errors.")
         else:
-            # try:
-            #     # Try to create fundamental object at the expected address. If the device has been left on, it should
-            #     # still appear here.
-            self._sensor_obj = af_VL53L1X(i2c, address=self._i2c_address)
-            # except OSError:
-            #     self._logger.warning("Sensor not found on assigned address of '{}'. Trying default of '0x29'".format(self._i2c_address))
-            #     # If that fails, create the sensor object with the default address of 0x29
-            #     self._sensor_obj = af_VL53L1X(i2c, address=0x29)
-            #     # Change the address to the desired address.
-            #     self._sensor_obj.set_address(new_address=self._i2c_address)
+            self._logger.debug("Sensor was already enabled. Trying target address of '{}'".format(hex(self._i2c_address)))
+            try:
+                self._sensor_obj = af_VL53L1X(self._i2c, address=self._i2c_address)
+            except ValueError:
+                self._logger.error("Sensor not found on target address '{}'".format(hex(self._i2c_address)))
+            return
+
+        if self._enable_attempt_counter >= 3:
+            self._logger.error("Could not enable sensor after {} attempts. Marking as faulty.".format(self._enable_attempt_counter))
+            self._fault = True
+        else:
+            self._logger.warning("Could not enable sensor. Disabling and retrying.")
+            self._enable_attempt_counter =+ 1
+            self._disable()
+            self._enable()
 
     def _disable(self):
         self.enable_pin.value = False
@@ -386,22 +394,26 @@ class CB_VL53L1X(I2CSensor):
 
     @property
     def distance_mode(self):
-        if self._sensor_obj.distance_mode == 1:
-            return 'Short'
-        elif self._sensor_obj.distance_mode == 2:
-            return 'Long'
+        if not self._fault:
+            if self._sensor_obj.distance_mode == 1:
+                return 'Short'
+            elif self._sensor_obj.distance_mode == 2:
+                return 'Long'
+        else:
+            return 'Fault'
 
     @distance_mode.setter
     def distance_mode(self, dm):
-        # Pre-checking the distance mode lets us toss an error before actually setting anything.
-        if dm.lower() == 'short':
-            dm = 1
-        elif dm.lower() == 'long':
-            dm = 2
-        else:
-            raise ValueError("{} is not a valid distance mode".format(dm))
-        self._distance_mode = dm
-        self._sensor_obj.distance_mode = dm
+        if not self._fault:
+            # Pre-checking the distance mode lets us toss an error before actually setting anything.
+            if dm.lower() == 'short':
+                dm = 1
+            elif dm.lower() == 'long':
+                dm = 2
+            else:
+                raise ValueError("{} is not a valid distance mode".format(dm))
+            self._distance_mode = dm
+            self._sensor_obj.distance_mode = dm
 
     @property
     def range(self):

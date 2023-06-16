@@ -128,6 +128,11 @@ def mqtt_message_search(input_value, element, value, extract=None):
 
 
 def scan_i2c():
+    """
+    Scan the I2C Bus.
+    :return: Active addresses on the bus.
+    :rtype List
+    """
     i2c = busio.I2C(board.SCL, board.SDA)
     while not i2c.try_lock():
         pass

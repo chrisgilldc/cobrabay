@@ -403,7 +403,8 @@ class Range(SingleDetector):
     def motion(self):
         # Grab the movement
         movement = self._movement
-        if movement is None:
+        print("Movement: {}".format(movement))
+        if not isinstance(movement,dict):
             return "Unknown"
         elif abs(self._movement['net_dist']) > Quantity(self._error_margin):
             return True
