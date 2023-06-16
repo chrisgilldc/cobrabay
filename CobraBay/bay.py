@@ -392,6 +392,11 @@ class CBBay:
 
     @state.setter
     def state(self, m_input):
+        """
+
+        :param m_input:
+        :return:
+        """
         self._logger.debug("State change requested to {} from {}".format(m_input, self._state))
         # Trap invalid bay states.
         if m_input not in ('ready', 'docking', 'undocking', 'unavailable'):
