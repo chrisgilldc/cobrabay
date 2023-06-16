@@ -89,22 +89,42 @@ class CBDisplay:
             self._layers[bay_id][lateral] = {}
             for side in ('L','R'):
                 self._layers[bay_id][lateral][side] = {}
+                if side == 'L':
+                    # line_w = 5
+                    line_w = 0
+                elif side == 'R':
+                    # line_w = w - 2  # -2, one because of the border, one because it's 0 indexed.
+                    line_w = w - 3
+                else:
+                    raise ValueError("Not a valid side option, this should never happen!")
+
+                # Make an image for the 'fault' status.
+                img = Image.new('RGBA', (w, h), (0,0,0,0))
+                draw = ImageDraw.Draw(img)
+
+                j = 0
+                while j <= pixel_lengths[i]:
+                    draw.line([
+                        (line_w, accumulated_height + j),(line_w + 2, accumulated_height + j)
+                    ],fill=(255,0,0,255),width=1)
+                    j += 2
+
+                # Save
+                self._layers[bay_id][lateral][side]['fault'] = img
+                del(draw)
+                del(img)
+
                 for status in status_lookup:
                     self._logger.debug("Creating layer for side {}, status {} with color {}.".format(side, status[0], status[1]))
                     # Make the image.
                     img = Image.new('RGBA', (w, h), (0,0,0,0))
                     draw = ImageDraw.Draw(img)
-                    # Move the width depending on which side we're on.
-                    if side == 'L':
-                        # line_w = 5
-                        line_w = 0
-                    elif side == 'R':
-                        # line_w = w - 2  # -2, one because of the border, one because it's 0 indexed.
-                        line_w = w - 3
-                    else:
-                        raise ValueError("Not a valid side option, this should never happen!")
 
-                    draw.rectangle([(line_w,1 + accumulated_height),(line_w+2,1 + accumulated_height + pixel_lengths[i])],
+                    draw.rectangle(
+                        [
+                            (line_w,1 + accumulated_height),
+                            (line_w+2,1 + accumulated_height + pixel_lengths[i])
+                        ],
                         fill=status[1],width=1)
                     # Put this in the right place in the lookup.
                     self._layers[bay_id][lateral][side][status[0]] = img
@@ -112,6 +132,9 @@ class CBDisplay:
                     # img.save("/tmp/CobraBay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
                     del(draw)
                     del(img)
+
+
+
             # Now add the height of this bar to the accumulated height, to get the correct start for the next time.
             accumulated_height += pixel_lengths[i]
             # Increment to the next zone.
@@ -309,14 +332,14 @@ class CBDisplay:
     # Make a placard to show range.
     def _placard_range(self, input_range, range_quality, bay_state):
         self._logger.debug("Creating range placard with range {} and quality {}".format(input_range, range_quality))
-        range_string = "RANGE"
+        range_string = "NOVAL"
         # Some range quality statuses need a text output, not a distance.
         if range_quality == 'back_up':
             range_string = "BACK UP"
         elif range_quality == 'door_open':
-            if bay_state == 'Docking':
+            if bay_state == 'docking':
                 range_string = "APPROACH"
-            elif bay_state == 'Undocking':
+            elif bay_state == 'undocking':
                 range_string = "CLEAR!"
         elif input_range == 'Beyond range':
             range_string = "APPROACH"
