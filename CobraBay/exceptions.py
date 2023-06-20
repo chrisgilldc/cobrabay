@@ -10,6 +10,9 @@ class CobraBayException(Exception):
 class SensorException(CobraBayException):
     """Sensor failure"""
 
+class SensorNotEnabledException(CobraBayException):
+    """Sensor could not be enabled."""
+
 class SensorWarning(CobraBayException):
     """Non-fatal sensor states"""
 

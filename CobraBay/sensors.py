@@ -93,7 +93,7 @@ class BaseSensor:
             if self._status == 'disabled':
                 try:
                     self._enable()
-                except BaseException as e:
+                except CobraBay.exceptions.SensorException as e:
                     self._logger.error("Could not perform implicit enable while changing status to ranging.")
                     self._logger.exception(e)
                     return
@@ -273,7 +273,7 @@ class CB_VL53L1X(I2CSensor):
         self.timing_budget = timing  # Timing budget
         self.enable_board = enable_board  # Board where the enable pin is.
         self.enable_pin = enable_pin  # Pin for enabling.
-        self._enable_attempt_counter = 0
+        self._enable_attempt_counter = 1
         
         # Add self to instance list.
         CB_VL53L1X.instances.add(self)
@@ -283,18 +283,22 @@ class CB_VL53L1X(I2CSensor):
             'min_range': Quantity('30mm')
         }
 
-        # Start ranging.
-        self.status = 'ranging'  # Start ranging.
+        # Enable the sensor.
         try:
+            self.status = 'enabled'
+        except CobraBay.exceptions.SensorNotEnabledException:
+            # What to do if not enabled.
+            self._logger.error("Initialization failed. Sensor faulted until error is corrected.")
+        else:
+            # Get a test reading.
+            self.status = 'ranging'    # Start ranging.
             self.measurement_time = Quantity(timing).to('microseconds').magnitude
             self.distance_mode = 'long'
             self._previous_reading = self._sensor_obj.distance
             self._logger.debug("Test reading: {}".format(self._previous_reading))
             self._logger.debug("Setting status back to enabled, stopping ranging.")
             self.status = 'enabled'
-        except AttributeError:
-            pass
-        self._logger.debug("Initialization complete.")
+            self._logger.debug("Initialization complete.")
 
     def _start_ranging(self):
         self._logger.debug("Starting ranging")
@@ -326,42 +330,38 @@ class CB_VL53L1X(I2CSensor):
 
     # Enable the sensor.
     def _enable(self):
+        # Shut off the sensor
+        self.enable_pin.value = False
         devices_prior = CobraBay.util.scan_i2c()
         self._logger.debug("I2C devices before enable: {}".format(devices_prior))
-
-        # Set enable pin if necessary.
-        if not self.enable_pin:
-            self._logger.info("Setting enable pin true.")
-            self.enable_pin.value = True
-            sleep(1)
-            devices_subsequent = CobraBay.util.scan_i2c()
-            self._logger.debug("I2C devices after enable: {}".format(devices_subsequent))
-            if len(devices_subsequent) > len(devices_prior):
-                # Create the sensor at the default address.
-                try:
-                    self._sensor_obj = af_VL53L1X(self._i2c, address=0x29)
-                except ValueError:
-                    self._logger.error("Sensor not found at default address '0x29'. Check for configuration and hardware errors!")
-                else:
-                    # Change the I2C address to the target address.
-                    self._sensor_obj.set_address(new_address=self._i2c_address)
-                    return
-            else:
-                self._logger.error("Device did not appear on I2C bus! Check configuration and for hardware errors.")
-        else:
-            self._logger.debug("Sensor was already enabled. Trying target address of '{}'".format(hex(self._i2c_address)))
+        # Turn the sensor back on.
+        self.enable_pin.value = True
+        # Wait one second for the bus to stabilize
+        sleep(1)
+        devices_subsequent = CobraBay.util.scan_i2c()
+        self._logger.debug("I2C devices after enable: {}".format(devices_subsequent))
+        if len(devices_subsequent) > len(devices_prior):
+            # Create the sensor at the default address.
             try:
-                self._sensor_obj = af_VL53L1X(self._i2c, address=self._i2c_address)
+                self._sensor_obj = af_VL53L1X(self._i2c, address=0x29)
             except ValueError:
-                self._logger.error("Sensor not found on target address '{}'".format(hex(self._i2c_address)))
-            return
+                self._logger.error("Sensor not found at default address '0x29'. Check for configuration and hardware errors!")
+            else:
+                # Change the I2C address to the target address.
+                self._sensor_obj.set_address(new_address=self._i2c_address)
+                # Make sure fault isn't set, if we're recovering from failure.
+                self._fault = False
+                return
+        else:
+            self._logger.error("Device did not appear on I2C bus! Check configuration and for hardware errors.")
 
         if self._enable_attempt_counter >= 3:
             self._logger.error("Could not enable sensor after {} attempts. Marking as faulty.".format(self._enable_attempt_counter))
             self._fault = True
+            raise CobraBay.exceptions.SensorNotEnabledException
         else:
-            self._logger.warning("Could not enable sensor. Disabling and retrying.")
-            self._enable_attempt_counter =+ 1
+            self._logger.warning("Could not enable sensor on attempt {}. Disabling and retrying.".format(self._enable_attempt_counter))
+            self._enable_attempt_counter += 1
             self._disable()
             self._enable()
 
