@@ -417,7 +417,7 @@ class Range(SingleDetector):
         # Grab the movement value.
         try:
             movement = self._movement
-        except CobraBay.exceptions.SensorWarning:
+        except CobraBay.exceptions.SensorException:
             return {"speed": "unknown", "direction": "unknown"}
         # Determine a direction.
         if movement == 'unknown':

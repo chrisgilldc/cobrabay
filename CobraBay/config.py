@@ -373,17 +373,16 @@ class CBConfig:
         return config_dict
 
     # Config dict for a detector.
-    def detector(self, detector_id):
-        self._logger.debug("Received config generate request for: {}".format(detector_id))
-        if detector_id not in self._config['detectors']:
+    def detector(self, detector_id, detector_type):
+        self._logger.debug("Received config generate request for: {} ({})".format(detector_id,detector_type.lower()))
+        if detector_id not in self._config['detectors'][detector_type]:
             raise KeyError("No configuration defined for detector '{}'".format(detector_id))
         # Assemble the config dict
         config_dict = {
             'detector_id': detector_id,
-            'name': self._config['detectors'][detector_id]['name'],
-            'type': self._config['detectors'][detector_id]['type'].lower(),
-            'sensor_type': self._config['detectors'][detector_id]['sensor']['type'],
-            'sensor_settings': self._config['detectors'][detector_id]['sensor'],
+            'name': self._config['detectors'][detector_type][detector_id]['name'],
+            'sensor_type': self._config['detectors'][detector_type][detector_id]['sensor']['type'],
+            'sensor_settings': self._config['detectors'][detector_type][detector_id]['sensor'],
             'log_level': self.get_loglevel(detector_id, mod_type='detector')
         }
 
@@ -392,13 +391,14 @@ class CBConfig:
         del config_dict['sensor_settings']['type']
 
         # Optional parameters if included.
-        if config_dict['type'] == 'range':
+        if detector_type == 'longitudinal':
             try:
-                config_dict['error_margin'] = self._config['detectors'][detector_id]['error_margin']
+                config_dict['error_margin'] = self._config['detectors'][detector_type][detector_id]['error_margin']
             except KeyError:
                 config_dict['error_margin'] = Quantity("0 cm")
-        elif config_dict['type'] == 'lateral':
-            pass
+        elif detector_type == 'lateral':
+            pass # Currently no optional lateral parameters. Stud for the future.
+
 
         self._logger.debug("Returning config: {}".format(config_dict))
         return config_dict
@@ -477,8 +477,12 @@ class CBConfig:
         return self._config['bays'].keys()
 
     @property
-    def detector_list(self):
-        return self._config['detectors'].keys()
+    def detectors_longitudinal(self):
+        return self._config['detectors']['longitudinal'].keys()
+
+    @property
+    def detectors_lateral(self):
+        return self._config['detectors']['lateral'].keys()
 
     @property
     def trigger_list(self):

@@ -81,7 +81,7 @@ class CBCore:
         self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'Online'})
 
         self._logger.debug("Creating detectors...")
-        # Create the detectors. This is complex enough it gets its own method.
+        # Create the detectors.
         self._detectors = self._setup_detectors()
         self._logger.debug("Have detectors: {}".format(self._detectors))
 
@@ -295,17 +295,19 @@ class CBCore:
     # Method to set up the detectors based on the configuration.
     def _setup_detectors(self):
         return_dict = {}
-        for detector_id in self._cbconfig.detector_list:
-            self._logger.info("Creating detector: {}".format(detector_id))
-            detector_config = self._cbconfig.detector(detector_id)
-            if detector_config['type'] == 'range':
-                self._logger.debug("Setting up Range detector with settings: {}".format(detector_config))
-                del(detector_config['type'])
-                return_dict[detector_id] = CobraBay.detectors.Range(**detector_config)
-            elif detector_config['type'] == 'lateral':
-                self._logger.debug("Setting up Lateral detector with settings: {}".format(detector_config))
-                del (detector_config['type'])
-                return_dict[detector_id] = CobraBay.detectors.Lateral(**detector_config)
+        # Create detectors with the right type.
+        self._logger.debug("Creating longitudinal detectors.")
+        for detector_id in self._cbconfig.detectors_longitudinal:
+            self._logger.info("Creating longitudinal detector: {}".format(detector_id))
+            detector_config = self._cbconfig.detector(detector_id,'longitudinal')
+            self._logger.debug("Using settings: {}".format(detector_config))
+            return_dict[detector_id] = CobraBay.detectors.Range(**detector_config)
+
+        for detector_id in self._cbconfig.detectors_lateral:
+            self._logger.info("Creating lateral detector: {}".format(detector_id))
+            detector_config = self._cbconfig.detector(detector_id,'lateral')
+            self._logger.debug("Using settings: {}".format(detector_config))
+            return_dict[detector_id] = CobraBay.detectors.Lateral(**detector_config)
         self._logger.debug("VL53LX instances: {}".format(len(CobraBay.sensors.CB_VL53L1X.instances)))
         return return_dict
 

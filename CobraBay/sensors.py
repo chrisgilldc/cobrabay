@@ -17,6 +17,7 @@ from .tfmp import TFMP
 from pathlib import Path
 from pprint import pformat
 import sys
+import CobraBay.const
 import CobraBay.exceptions
 import CobraBay.util
 
@@ -129,10 +130,7 @@ class BaseSensor:
 
 class I2CSensor(BaseSensor):
     def __init__(self, i2c_bus, i2c_address, logger, log_level='WARNING'):
-        try:
-            super().__init__(logger, log_level)
-        except ValueError:
-            raise
+        super().__init__(logger, log_level)
         # Check for the Base I2C Sensors
         # Create a logger
         self._name = "{}-{}-{}".format(type(self).__name__, i2c_bus, hex(i2c_address))
@@ -358,7 +356,7 @@ class CB_VL53L1X(I2CSensor):
         if self._enable_attempt_counter >= 3:
             self._logger.error("Could not enable sensor after {} attempts. Marking as faulty.".format(self._enable_attempt_counter))
             self._fault = True
-            raise CobraBay.exceptions.SensorNotEnabledException
+            raise CobraBay.exceptions.SensorException
         else:
             self._logger.warning("Could not enable sensor on attempt {}. Disabling and retrying.".format(self._enable_attempt_counter))
             self._enable_attempt_counter += 1
@@ -537,32 +535,23 @@ class CB_VL53L1X(I2CSensor):
         if self._fault is True:
             # Fault while enabling.
             self._logger.debug("Fault found.")
-            return 'fault'
+            return CobraBay.const.SENSOR_STATE_FAULT
         elif self.enable_pin.value is True:
             self._logger.debug("Enable pin is on.")
             if self._ranging is True:
-                self._logger.debug("Previous reading: {} ({})".format(self._previous_reading, type(self._previous_reading)))
-                if isinstance(self._previous_reading,Quantity):
-                    return 'ranging'
-                elif isinstance(self._previous_reading,CobraBay.exceptions.SensorWarning):
-                    # Pass up any warning state to be evaluated.
-                    return self._previous_reading
-                else:
-                    self._logger.debug("No match, will return 'unknown error'")
-                    return 'unknown error'
+                self._logger.debug("Sensor has been recorded as ranging.")
+                return CobraBay.const.SENSOR_STATE_RANGING
             else:
                 self._logger.debug("Enabled, not ranging.")
-                return 'enabled'
+                return CobraBay.const.SENSOR_STATE_ENABLED
         elif self.enable_pin.value is False:
                 self._logger.debug("Enable pin is off.")
-                return 'disabled'
+                return CobraBay.const.SENSOR_STATE_DISABLED
         else:
-            self._logger.debug("Unknown fault state.")
-            return 'fault'
-
+            raise CobraBay.exceptions.SensorException
 
 class TFMini(SerialSensor):
-    def __init__(self, port, baud, logger, log_level="WARNING"):
+    def __init__(self, port, baud, logger, log_level):
         try:
             super().__init__(port=port, baud=baud, logger=logger, log_level=log_level)
         except ValueError:
@@ -576,10 +565,7 @@ class TFMini(SerialSensor):
         # Create the sensor object.
         self._logger.debug("Creating TFMini object on serial port {}".format(self.serial_port))
         self._sensor_obj = TFMP(self.serial_port, self.baud_rate)
-        try:
-            self._logger.debug("Test reading: {}".format(self.range))
-        except CobraBay.exceptions.SensorWarning as e:
-            self._logger.warning("During sensor setup, received abnormal reading '{}'.".format(e))
+        self._logger.debug("Test reading: {}".format(self.range))
 
     # TFMini is always ranging, so enable here is just a dummy method.
     @staticmethod
@@ -602,9 +588,9 @@ class TFMini(SerialSensor):
             self._previous_timestamp = monotonic()
             return self._previous_reading
         elif reading.status == "Weak":
-            raise CobraBay.exceptions.SensorWeakWarning
+            return CobraBay.const.SENSOR_VALUE_NOOBJ
         elif reading.status == "Flood":
-            raise CobraBay.exceptions.SensorFloodWarning
+            raise CobraBay.const.SENSOR_VALUE_FLOOD
         else:
             raise CobraBay.exceptions.SensorException
 
@@ -633,10 +619,16 @@ class TFMini(SerialSensor):
         :return: str
         """
         reading = self._sensor_obj.data()
-        if reading.status != 'OK':
-            return reading.status.lower()
+        if reading.status == 'OK':
+            return CobraBay.const.SENSOR_VALUE_OK
+        elif reading.status == 'Weak':
+            return CobraBay.const.SENSOR_VALUE_WEAK
+        elif reading.status == 'Flood':
+            return CobraBay.const.SENSOR_VALUE_FLOOD
+        elif reading.status == 'Strong':
+            return CobraBay.const.SENSOR_VALUE_STRONG
         else:
-            return 'ranging'
+            raise CobraBay.exceptions.SensorException
 
     @property
     def status(self):
@@ -648,7 +640,7 @@ class TFMini(SerialSensor):
         :return:
         """
         # The TFMini always ranges, so we can just return ranging.
-        return "ranging"
+        return CobraBay.const.SENSOR_STATE_RANGING
 
     @status.setter
     def status(self, target_status):
@@ -725,7 +717,7 @@ class FileSensor(BaseSensor):
     @property
     def state(self):
         # IF the file loaded, we're ranging, by definition.
-        return 'ranging'
+        return CobraBay.const.SENSOR_VALUE_RANGING
 
     def _start_ranging(self):
         self._logger.debug("Starting ranging.")
