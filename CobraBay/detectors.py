@@ -4,7 +4,7 @@
 import pint.errors
 
 from .sensors import CB_VL53L1X, TFMini, FileSensor, I2CSensor, SerialSensor
-# Import all the CobraBay Exceptions.
+import CobraBay.const
 import CobraBay.exceptions
 from pint import UnitRegistry, Quantity, DimensionalityError
 from time import monotonic_ns
@@ -73,13 +73,13 @@ def read_if_stale(func):
         read_sensor = False  # Assume we won't read the sensor.
         if self._sensor_obj.status != 'ranging':
             # If sensor object isn't ranging, return immediately with a not_ranging result.
-            return 'not_ranging'
+            return CobraBay.const.STATE_NOTRANGING
         else:
             if len(self._history) > 0:
                 # Time difference between now and the most recent read.
                 time_delta = monotonic_ns() - self._history[0][1]
                 # Assume we can read the sensor every other pass of its set timing.
-                if time_delta > self._sensor_obj.timing_budget.to('ns').magnitude * 2:
+                if time_delta > self._sensor_obj.timing_budget.to('ns').magnitude * 1.1:
                     read_sensor = True
             else:
                 read_sensor = True  ## Must read the sensor, there isn't any history. This should only happen on startup.
@@ -89,19 +89,14 @@ def read_if_stale(func):
             try:
                 value = self._sensor_obj.range
                 self._logger.debug("Triggered sensor reading. Got: {} ({})".format(value, type(value)))
-            except CobraBay.exceptions.SensorWarning as e:
-                # SensorWarnings we can save and process because those may have meaning.
-                value = e
-                self._logger.debug("Sensor reading received Warning exception: '{}'".format(type(value)))
+            except CobraBay.exceptions.SensorException as e:
+                raise
             except BaseException:
                 # Any other exception, raise immediately.
                 raise
             # Add value to the history and truncate history to ten records.
             self._history.insert(0, (value, monotonic_ns()))
             self._history = self._history[:10]
-            # If a SensorWarning was received, raise it.
-            # if isinstance(value, CobraBay.exceptions.SensorWarning):
-            #     raise value
         # Call the wrapped function.
         return func(self)
     return wrapper
@@ -341,33 +336,21 @@ class Range(SingleDetector):
                 qv = 'no_object'
             # Now consider the adjusted values.
             elif current_value < 0 and abs(current_value) > self.spread_park:
-                qv = 'back_up'
+                return CobraBay.const.DETECTOR_QUALITY_BACKUP
             elif abs(current_value) < self.spread_park:
-                qv = 'park'
+                return CobraBay.const.DETECTOR_QUALITY_PARK
             elif current_value <= self._dist_crit:
-                qv = 'final'
+                return CobraBay.const.DETECTOR_QUALITY_FINAL
             elif current_value <= self._dist_warn:
-                qv = 'base'
+                return CobraBay.const.DETECTOR_QUALITY_BASE
             else:
-                qv = 'ok'
-        elif isinstance(current_value, CobraBay.exceptions.SensorWarning):
-            # Some type of manageable state.
-            if isinstance(current_value, CobraBay.exceptions.SensorWeakWarning):
-                # A 'weak' response almost certainly means the door is open.
-                qv = 'door_open'
-            elif isinstance(current_value, CobraBay.exceptions.SensorFloodWarning):
-                qv = 'flooded'
-            elif isinstance(current_value, CobraBay.exceptions.SensorNoReadingWarning):
-                qv = 'no_reading'
-            else:
-                qv = 'unknown_warning'
-        elif isinstance(current_value, CobraBay.exceptions.SensorException):
-                qv = 'failure'
+                return CobraBay.const.DETECTOR_QUALITY_OK
+        elif current_value == CobraBay.const.SENSOR_VALUE_WEAK:
+            return CobraBay.const.DETECTOR_QUALITY_DOOROPEN
+        elif current_value in (CobraBay.const.SENSOR_VALUE_FLOOD, CobraBay.const.SENSOR_VALUE_STRONG):
+            return CobraBay.const.DETECTOR_NOREADING
         else:
-                qv = 'unknown_error'
-
-        self._logger.debug("Quality: {}".format(qv))
-        return(qv)
+            raise CobraBay.exceptions.SensorException
 
     # Determine the rate of motion being measured by the detector.
     @property
@@ -415,11 +398,13 @@ class Range(SingleDetector):
     def vector(self):
 
         # Grab the movement value.
-        try:
-            movement = self._movement
-        except CobraBay.exceptions.SensorException:
+        movement = self._movement
+        # Movement should trigger a read and get a new state value. If that returns NOTRANGING, we can't
+        # process the vector and both speed and direction should be flagged unknown.
+        if movement == CobraBay.const.STATE_NOTRANGING:
             return {"speed": "unknown", "direction": "unknown"}
         # Determine a direction.
+        self._logger.debug("Have movement value: {}".format(movement))
         if movement == 'unknown':
             # If movement couldn't be determined, we also can't determine vector, so this is unknown.
             return {"speed": "unknown", "direction": "unknown"}
@@ -532,15 +517,12 @@ class Lateral(SingleDetector):
     def value_raw(self):
         if isinstance(self._history[0][0], Quantity):
             return self._history[0][0]
-        elif isinstance(self._history[0][0], CobraBay.exceptions.SensorWarning):
-            # Any Sensor *Warning* we can pass on, because that may have meaning.
-            return self._history[0][0]
         elif isinstance(self._history[0][0], CobraBay.exceptions.SensorException):
             # If the sensor has already errored, raise that.
             raise self._history[0][0]
         else:
             # Anything else, treat it as the sensor returning no reading.
-            raise CobraBay.exceptions.SensorNoReadingWarning
+            return CobraBay.const.DETECTOR_NOREADING
 
     @property
     @read_if_stale

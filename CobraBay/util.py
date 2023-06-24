@@ -66,16 +66,6 @@ class Convertomatic:
         elif isinstance(input_value, bool):
             result = str(input_value).lower()
         # Convert sensor warning exceptions....
-        elif isinstance(input_value, CobraBay.exceptions.SensorNotRangingWarning):
-            result = "not_ranging"
-        elif isinstance(input_value, CobraBay.exceptions.SensorFloodWarning):
-            result = "flood"
-        elif isinstance(input_value, CobraBay.exceptions.SensorNoReadingWarning):
-            result = "no_reading"
-        elif isinstance(input_value, CobraBay.exceptions.SensorWeakWarning):
-            result = "weak"
-        elif isinstance(input_value, CobraBay.exceptions.SensorWarning):
-            result = "unknown_sensor_warning"
         elif isinstance(input_value, CobraBay.exceptions.SensorException):
             result = "sensor_error"
         elif isinstance(input_value, BaseException):
@@ -126,6 +116,11 @@ def mqtt_message_search(input_value, element, value, extract=None):
                 return_values.append(matched_message[extract])
             return return_values
 
+def aw9523_reset(aw9523_obj):
+    for pin in range(15):
+        pin_obj = aw9523_obj.get_pin(pin)
+        pin_obj.switch_to_output()
+        pin_obj.value = False
 
 def scan_i2c():
     """

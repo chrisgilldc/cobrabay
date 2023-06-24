@@ -4,29 +4,9 @@
 
 import logging
 from logging.handlers import WatchedFileHandler
-# from time import monotonic
 import atexit
-# import busio
-# import board
-# import os
-# import sys
-# import psutil
 from pprint import pformat
-
 import CobraBay
-
-# Import the other CobraBay classes
-#from CobraBay.bay import Bay
-#from CobraBay.config import CBConfig
-#from CobraBay.display import Display
-# from CobraBay.detectors import Lateral, Range
-# #from CobraBay.network import CBNetwork
-# from CobraBay.sensors import CB_VL53L1X
-# # from CobraBay.systemhw import CBPiStatus
-# from . import triggers
-# from CobraBay.version import __version__
-import sys
-
 
 class CBCore:
     def __init__(self, config_obj):
@@ -348,10 +328,10 @@ class CBCore:
                         topic = trigger_config['topic'],
                         bay_obj = self._bays[trigger_config['bay_id']],
                         log_level = trigger_config['log_level'])
-                elif trigger_config['type'] == 'range':
-                    # Range triggers also need the detector object.
-                    return_dict[trigger_id] = CobraBay.triggers.Range(trigger_config, bay_obj,
-                                                             self._detectors[trigger_config['detector']])
+                # elif trigger_config['type'] == 'range':
+                #     # Range triggers also need the detector object.
+                #     return_dict[trigger_id] = CobraBay.triggers.Range(trigger_config, bay_obj,
+                #                                              self._detectors[trigger_config['detector']])
                 else:
                     # This case should be trapped by the config processor, but just in case, if trigger type
                     # is unknown, trap and ignore.

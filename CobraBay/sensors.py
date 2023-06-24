@@ -129,6 +129,7 @@ class BaseSensor:
         raise NotImplementedError("Stop Ranging method must be implemented by core sensor class.")
 
 class I2CSensor(BaseSensor):
+    aw9523_boards = {}
     def __init__(self, i2c_bus, i2c_address, logger, log_level='WARNING'):
         super().__init__(logger, log_level)
         # Check for the Base I2C Sensors
@@ -417,7 +418,7 @@ class CB_VL53L1X(I2CSensor):
     def range(self):
         self._logger.debug("Range requsted. Sensor state is: {}".format(self.state))
         if self.state != 'ranging':
-            raise CobraBay.exceptions.SensorNotRangingWarning
+            return CobraBay.const.STATE_NOTRANGING
         elif monotonic() - self._previous_timestamp < 0.2:
             # Make sure to pace the readings properly, so we're not over-running the native readings.
             # If a request comes in before the sleep time (200ms), return the previous reading.
@@ -513,14 +514,31 @@ class CB_VL53L1X(I2CSensor):
             else:
                 self._enable_pin = enable_pin_obj
         else:
-            # Otherwise, treat enable_board as the address of an AW9523.
-            # Note that reset=False is very import, otherwise creating this object will reset all other pins to off!
-            try:
-                aw = AW9523(self._i2c, self.enable_board, reset=False)
-            except:
-                raise
-            # Get the pin from the AW9523.
-            self._enable_pin = aw.get_pin(enable_pin)
+            # Check to see if the AW9523 object has already been created.
+            # Use the key format "bus-addr"
+            awkey = str(self.i2c_bus) + "-" + str(self.enable_board)
+            if awkey not in self.__class__.aw9523_boards.keys():
+                self._logger.info("Etablishing access to AW9523 board on bus {}, address {}".format(self.i2c_bus, self._i2c_address))
+                # Need to create the board.
+                try:
+                    self.__class__.aw9523_boards[awkey] = AW9523(self._i2c, self.enable_board, reset=True)
+                except BaseException as e:
+                    self._logger.critical("Could not access AW9523 on bus {}, address {}".format(self.i2c_bus, self.i2c_address))
+                    raise e
+                else:
+                    CobraBay.util.aw9523_reset(self.__class__.aw9523_boards[awkey])
+            # Can now create the pin
+            self._enable_pin = self.__class__.aw9523_boards[awkey].get_pin(enable_pin)
+
+            # # Otherwise, treat enable_board as the address of an AW9523.
+            # # Note that reset=False is very import, otherwise creating this object will reset all other pins to off!
+            # try:
+            #     aw = AW9523(self._i2c, self.enable_board, reset=False)
+            # except BaseException as e:
+            #     self._logger.critical("Could not access AW9523 board.")
+            #     raise e
+            # # Get the pin from the AW9523.
+            #self._enable_pin = aw.get_pin(enable_pin)
         # Make sure this is an 'output' type pin.
         self._enable_pin.switch_to_output()
 
@@ -535,18 +553,18 @@ class CB_VL53L1X(I2CSensor):
         if self._fault is True:
             # Fault while enabling.
             self._logger.debug("Fault found.")
-            return CobraBay.const.SENSOR_STATE_FAULT
+            return CobraBay.const.STATE_FAULT
         elif self.enable_pin.value is True:
             self._logger.debug("Enable pin is on.")
             if self._ranging is True:
                 self._logger.debug("Sensor has been recorded as ranging.")
-                return CobraBay.const.SENSOR_STATE_RANGING
+                return CobraBay.const.STATE_RANGING
             else:
                 self._logger.debug("Enabled, not ranging.")
-                return CobraBay.const.SENSOR_STATE_ENABLED
+                return CobraBay.const.STATE_ENABLED
         elif self.enable_pin.value is False:
                 self._logger.debug("Enable pin is off.")
-                return CobraBay.const.SENSOR_STATE_DISABLED
+                return CobraBay.const.STATE_DISABLED
         else:
             raise CobraBay.exceptions.SensorException
 
@@ -588,7 +606,7 @@ class TFMini(SerialSensor):
             self._previous_timestamp = monotonic()
             return self._previous_reading
         elif reading.status == "Weak":
-            return CobraBay.const.SENSOR_VALUE_NOOBJ
+            return CobraBay.const.SENSOR_VALUE_WEAK
         elif reading.status == "Flood":
             raise CobraBay.const.SENSOR_VALUE_FLOOD
         else:
@@ -640,7 +658,7 @@ class TFMini(SerialSensor):
         :return:
         """
         # The TFMini always ranges, so we can just return ranging.
-        return CobraBay.const.SENSOR_STATE_RANGING
+        return CobraBay.const.STATE_RANGING
 
     @status.setter
     def status(self, target_status):
