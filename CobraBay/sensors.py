@@ -466,13 +466,11 @@ class CB_VL53L1X(I2CSensor):
             else:
                 # A "none" means the sensor had no response.
                 if reading is None:
-                    self._previous_reading = CobraBay.exceptions.SensorNoReadingWarning
-                    self._previous_timestamp = monotonic()
-                    raise CobraBay.exceptions.SensorNoReadingWarning
+                    self._previous_reading = CobraBay.const.SENSOR_VALUE_WEAK
                 else:
                     self._previous_reading = Quantity(reading, 'cm')
-                    self._previous_timestamp = monotonic()
-                    return self._previous_reading
+                self._previous_timestamp = monotonic()
+                return self._previous_reading
 
     # Method to find out if an address is on the I2C bus.
     def _addr_on_bus(self, i2c_address):
