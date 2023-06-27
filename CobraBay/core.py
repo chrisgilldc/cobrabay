@@ -7,6 +7,7 @@ from logging.handlers import WatchedFileHandler
 import atexit
 from pprint import pformat
 import CobraBay
+import sys
 
 class CBCore:
     def __init__(self, config_obj):
@@ -173,25 +174,24 @@ class CBCore:
 
     # Main operating loop.
     def run(self):
-        # This loop runs while the system is idle. Process commands, increment various timers.
-        while True:
-            # Do a network poll, this method handles all the default outbound messages and incoming status.
-            network_data = self._network_handler()
-            # Update the network components of the system state.
-            system_status = {
-                'network': network_data['online'],
-                'mqtt': network_data['mqtt_status'] }
+        try:
+            # This loop runs while the system is idle. Process commands, increment various timers.
+            while True:
+                # Do a network poll, this method handles all the default outbound messages and incoming status.
+                network_data = self._network_handler()
+                # Update the network components of the system state.
+                system_status = {
+                    'network': network_data['online'],
+                    'mqtt': network_data['mqtt_status'] }
 
-            # Check triggers and execute actions if needed.
-            self._trigger_check()
-            self._logger.debug("Returned to main loop from trigger check.")
+                # Check triggers and execute actions if needed.
+                self._trigger_check()
 
-            self._display.show(system_status, "clock")
-            # # Push out the image to MQTT.
-            # self._outbound_messages.append(
-            #     {'topic_type': 'system',
-            #      'topic': 'display',
-            #      'message': self._display.current, 'repeat': True})
+                self._display.show(system_status, "clock")
+        except BaseException as e:
+            self._logger.critical("Unexpected exception encountered!")
+            self._logger.exception(e)
+            sys.exit(1)
 
     # Start sensors and display to guide parking.
     def _motion(self, bay_id, cmd):
