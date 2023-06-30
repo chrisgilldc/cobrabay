@@ -516,12 +516,14 @@ class CB_VL53L1X(I2CSensor):
             # Use the key format "bus-addr"
             awkey = str(self.i2c_bus) + "-" + str(self.enable_board)
             if awkey not in self.__class__.aw9523_boards.keys():
-                self._logger.info("Etablishing access to AW9523 board on bus {}, address {}".format(self.i2c_bus, self._i2c_address))
+                self._logger.info("Establishing access to AW9523 board on bus {}, address 0x{:x}".
+                                  format(self.i2c_bus, self.enable_board))
                 # Need to create the board.
                 try:
                     self.__class__.aw9523_boards[awkey] = AW9523(self._i2c, self.enable_board, reset=True)
                 except BaseException as e:
-                    self._logger.critical("Could not access AW9523 on bus {}, address {}".format(self.i2c_bus, self.i2c_address))
+                    self._logger.critical("Could not access AW9523 on bus {}, address 0x{:x}".
+                                          format(self.i2c_bus, self.enable_board))
                     raise e
                 else:
                     CobraBay.util.aw9523_reset(self.__class__.aw9523_boards[awkey])

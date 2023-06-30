@@ -271,6 +271,7 @@ class SingleDetector(Detector):
         :return:
         """
         self._logger.debug("Creating adjusted value from latest value: {}".format(self.value_raw))
+        self._logger.debug("Defined offset is: {}".format(self.offset))
         if isinstance(self.value_raw, Quantity):
             return self.value_raw - self.offset
         else:
@@ -595,11 +596,13 @@ class Lateral(SingleDetector):
 
     @property
     def offset(self):
+        self._logger.debug("Returning offset: {}".format(super().offset))
         return super().offset
 
     @offset.setter
     @check_ready
     def offset(self, m_input):
+        self._logger.debug("Setting offset to: {}".format(m_input))
         super(Lateral, self.__class__).offset.fset(self, m_input)
 
     @property

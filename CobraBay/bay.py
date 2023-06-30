@@ -331,6 +331,9 @@ class CBBay:
         :return: float
         '''
         # If it's not a Quantity, just return zero.
+        self._logger.debug("Calculating range percentage")
+        self._logger.debug("Range value: {} ({})".format(self.range.value,type(self.range.value)))
+        self._logger.debug("Adjusted depth: {} ({})".format(self._adjusted_depth,type(self._adjusted_depth)))
         if isinstance(self.range.value, Quantity):
             range_pct = self.range.value.to('cm') / self._adjusted_depth.to('cm')
             # Singe this is dimensionless, just take the value and make it a Python scalar.
@@ -528,11 +531,11 @@ class CBBay:
         # For each detector we use, apply its properties.
         self._logger.debug("Detectors: {}".format(self._detectors.keys()))
         for dc in self._detector_settings.keys():
-            self._logger.debug("Configuring detector {}".format(dc))
+            self._logger.info("Configuring detector {}".format(dc))
             self._logger.debug("Settings: {}".format(self._detector_settings[dc]))
             # Apply all the bay-specific settings to the detector. Usually these are defined in the detector-settings.
             for item in self._detector_settings[dc]:
-                self._logger.debug(
+                self._logger.info(
                     "Setting property {} to {}".format(item, self._detector_settings[dc][item]))
                 setattr(self._detectors[dc], item, self._detector_settings[dc][item])
             # Bay depth is a bay global. For range sensors, this also needs to get applied.
