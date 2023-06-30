@@ -53,9 +53,9 @@ class CBDisplay:
         self._layers['approach'] = self._placard('APPROACH','blue')
         self._layers['error'] = self._placard('ERROR','red')
 
-    # Have a bay register. This creates layers for that bay's lateral.
+    # Have a bay register. This creates layers for the bay in advance so they can be composited faster.
     def register_bay(self, display_reg_info):
-        bay_id = display_reg_info['bay_id']
+        bay_id = display_reg_info['id']
         self._logger.debug("Registering bay ID {} to display".format(bay_id))
         self._logger.debug("Got registration input: {}".format(display_reg_info))
         # Initialize a dict for this bay_id.
@@ -75,9 +75,9 @@ class CBDisplay:
                            format(avail_height,len(display_reg_info['lateral_order']),pixel_lengths))
 
         status_lookup = (
-            ['OK',(0,128,0,255)],
-            ['Warning',(255,255,0,255)],
-            ['Critical',(255,0,0,255)]
+            ['ok',(0,128,0,255)],
+            ['warning',(255,255,0,255)],
+            ['critical',(255,0,0,255)]
         )
 
         i = 0
@@ -89,22 +89,42 @@ class CBDisplay:
             self._layers[bay_id][lateral] = {}
             for side in ('L','R'):
                 self._layers[bay_id][lateral][side] = {}
+                if side == 'L':
+                    # line_w = 5
+                    line_w = 0
+                elif side == 'R':
+                    # line_w = w - 2  # -2, one because of the border, one because it's 0 indexed.
+                    line_w = w - 3
+                else:
+                    raise ValueError("Not a valid side option, this should never happen!")
+
+                # Make an image for the 'fault' status.
+                img = Image.new('RGBA', (w, h), (0,0,0,0))
+                draw = ImageDraw.Draw(img)
+
+                j = 0
+                while j <= pixel_lengths[i]:
+                    draw.line([
+                        (line_w, accumulated_height + j),(line_w + 2, accumulated_height + j)
+                    ],fill=(255,0,0,255),width=1)
+                    j += 2
+
+                # Save
+                self._layers[bay_id][lateral][side]['fault'] = img
+                del(draw)
+                del(img)
+
                 for status in status_lookup:
                     self._logger.debug("Creating layer for side {}, status {} with color {}.".format(side, status[0], status[1]))
                     # Make the image.
                     img = Image.new('RGBA', (w, h), (0,0,0,0))
                     draw = ImageDraw.Draw(img)
-                    # Move the width depending on which side we're on.
-                    if side == 'L':
-                        # line_w = 5
-                        line_w = 0
-                    elif side == 'R':
-                        # line_w = w - 2  # -2, one because of the border, one because it's 0 indexed.
-                        line_w = w - 3
-                    else:
-                        raise ValueError("Not a valid side option, this should never happen!")
 
-                    draw.rectangle([(line_w,1 + accumulated_height),(line_w+2,1 + accumulated_height + pixel_lengths[i])],
+                    draw.rectangle(
+                        [
+                            (line_w,1 + accumulated_height),
+                            (line_w+2,1 + accumulated_height + pixel_lengths[i])
+                        ],
                         fill=status[1],width=1)
                     # Put this in the right place in the lookup.
                     self._layers[bay_id][lateral][side][status[0]] = img
@@ -112,6 +132,9 @@ class CBDisplay:
                     # img.save("/tmp/CobraBay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
                     del(draw)
                     del(img)
+
+
+
             # Now add the height of this bar to the accumulated height, to get the correct start for the next time.
             accumulated_height += pixel_lengths[i]
             # Increment to the next zone.
@@ -150,8 +173,14 @@ class CBDisplay:
         self._output_image(img)
 
     # Specific displayer for docking.
-    def show_motion(self, direction, display_data):
-        self._logger.debug("Show Dock received data: {}".format(display_data))
+    def show_motion(self, direction, bay_obj):
+        self._logger.debug("Show Dock received bay '{}'".format(bay_obj.name))
+
+        # Don't do motion display if the bay isn't in a motion state.
+        if bay_obj.state not in ('docking','undocking'):
+            self._logger.error("Asked to show motion for bay that isn't performing a motion. Will not do!")
+            return
+
         # For easy reference.
         w = self._settings['matrix_width']
         h = self._settings['matrix_height']
@@ -159,34 +188,43 @@ class CBDisplay:
         final_image = Image.new("RGBA", (w, h), (0,0,0,255))
         ## Center area, the range number.
         range_layer = self._placard_range(
-            display_data['range'],
-            display_data['range_quality'],
-            display_data['bay_state']
+            bay_obj.range.value,
+            bay_obj.range.quality,
+            bay_obj.state
         )
         final_image = Image.alpha_composite(final_image, range_layer)
 
         ## Bottom strobe box.
-        final_image = Image.alpha_composite(final_image, self._strober(display_data))
+        final_image = Image.alpha_composite(final_image,
+                                            self._strobe(
+                                                range_quality=bay_obj.range.quality,
+                                                range_pct=bay_obj.range_pct
+                                            ))
 
-        # IF lateral data is reported, show it.
-        self._logger.debug("Data has lateral entries: {}".format(len(display_data['lateral'])))
-        if len(display_data['lateral']) > 0:
-            # final_image = Image.alpha_composite(final_image, self._layers['frame_lateral'])
-            for reading in display_data['lateral']:
-                if reading['quality'] in ('OK','Warning', 'Critical'):
-                    self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(reading['name'], reading['side'], reading['quality']))
-                    selected_layer = self._layers[display_data['bay_id']][reading['name']][reading['side']][reading['quality']]
-                    final_image = Image.alpha_composite(final_image, selected_layer)
+        for lateral_detector in bay_obj.lateral_sorted:
+            detector = bay_obj.detectors[lateral_detector]
+            if detector.quality in ('ok','warning','critical'):
+                self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(detector.name, detector.side, detector.quality))
+                selected_layer = self._layers[bay_obj.id][detector.id][detector.side][detector.quality]
+                final_image = Image.alpha_composite(final_image, selected_layer)
         self._output_image(final_image)
 
-    def _strober(self, display_data):
+    def _strobe(self, range_quality, range_pct):
+        '''
+        Construct a strober for the display.
+
+        :param range_quality: Quality value of the range detector.
+        :type range_quality: str
+        :param range_pct: Percentage of distance from garage door to the parking point.
+        :return:
+        '''
         w = self._settings['matrix_width']
         h = self._settings['matrix_height']
         # Set up a base image to draw on.
         img = Image.new("RGBA", (w, h), (0,0,0,0))
         draw = ImageDraw.Draw(img)
         # Back up and emergency distances, we flash the whole bar.
-        if display_data['range_quality'] in ('Back up','Emergency!'):
+        if range_quality in ('back_up','emergency'):
             if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
                 try:
                     if self._running['strobe_color'] == 'red':
@@ -199,17 +237,17 @@ class CBDisplay:
             # draw.line([(1,h-2),(w-2,h-2)], fill=self._running['strobe_color'])
             draw.rectangle([(1,h-3),(w-2,h-1)], fill=self._running['strobe_color'])
         else:
-            # If we're beyond range, always have the blockers be zero.
-            if display_data['range_quality'] == 'Back up':
+            # If we need to back up, have blockers be zero
+            if range_quality == 'back_up':
                 blocker_width = 0
             else:
                 # Calculate where the blockers need to be.
                 available_width = (w-2)/2
-                blocker_width = math.floor(available_width * (1-display_data['range_pct']))
+                blocker_width = math.floor(available_width * (1-range_pct))
             self._logger.debug("Strober blocker width: {}".format(blocker_width))
             # Because of rounding, we can wind up with an entirely closed bar if we're not fully parked.
             # Thus, fudge the space unless we're okay.
-            if display_data['range_quality'] != 'ok' and blocker_width > 28:
+            if range_quality != 'ok' and blocker_width > 28:
                 blocker_width = 28
             # Draw the blockers.
             #draw.line([(1, h-2),(blocker_width+1, h-2)], fill="white")
@@ -258,7 +296,7 @@ class CBDisplay:
         draw.rectangle([(w-3, 0), (w-1, h-5)], width=1)
         return img
 
-    def _icon_network(self, net_status, mqtt_status, x_input=None, y_input=None):
+    def _icon_network(self, net_status=False, mqtt_status=False, x_input=None, y_input=None):
         # determine the network status color based on combined network and MQTT status.
         if net_status is False:
             net_color = 'red'
@@ -266,7 +304,7 @@ class CBDisplay:
         elif net_status is True:
             net_color = 'green'
             if mqtt_status is False:
-                net_color = 'red'
+                mqtt_color = 'red'
             elif mqtt_status is True:
                 mqtt_color = 'green'
             else:
@@ -294,18 +332,18 @@ class CBDisplay:
     # Make a placard to show range.
     def _placard_range(self, input_range, range_quality, bay_state):
         self._logger.debug("Creating range placard with range {} and quality {}".format(input_range, range_quality))
-        range_string = "RANGE"
+        range_string = "NOVAL"
         # Some range quality statuses need a text output, not a distance.
-        if range_quality == 'Back up':
+        if range_quality == 'back_up':
             range_string = "BACK UP"
-        elif range_quality == 'Door open':
-            if bay_state == 'Docking':
+        elif range_quality == 'door_open':
+            if bay_state == 'docking':
                 range_string = "APPROACH"
-            elif bay_state == 'Undocking':
+            elif bay_state == 'undocking':
                 range_string = "CLEAR!"
         elif input_range == 'Beyond range':
             range_string = "APPROACH"
-        elif self._settings['units'] == 'imperial':
+        elif self._settings['unit_system'] == 'imperial':
             as_inches = input_range.to('in')
             if as_inches.magnitude < 12:
                 range_string = "{}\"".format(round(as_inches.magnitude,1))
@@ -318,11 +356,11 @@ class CBDisplay:
             range_string = "{} m".format(as_meters)
 
         # Determine a color based on quality
-        if range_quality in ('Critical','Back up'):
+        if range_quality in ('critical','back_up'):
             text_color = 'red'
-        elif range_quality == 'Warning':
+        elif range_quality == 'warning':
             text_color = 'yellow'
-        elif range_quality in ('Beyond range', 'Door open'):
+        elif range_quality == 'door_open':
             text_color = 'blue'
         else:
             text_color = 'green'

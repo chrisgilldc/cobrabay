@@ -3,9 +3,9 @@
 ####
 import pint.errors
 
-from .sensors import CB_VL53L1X, TFMini, I2CSensor, SerialSensor
-# Import all the CobraBay Exceptions.
-from .exceptions import CobraBayException, SensorValueException
+from .sensors import CB_VL53L1X, TFMini, FileSensor, I2CSensor, SerialSensor
+import CobraBay.const
+import CobraBay.exceptions
 from pint import UnitRegistry, Quantity, DimensionalityError
 from time import monotonic_ns
 from functools import wraps
@@ -17,17 +17,15 @@ from collections import namedtuple
 def check_ready(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        print("Checking for readiness via function: {}".format(func))
         # Call the function.
         func(self, *args, **kwargs)
         # Now check for readiness and set ready if we are.
-        for setting in self._settings['required']:
-            if self._settings[setting] is None:
+        for setting in self._required:
+            if getattr(self, setting) is None:
                 self._ready = False
                 return
         self._ready = True
         self._when_ready()
-
     return wrapper
 
 
@@ -41,7 +39,6 @@ def only_if_ready(func):
                                "Current settings:\n{}".format(self._settings))
         else:
             return func(self, *args, **kwargs)
-
     return wrapper
 
 
@@ -64,44 +61,49 @@ def use_value_cache(func):
             value = self._sensor_obj.range
         # Send whichever value it is into the function.
         return func(self, value)
-
     return wrapper
 
 
-# This decorator is used for methods that rely on sensor data. If the sensor data is determined to be stale, it will
-# trigger a new sensor read prior to executing the method.
+# Decorator for methods reading the sensor.
+# If it's been too long since the previous sensor check, check it and add it to the history.
+# The wrapped function should use the first element in the history, not the direct reading!
 def read_if_stale(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        read_sensor = False
-        # Assume we shouldn't read the sensor.
-        if len(self._history) > 0:
-            # Time difference between now and the most recent read.
-            time_delta = monotonic_ns() - self._history[0][1]
-            if time_delta > 1000000000:  # 1s is too long, read the sensor.
-                read_sensor = True
-        # If we have no history, ie: at startup, go ahead and read.
+        read_sensor = False  # Assume we won't read the sensor.
+        if self._sensor_obj.status != 'ranging':
+            # If sensor object isn't ranging, return immediately with a not_ranging result.
+            return CobraBay.const.STATE_NOTRANGING
         else:
-            read_sensor = True  ## If there's no history, read the sensor, we must be on startup.
+            if len(self._history) > 0:
+                # Time difference between now and the most recent read.
+                time_delta = monotonic_ns() - self._history[0][1]
+                # Assume we can read the sensor every other pass of its set timing.
+                if time_delta > self._sensor_obj.timing_budget.to('ns').magnitude * 1.1:
+                    read_sensor = True
+            else:
+                read_sensor = True  ## Must read the sensor, there isn't any history. This should only happen on startup.
+
         # If flag is set, read the sensor and put its value into the history.
         if read_sensor:
             try:
                 value = self._sensor_obj.range
-            except BaseException as e:
-                # Save an exception into the history, we'll process this later.
-                value = e
-            self._logger.debug("Triggered sensor reading. Got: {}".format(value))
+                self._logger.debug("Triggered sensor reading. Got: {} ({})".format(value, type(value)))
+            except CobraBay.exceptions.SensorException as e:
+                raise
+            except BaseException:
+                # Any other exception, raise immediately.
+                raise
             # Add value to the history and truncate history to ten records.
             self._history.insert(0, (value, monotonic_ns()))
             self._history = self._history[:10]
         # Call the wrapped function.
         return func(self)
-
     return wrapper
 
 
 class Detector:
-    def __init__(self, detector_id, name, offset="0 cm", log_level="WARNING", **kwargs):
+    def __init__(self, detector_id, name, offset="0 cm", log_level="WARNING"):
         # Save parameters.
         self._detector_id = detector_id
         self._name = name
@@ -145,11 +147,11 @@ class Detector:
 
     @property
     def id(self):
-        return self._settings['id']
+        return self._detector_id
 
     @property
     def name(self):
-        return self._settings['name']
+        return self._name
 
     # Convenience property to let upstream modules check for the detector type. This disconnects
     # from the class name, because in the future we may have multiple kinds of 'range' or 'lateral' detectors.
@@ -173,23 +175,25 @@ class Detector:
     def _when_ready(self):
         pass
 
-
 # Single Detectors add wrappers around a single sensor. Sensor arrays are not currently supported, but may be in the
 # future.
 class SingleDetector(Detector):
-    def __init__(self, sensor_type, sensor_settings, **kwargs):
-        print("Single detector has kwargs: {}".format(kwargs))
-        super().__init__(**kwargs)
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="DEBUG", **kwargs):
+        super().__init__(detector_id=detector_id, name=name, log_level=log_level)
         self._logger.debug("Creating sensor object using options: {}".format(sensor_settings))
         if sensor_type == 'VL53L1X':
-            # Create the sensor object using provided settings.
-            self._sensor_obj = CB_VL53L1X(**sensor_settings)
+            self._logger.debug("Setting up VL53L1X with sensor settings: {}".format(sensor_settings))
+            self._sensor_obj = CB_VL53L1X(**sensor_settings, log_level=log_level)
         elif sensor_type == 'TFMini':
-            print("Setting up TFMini with sensor settings: {}".format(sensor_settings))
-            self._sensor_obj = TFMini(**sensor_settings)
+            self._logger.debug("Setting up TFMini with sensor settings: {}".format(sensor_settings))
+            self._sensor_obj = TFMini(**sensor_settings, log_level=log_level)
+        elif sensor_type == 'FileSensor':
+            self._logger.debug("Setting up FileSensor with sensor settings: {}".format(sensor_settings))
+            self._sensor_obj = FileSensor(**sensor_settings, sensor=detector_id, log_level=log_level)
         else:
             raise ValueError("Detector {} trying to use unknown sensor type {}".format(
                  self._name, sensor_settings))
+        self._status = None
 
     # Allow adjustment of timing.
     def timing(self, timing_input):
@@ -199,28 +203,47 @@ class SingleDetector(Detector):
         mt = timing_input.to('microseconds').magnitude
         self._sensor_obj.measurement_time = mt
 
-    # Called when the system needs to turn this sensor on.
-    def activate(self):
-        self._sensor_obj.start_ranging()
+    # The status of a single detector is definitionally the status of its enwrapped sensor.
+    @property
+    def status(self):
+        return self._sensor_obj.status
 
-    # Called when the system needs to go into idle mode and turn the sensor off.
-    def deactivate(self):
-        print("Calling sensor object's stop_ranging method.")
-        self._sensor_obj.stop_ranging()
+    # Change the status of the detector.
+    @status.setter
+    def status(self, target_status):
+        """
+        :param target_status: Status to set the detector to. One of 'disabled', 'enabled', 'ranging'
+        :type target_status: str
+        :return:
+        """
+        if target_status.lower() not in ('disabled', 'enabled', 'ranging'):
+            raise ValueError("Target status '{}' not valid.".format(target_status))
+        else:
+            self._logger.debug("Target status: {}".format(target_status))
+        if target_status.lower() == self._sensor_obj.status:
+            self._logger.info("Detector already has status '{}'. Nothing to do.".format(self._sensor_obj.status))
+        else:
+            self._logger.debug("Setting sensor object status to '{}'".format(target_status))
+            self._sensor_obj.status = target_status
 
-    # Complete turn the sensor on or off using its enable pin.
-    def enable(self):
-        self._sensor_obj.enable()
+    # Pass through for the operating state of the sensor object.
+    @property
+    def state(self):
+        return self._sensor_obj.state
 
-    def disable(self):
-        self._logger.warning("Setting sensor enable pin to false.")
-        self._sensor_obj.disable()
+    @property
+    def fault(self):
+        """
+        Utility property for determining if the detector is in a fault state. The status and state should always match up,
+        so if they don't, something is wrong. More complex logic to figure out what the fault is and what action to take
+        should be implemented elsewhere.
 
-    # Called *only* when the system is exiting. This is currently an alias for deactivating, but other types
-    # of hardware may need other behavior, ie: freeing devices.
-    def shutdown(self):
-        self.deactivate()
-        self.disable()
+        :return: bool
+        """
+        if self.status != self.state:
+            return True
+        else:
+            return False
 
     # Debugging methods to let the main system know a few things about the attached sensor.
     @property
@@ -228,97 +251,107 @@ class SingleDetector(Detector):
         return type(self._sensor_obj)
 
     @property
-    def status(self):
-        return self._sensor_obj.status
-
-    @property
     def sensor_interface(self):
         iface_info = namedtuple("iface_info", ['type', 'addr'])
         if isinstance(self._sensor_obj, SerialSensor):
             iface = iface_info("serial", self._sensor_obj.serial_port)
-            return iface
         elif isinstance(self._sensor_obj, I2CSensor):
             iface = iface_info("i2c", self._sensor_obj.i2c_address)
-            return iface
-        return None
+        elif isinstance(self._sensor_obj, FileSensor):
+            iface = iface_info("file", self._sensor_obj.file)
+        else:
+            iface = iface_info("unknown","unknown")
+        return iface
 
+    @property
+    def value(self):
+        """
+        Returns the adjusted measurement of the detector. Calls the "value_raw" method of the detector, which must
+        be defined on a per-class basis.
+        :return:
+        """
+        self._logger.debug("Creating adjusted value from latest value: {}".format(self.value_raw))
+        self._logger.debug("Defined offset is: {}".format(self.offset))
+        if isinstance(self.value_raw, Quantity):
+            return self.value_raw - self.offset
+        else:
+            return self.value_raw
+
+    @property
+    def value_raw(self):
+        raise NotImplementedError("Raw value method should be implemented on a class basis.")
 
 # Detector that measures range progress.
 class Range(SingleDetector):
-    def __init__(self, error_margin, **kwargs):
-        print("Range init.\n\tHave kwargs: {}".format(kwargs))
-        super().__init__(**kwargs)
+    def __init__(self, detector_id, name, error_margin, sensor_type, sensor_settings, log_level="WARNING"):
+        super().__init__(detector_id, name, sensor_type, sensor_settings, log_level)
+        # Required properties. These are checked by the check_ready decorator function to see if they're not None.
+        # Once all required properties are not None, the object is set to ready. Doesn't check for values being *correct*.
+        self._required = ['bay_depth','spread_park','pct_warn','pct_crit']
+        # Save parameters
         self._error_margin = error_margin
 
+        # Initialize variables, to be set by properties later.
+        # Since these are all bay-specific, it doesn't make sense to set them at init-time.
+        self._bay_depth = None
+        self._spread_park = None
+        self._pct_warn = None
+        self._pct_crit = None
+        self._dist_warn = None
+        self._dist_crit = None
 
-    # Return the adjusted reading of the sensor.
-    @property
-    @read_if_stale
-    def value(self):
-        self._logger.debug("Creating adjusted value from latest value: {}".format(self._history[0][0]))
-        if isinstance(self._history[0][0], Quantity):
-            return self._history[0][0] - self.offset
-        elif self._history[0][0] is None:
-            return None
-        elif isinstance(self._history[0][0], str):
-            if self._history[0][0] == 'No reading':
-                return "No reading"
-        else:
-            return "Error"
+
 
     # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
     @read_if_stale
     def value_raw(self):
+        # Note, the read_if_stale decorator will trap this if the sensor itself isn't ranging. Thus, we can assume it is.
         self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
-        if isinstance(self._history[0][0], Quantity):
+        if isinstance(self._history[0][0], Quantity) or isinstance(self._history[0][0], BaseException):
             return self._history[0][0]
         elif self._history[0][0] is None:
-            return "Unknown"
+            self._logger.debug("Latest reading was None. Returning 'unknown'")
+            return "unknown"
         elif isinstance(self._history[0][0], str):
-            if self._history[0][0] == 'No reading':
-                return "No reading"
+            self._logger.debug("History had string '{}'. Returning 'no_reading'".format(self._history[0][0]))
+            return "no_reading"
         else:
-            return "Error"
+            self._logger.debug("Unknown reading state, returning 'error'")
+            return "error"
 
     # Assess the quality of the sensor
     @property
     @read_if_stale
     def quality(self):
-        self._logger.debug("Creating quality from latest value: {}".format(self._history[0][0]))
-        self._logger.debug("90% of bay depth is: {}".format(self._settings['bay_depth'] * .9))
-        # Is there one of our own exceptions? These we can *probably* handle and get some useful information from.
-        if isinstance(self._history[0][0], SensorValueException):
-            # A weak reading from the sensor almost certainly means the door is open and nothing is blocking.
-            if self._history[0][0].status == "Weak":
-                return "Door open"
-            elif self._history[0][0].status in ("Saturation", "Flood"):
-                # When saturated or flooded, just pass on those statuses.
-                return self._history[0][0]
-            else:
-                return "Unknown"
-        # All other exceptions.
-        elif isinstance(self._history[0][0], BaseException):
-            return "Unknown"
-        else:
-            # You're about to hit the wall!
-            if self._history[0][0] < Quantity("2 in"):
-                return 'Emergency!'
-            elif (self._settings['bay_depth'] * 0.90) <= self._history[0][0]:
+        self._logger.debug("Creating quality from latest value: {} ({})".format(self._history[0][0], type(self._history[0][0])))
+        self._logger.debug("90% of bay depth is: {}".format(self.bay_depth * .9))
+        current_value = self._history[0][0]
+        if isinstance(current_value, Quantity):
+            # Actual reading, evaluate.
+            if current_value < Quantity("2 in"):
+                qv = 'emergency'
+            elif (self.bay_depth * 0.90) <= current_value:
                 self._logger.debug(
-                    "Reading is more than 90% of bay depth ({})".format(self._settings['bay_depth'] * .9))
-                return 'No object'
+                    "Reading is more than 90% of bay depth ({})".format(self.bay_depth * .9))
+                qv = 'no_object'
             # Now consider the adjusted values.
-            elif self.value < 0 and abs(self.value) > self.spread_park:
-                return 'Back up'
-            elif abs(self.value) < self.spread_park:
-                return 'Park'
-            elif self.value <= self._settings['dist_crit']:
-                return 'Final'
-            elif self.value <= self._settings['dist_warn']:
-                return 'Base'
+            elif current_value < 0 and abs(current_value) > self.spread_park:
+                return CobraBay.const.DETECTOR_QUALITY_BACKUP
+            elif abs(current_value) < self.spread_park:
+                return CobraBay.const.DETECTOR_QUALITY_PARK
+            elif current_value <= self._dist_crit:
+                return CobraBay.const.DETECTOR_QUALITY_FINAL
+            elif current_value <= self._dist_warn:
+                return CobraBay.const.DETECTOR_QUALITY_BASE
             else:
-                return 'OK'
+                return CobraBay.const.DETECTOR_QUALITY_OK
+        elif current_value == CobraBay.const.SENSOR_VALUE_WEAK:
+            return CobraBay.const.DETECTOR_QUALITY_DOOROPEN
+        elif current_value in (CobraBay.const.SENSOR_VALUE_FLOOD, CobraBay.const.SENSOR_VALUE_STRONG):
+            return CobraBay.const.DETECTOR_NOREADING
+        else:
+            raise CobraBay.exceptions.SensorException
 
     # Determine the rate of motion being measured by the detector.
     @property
@@ -331,9 +364,8 @@ class Range(SingleDetector):
                 history.append(entry)
         # If we don't have at least two data points, can't measure, return none.
         if len(history) < 2:
-            return None
-        elif history[0][0] == 'Weak':
-            return None
+            return 'unknown'
+
         # If the sensor is reading beyond range, speed and direction can't be known, so return immediately.
         last_element = len(history) - 1
         self._logger.debug("First history: {}".format(history[0]))
@@ -343,7 +375,7 @@ class Range(SingleDetector):
             net_time = Quantity(history[0][1] - history[last_element][1], 'nanoseconds').to('seconds')
         except pint.errors.DimensionalityError:
             # If we're trying to subtract a non-Quantity value, then return unknown for these.
-            return None
+            return 'unknown'
         self._logger.debug("Moved {} in {}s".format(net_dist, net_time))
         speed = (net_dist / net_time).to('kph')
         # Since we've processed all this already, return all three values.
@@ -355,7 +387,8 @@ class Range(SingleDetector):
     def motion(self):
         # Grab the movement
         movement = self._movement
-        if movement is None:
+        print("Movement: {}".format(movement))
+        if not isinstance(movement,dict):
             return "Unknown"
         elif abs(self._movement['net_dist']) > Quantity(self._error_margin):
             return True
@@ -363,14 +396,20 @@ class Range(SingleDetector):
             return False
 
     @property
-    @read_if_stale
     def vector(self):
+
         # Grab the movement value.
         movement = self._movement
+        # Movement should trigger a read and get a new state value. If that returns NOTRANGING, we can't
+        # process the vector and both speed and direction should be flagged unknown.
+        if movement == CobraBay.const.STATE_NOTRANGING:
+            return {"speed": "unknown", "direction": "unknown"}
         # Determine a direction.
-        if movement is None:
+        self._logger.debug("Have movement value: {}".format(movement))
+        if movement == 'unknown':
             # If movement couldn't be determined, we also can't determine vector, so this is unknown.
-            return {"speed": "Unknown", "direction": "Unknown"}
+            return {"speed": "unknown", "direction": "unknown"}
+
         # Okay, not none, so has value!
         if movement['net_dist'] > Quantity(self._error_margin):
             return {'speed': abs(movement['speed']), 'direction': 'forward'}
@@ -389,93 +428,102 @@ class Range(SingleDetector):
         try:
             self._sensor_obj.distance_mode = target_mode
         except ValueError:
-            print("Could not change distance mode to {}".format(target_mode))
+            self._logger.warning("Could not change distance mode to {}".format(target_mode))
 
     @property
     def bay_depth(self):
-        return self._settings['bay_depth']
+        return self._bay_depth
 
     @bay_depth.setter
     @check_ready
     def bay_depth(self, depth):
-        self._settings['bay_depth'] = self._convert_value(depth)
-        self._derived_distances()
+        self._bay_depth = self._convert_value(depth)
 
     @property
     def spread_park(self):
-        return self._settings['spread_park']
+        return self._spread_park
 
     @spread_park.setter
     @check_ready
     def spread_park(self, input):
-        self._settings['spread_park'] = self._convert_value(input)
+        self._spread_park = self._convert_value(input)
 
     # Properties for warning and critical percentages. We take these are "normal" percentages (ie: 15.10) and convert
     # to decimal so it can be readily used for multiplication.
     @property
     def pct_warn(self):
-        return self._settings['pct_warn'] * 100
+        try:
+            return self._pct_warn * 100
+        except TypeError:
+            return None
 
     @pct_warn.setter
     @check_ready
     def pct_warn(self, input):
-        self._settings['pct_warn'] = input / 100
+        self._pct_warn = input / 100
 
     @property
     def pct_crit(self):
-        return self._settings['pct_crit'] * 100
+        try:
+            return self._pct_crit * 100
+        except TypeError:
+            return None
 
     @pct_crit.setter
     @check_ready
     def pct_crit(self, input):
-        self._settings['pct_crit'] = input / 100
+        self._pct_crit = input / 100
 
     # Pre-bake distances for warn and critical to make evaluations a little easier.
     def _derived_distances(self):
         self._logger.debug("Calculating derived distances.")
-        adjusted_distance = self._settings['bay_depth'] - self._offset
-        self._settings['dist_warn'] = adjusted_distance.magnitude * self.pct_warn * adjusted_distance.units
-        self._settings['dist_crit'] = adjusted_distance.magnitude * self.pct_crit * adjusted_distance.units
+        adjusted_distance = self.bay_depth - self._offset
+        self._logger.debug("Adjusted distance: {}".format(adjusted_distance))
+        self._dist_warn = ( adjusted_distance.magnitude * self.pct_warn )/100 * adjusted_distance.units
+        self._logger.debug("Warning distance: {}".format(self._dist_warn))
+        self._dist_crit = ( adjusted_distance.magnitude * self.pct_crit )/100 * adjusted_distance.units
+        self._logger.debug("Critical distance: {}".format(self._dist_crit))
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
-
-    @property
-    def i2c_address(self):
-        return super().i2c_address
 
     @property
     def offset(self):
         return super().offset
 
     @offset.setter
-    def offset(self, input):
-        super(Range, self.__class__).offset.fset(self, input)
+    def offset(self, new_offset):
+        super(Range, self.__class__).offset.fset(self, new_offset)
 
+    @property
+    def status(self):
+        return super().status
+
+    @status.setter
+    def status(self, target_status):
+        super(Range, self.__class__).status.fset(self, target_status)
 
 # Detector for lateral position
 class Lateral(SingleDetector):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    @property
-    @read_if_stale
-    def value(self):
-        self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
-        if isinstance(self._history[0][0], Quantity):
-            return self._history[0][0] - self.offset
-        else:
-            return None
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING"):
+        super().__init__(detector_id, name, sensor_type, sensor_settings, log_level)
+        self._required = ['side', 'spread_ok', 'spread_warn']
+        self._side = None
+        self._spread_ok = None
+        self._spread_warn = None
 
     # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
     @read_if_stale
     def value_raw(self):
-        self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
         if isinstance(self._history[0][0], Quantity):
             return self._history[0][0]
+        elif isinstance(self._history[0][0], CobraBay.exceptions.SensorException):
+            # If the sensor has already errored, raise that.
+            raise self._history[0][0]
         else:
-            return None
+            # Anything else, treat it as the sensor returning no reading.
+            return CobraBay.const.DETECTOR_NOREADING
 
     @property
     @read_if_stale
@@ -483,25 +531,25 @@ class Lateral(SingleDetector):
         self._logger.debug("Assessing quality for value: {}".format(self.value))
         # Process quality if we get a quantity from the Detector.
         if isinstance(self.value, Quantity):
-            self._logger.debug("Comparing to: \n\t{}\n\t{}".format(
+            self._logger.debug("Comparing to OK ({}) and WARN ({})".format(
                 self.spread_ok, self.spread_warn))
-            if self.value > Quantity('96 in'):
-                # A standard vehicle width (in the US, at least) is 96 inches, so if we're reading something further
-                # than that, it's not the vehicle in question (ie: a far wall, another vehicle, etc).
-                qv = "No object"
+            if self.value > Quantity('90 in'):
+                # A standard vehicle width (in the US, at least) is 96 inches. If we can reach across a significant
+                # proportion of the bay, we're not finding a vehicle, so deem it to be no vehicle.
+                qv = "no_vehicle"
             elif abs(self.value) <= self.spread_ok:
-                qv = "OK"
+                qv = "ok"
             elif abs(self.value) <= self.spread_warn:
-                qv = "Warning"
+                qv = "warning"
             elif abs(self.value) > self.spread_warn:
-                qv = "Critical"
+                qv = "critical"
             else:
                 # Total failure to return a value means the light didn't reflect off anything. That *probably* means
                 # nothing is there, but it could be failing for other reasons.
-                qv = "Unknown"
+                qv = "unknown"
         else:
-            qv = "Unknown"
-        self._logger.debug("Quality returning {}".format(qv))
+            qv = "unknown"
+        self._logger.debug("Quality {}".format(qv))
         return qv
 
     @property
@@ -510,26 +558,26 @@ class Lateral(SingleDetector):
 
     @property
     def spread_ok(self):
-        return self._settings['spread_ok']
+        return self._spread_ok
 
     @spread_ok.setter
     @check_ready
     def spread_ok(self, m_input):
-        self._settings['spread_ok'] = self._convert_value(m_input).to('cm')
+        self._spread_ok = self._convert_value(m_input).to('cm')
         # Check to see if the detector is now ready.
 
     @property
     def spread_warn(self):
-        return self._settings['spread_warn']
+        return self._spread_warn
 
     @spread_warn.setter
     @check_ready
     def spread_warn(self, m_input):
-        self._settings['spread_warn'] = self._convert_value(m_input).to('cm')
+        self._spread_warn = self._convert_value(m_input).to('cm')
 
     @property
     def side(self):
-        return self._settings['side']
+        return self._side
 
     @side.setter
     @check_ready
@@ -537,20 +585,30 @@ class Lateral(SingleDetector):
         if m_input.upper() not in ('R', 'L'):
             raise ValueError("Lateral side must be 'R' or 'L'")
         else:
-            self._settings['side'] = m_input.upper()
+            self._side = m_input.upper()
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
 
     @property
     def i2c_address(self):
-        return super().i2c_address
+        return super()._i2c_address
 
     @property
     def offset(self):
+        self._logger.debug("Returning offset: {}".format(super().offset))
         return super().offset
 
     @offset.setter
     @check_ready
     def offset(self, m_input):
+        self._logger.debug("Setting offset to: {}".format(m_input))
         super(Lateral, self.__class__).offset.fset(self, m_input)
+
+    @property
+    def status(self):
+        return super().status
+
+    @status.setter
+    def status(self, target_status):
+        super(Lateral, self.__class__).status.fset(self, target_status)

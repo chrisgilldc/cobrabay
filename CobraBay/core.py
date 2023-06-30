@@ -4,32 +4,14 @@
 
 import logging
 from logging.handlers import WatchedFileHandler
-# from time import monotonic
 import atexit
-# import busio
-# import board
-# import os
-# import sys
-# import psutil
 from pprint import pformat
-
 import CobraBay
-
-# Import the other CobraBay classes
-#from CobraBay.bay import Bay
-#from CobraBay.config import CBConfig
-#from CobraBay.display import Display
-# from CobraBay.detectors import Lateral, Range
-# #from CobraBay.network import CBNetwork
-# from CobraBay.sensors import CB_VL53L1X
-# # from CobraBay.systemhw import CBPiStatus
-# from . import triggers
-# from CobraBay.version import __version__
 import sys
-
 
 class CBCore:
     def __init__(self, config_obj):
+        self.system_state = 'init'
         # Register the exit handler.
         atexit.register(self.system_exit)
 
@@ -59,10 +41,7 @@ class CBCore:
         self._setup_logging_handlers(self._cbconfig.log_handlers())
 
         # Reset our own level based on the configuration.
-        self._logger.setLevel(self._cbconfig.get_loglevel("Core"))
-
-        # Put the raw config in a variable, this is a patch.
-        self.config = self._cbconfig._config
+        self._logger.setLevel(self._cbconfig.get_loglevel("core"))
 
         # Create the object for checking hardware status.
         self._logger.debug("Creating Pi hardware monitor...")
@@ -71,10 +50,11 @@ class CBCore:
         # Create the network object.
         self._logger.debug("Creating network object...")
         # Create Network object.
-        self._network = CobraBay.CBNetwork(config=self._cbconfig)
-        self._logger.info('Connecting to network...')
-        # Connect to the network.
-        self._network.connect()
+        network_config = self._cbconfig.network()
+        self._logger.debug("Using network config:")
+        self._logger.debug(pformat(network_config))
+        self._network = CobraBay.CBNetwork(**network_config, cbcore=self)
+        self._network.register_pistatus(self._pistatus)
 
         # Queue for outbound messages.
         self._outbound_messages = []
@@ -82,35 +62,40 @@ class CBCore:
         self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'Online'})
 
         self._logger.debug("Creating detectors...")
-        # Create the detectors. This is complex enough it gets its own method.
+        # Create the detectors.
         self._detectors = self._setup_detectors()
         self._logger.debug("Have detectors: {}".format(self._detectors))
 
         # Create master bay object for defined docking bay
         # Master list to store all the bays.
         self._bays = {}
-        self._logger.debug("Creating bays...")
+        self._logger.info("Creating bays...")
         for bay_id in self._cbconfig.bay_list:
             self._logger.info("Bay ID: {}".format(bay_id))
             bay_config = self._cbconfig.bay(bay_id)
             self._logger.debug("Bay config:")
             self._logger.debug(pformat(bay_config))
-            self._bays[bay_id] = CobraBay.CBBay(**bay_config, detectors=self._detectors)
+            self._bays[bay_id] = CobraBay.CBBay(**bay_config, detectors=self._detectors, cbcore=self)
 
-        self._logger.info('CobraBay: Creating display...')
+        self._logger.info('Creating display...')
         self._display = CobraBay.CBDisplay(self._cbconfig)
+        # Inform the network about the display. This is so the network can send display images. Nice to have, very
+        # useful for debugging!
+        self._network.display = self._display
 
         # Register the bay with the network and display.
         for bay_id in self._bays:
-            self._network.register_bay(self._bays[bay_id].discovery_reg_info)
+            self._network.register_bay(self._bays[bay_id])
             self._display.register_bay(self._bays[bay_id].display_reg_info)
 
-        # Collect messages from the bays.
-        for bay_id in self._bays:
-            self._outbound_messages = self._outbound_messages + self._bays[bay_id].mqtt_messages(verify=True)
+        # # Collect messages from the bays.
+        # for bay_id in self._bays:
+        #     self._outbound_messages = self._outbound_messages + self._bays[bay_id].mqtt_messages(verify=True)
 
         # Create triggers.
+        self._logger.debug("About to setup triggers.")
         self._triggers = self._setup_triggers()
+        self._logger.debug("Done calling setup_triggers.")
         self._logger.debug("Have triggers: {}".format(self._triggers))
 
         # Parcel trigger objects out to the right place.
@@ -118,10 +103,10 @@ class CBCore:
         #  - Range triggers go to the appropriate bay.
         self._logger.debug("Linking triggers to modules.")
         for trigger_id in self._triggers:
-            self._logger.debug("{} is a {} trigger".format(trigger_id,self._triggers[trigger_id].type))
             trigger_obj = self._triggers[trigger_id]
             # Network needs to be told about triggers that talk to MQTT.
-            if trigger_obj.type in ('syscommand', 'baycommand', 'mqtt_sensor'):
+            if isinstance(trigger_obj, CobraBay.triggers.MQTTTrigger):
+                self._logger.debug("Registering Trigger {} with Network module.".format(trigger_id))
                 self._network.register_trigger(trigger_obj)
             # Tell bays about their bay triggers.
             #if trigger_obj.type in ('baycommand'):
@@ -137,19 +122,18 @@ class CBCore:
             #         break
             #     target_bay.register_trigger(self._triggers[trigger_id])
 
-        # Poll to dispatch the message queue
-        self._logger.debug("Initial message queue: {}".format(self._outbound_messages))
-        self._network.poll(self._outbound_messages)
-        # Flush the queue.
-        self._outbound_messages = []
-        self._logger.info('CobraBay: Initialization complete.')
+        # Connect to the network.
+        self._logger.info('Connecting to network...')
+        self._network.connect()
+        # Do an initial poll.
+        self._network.poll()
+        self._logger.info('System Initialization complete.')
+        self.system_state = 'running'
 
     # Common network handler, pushes data to the network and makes sure the MQTT client can poll.
     def _network_handler(self):
-        # Add hardware status messages.
-        self._outbound_messages.extend(self._mqtt_hw())
         # Send the outbound message queue to the network module to handle. After, we empty the message queue.
-        network_data = self._network.poll(self._outbound_messages)
+        network_data = self._network.poll()
         # We've pushed the message out, so reset our current outbound message queue.
         self._outbound_messages = []
         return network_data
@@ -164,14 +148,19 @@ class CBCore:
         for trigger_id in self._triggers.keys():
             self._logger.debug("Checking trigger: {}".format(trigger_id))
             trigger_obj = self._triggers[trigger_id]
+            # Disabling range triggers for the moment.
             # Range objects need to be checked explicitly. So call it!
-            if trigger_obj.type == 'range':
-                trigger_obj.check()
-            self._logger.debug("Has trigger value: {}".format(trigger_obj.triggered))
+            # if trigger_obj.type == 'range':
+            #     trigger_obj.check()
+            # self._logger.debug("Has trigger value: {}".format(trigger_obj.triggered))
             if trigger_obj.triggered:
                 while trigger_obj.cmd_stack:
+                    # Pop the command from the object.
                     cmd = trigger_obj.cmd_stack.pop(0)
-                    if trigger_obj.type in ('baycommand','mqtt_sensor'):
+                    # Route it appropriately.
+                    if isinstance(trigger_obj,CobraBay.triggers.SysCommand):
+                        self._core_command(cmd)
+                    else:
                         if cmd in ('dock','undock'):
                             # Dock or undock, enter the motion routine.
                             self._motion(trigger_obj.bay_id, cmd)
@@ -181,39 +170,36 @@ class CBCore:
                             # On an abort, call the bay's abort. This will set it ready and clean up.
                             # If we're in the _motion method, this will go back to run, if not, nothing happens.
                             self._bays[trigger_obj.bay_id].abort()
-                    elif trigger_obj.type in ('syscommand'):
-                        self._core_command(cmd)
             self._logger.debug("Trigger check complete.")
 
     # Main operating loop.
     def run(self):
-        # This loop runs while the system is idle. Process commands, increment various timers.
-        while True:
-            # Do a network poll, this method handles all the default outbound messages and incoming status.
-            network_data = self._network_handler()
-            # Update the network components of the system state.
-            system_status = {
-                'network': network_data['online'],
-                'mqtt': network_data['mqtt_status'] }
+        try:
+            # This loop runs while the system is idle. Process commands, increment various timers.
+            while True:
+                # Do a network poll, this method handles all the default outbound messages and incoming status.
+                network_data = self._network_handler()
+                # Update the network components of the system state.
+                system_status = {
+                    'network': network_data['online'],
+                    'mqtt': network_data['mqtt_status'] }
 
-            # Check triggers and execute actions if needed.
-            self._trigger_check()
-            self._logger.debug("Returned to main loop from trigger check.")
+                # Check triggers and execute actions if needed.
+                self._trigger_check()
 
-            self._display.show(system_status, "clock")
-            # Push out the image to MQTT.
-            self._outbound_messages.append(
-                {'topic_type': 'system',
-                 'topic': 'display',
-                 'message': self._display.current, 'repeat': True})
+                self._display.show(system_status, "clock")
+        except BaseException as e:
+            self._logger.critical("Unexpected exception encountered!")
+            self._logger.exception(e)
+            sys.exit(1)
 
     # Start sensors and display to guide parking.
     def _motion(self, bay_id, cmd):
         # Convert command to a state. Should have planned this better, but didn't.
         if cmd == 'dock':
-            direction = "Docking"
+            direction = "docking"
         elif cmd == 'undock':
-            direction = "Undocking"
+            direction = "undocking"
         else:
             raise ValueError("Motion command '{}' not valid.".format(cmd))
 
@@ -224,21 +210,11 @@ class CBCore:
 
         # As long as the bay is in the desired state, keep running.
         while self._bays[bay_id].state == direction:
-            # Collect the MQTT messages from the bay itself.
-            self._logger.debug("Collecting MQTT messages from bay.")
-            bay_messages = self._bays[bay_id].mqtt_messages()
-            self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
-            self._outbound_messages = self._outbound_messages + bay_messages
-            # Collect the display data to send to the display.
-            self._logger.debug("Collecting display data from bay.")
-            display_data = self._bays[bay_id].display_data()
-            self._logger.debug("Collected display data: {}".format(display_data))
-            self._display.show_motion(direction, display_data)
-            # Put the display image on the MQTT stack.
-            self._outbound_messages.append(
-                {'topic_type': 'system', 'topic': 'display', 'message': self._display.current, 'repeat': True})
+            self._logger.debug("{} motion - Displaying".format(cmd))
+            # Send the bay object reference to the display method.
+            self._display.show_motion(direction, self._bays[bay_id])
             # Poll the network.
-            self._logger.debug("Polling network.")
+            self._logger.debug("{} motion - Polling network.".format(cmd))
             self._network_handler()
             # Check for completion
             self._bays[bay_id].check_timer()
@@ -246,33 +222,17 @@ class CBCore:
             self._trigger_check()
         self._logger.info("Bay state changed to {}. Returning to idle.".format(self._bays[bay_id].state))
         # Collect and send a final set of MQTT messages.
-        self._logger.debug("Collecting MQTT messages from bay.")
-        bay_messages = self._bays[bay_id].mqtt_messages()
-        self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
-        self._outbound_messages = self._outbound_messages + bay_messages
-
-    # Utility method to put the hardware status on the outbound message queue. This needs to be used from a few places.
-    def _mqtt_hw(self):
-        hw_messages = []
-        hw_messages.append(
-            {'topic_type': 'system', 'topic': 'cpu_pct', 'message': self._pistatus.status('cpu_pct'), 'repeat': False})
-        hw_messages.append(
-            {'topic_type': 'system', 'topic': 'cpu_temp', 'message': self._pistatus.status('cpu_temp'),
-             'repeat': False})
-        hw_messages.append(
-            {'topic_type': 'system', 'topic': 'mem_info', 'message': self._pistatus.status('mem_info'),
-             'repeat': False})
-        hw_messages.append(
-            {'topic_type': 'system', 'topic': 'undervoltage', 'message': self._pistatus.status('undervoltage'),
-             'repeat': False}
-        )
-        return hw_messages
+        # self._logger.debug("Collecting MQTT messages from bay.")
+        # bay_messages = self._bays[bay_id].mqtt_messages()
+        # self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
+        # self._outbound_messages = self._outbound_messages + bay_messages
 
     def undock(self):
         self._logger.info('CobraBay: Undock not yet implemented.')
         return
 
     def system_exit(self):
+        self.system_state = 'shutdown'
         # Wipe any previous messages. They don't matter now, we're going away!
         self._outbound_messages = []
         # Stop the ranging and close all the open sensors.
@@ -281,8 +241,8 @@ class CBCore:
                 self._logger.critical("Shutting down bay {}".format(bay))
                 self._bays[bay].shutdown()
             for detector in self._detectors:
-                self._logger.critical("Shutting down detector: {}".format(detector))
-                self._detectors[detector].shutdown()
+                self._logger.critical("Disabling detector: {}".format(detector))
+                self._detectors[detector].status = 'disabled'
         except AttributeError:
             # Must be exiting before bays were defined. That's okay.
             pass
@@ -315,15 +275,19 @@ class CBCore:
     # Method to set up the detectors based on the configuration.
     def _setup_detectors(self):
         return_dict = {}
-        for detector_id in self.config['detectors']:
-            self._logger.info("Creating detector: {}".format(detector_id))
-            detector_config = self._cbconfig.detector(detector_id)
-            if detector_config['type'] == 'range':
-                self._logger.debug("Setting up Range detector with settings: {}".format(detector_config))
-                return_dict[detector_id] = CobraBay.detectors.Range(**detector_config)
-            if detector_config['type'] == 'lateral':
-                self._logger.debug("Setting up Lateral detector with settings: {}".format(detector_config))
-                return_dict[detector_id] = CobraBay.detectors.Lateral(**detector_config)
+        # Create detectors with the right type.
+        self._logger.debug("Creating longitudinal detectors.")
+        for detector_id in self._cbconfig.detectors_longitudinal:
+            self._logger.info("Creating longitudinal detector: {}".format(detector_id))
+            detector_config = self._cbconfig.detector(detector_id,'longitudinal')
+            self._logger.debug("Using settings: {}".format(detector_config))
+            return_dict[detector_id] = CobraBay.detectors.Range(**detector_config)
+
+        for detector_id in self._cbconfig.detectors_lateral:
+            self._logger.info("Creating lateral detector: {}".format(detector_id))
+            detector_config = self._cbconfig.detector(detector_id,'lateral')
+            self._logger.debug("Using settings: {}".format(detector_config))
+            return_dict[detector_id] = CobraBay.detectors.Lateral(**detector_config)
         self._logger.debug("VL53LX instances: {}".format(len(CobraBay.sensors.CB_VL53L1X.instances)))
         return return_dict
 
@@ -338,18 +302,36 @@ class CBCore:
             # Create trigger object based on type.
             # All triggers except the system command handler will need a reference to the bay object.
             if trigger_config['type'] == "syscommand":
-                return_dict[trigger_id] = CobraBay.triggers.SysCommand(trigger_config)
+                return_dict[trigger_id] = CobraBay.triggers.SysCommand(
+                    id="sys_cmd",
+                    name="System Command Handler",
+                    topic=trigger_config['topic'],
+                    log_level=trigger_config['log_level'])
             else:
-                bay_obj = self._bays[trigger_config['bay_id']]
                 if trigger_config['type'] == 'mqtt_sensor':
-                    return_dict[trigger_id] = CobraBay.triggers.MQTTSensor(trigger_config, bay_obj)
+                    return_dict[trigger_id] = CobraBay.triggers.MQTTSensor(
+                        id = trigger_config['id'],
+                        name = trigger_config['name'],
+                        topic = trigger_config['topic'],
+                        topic_mode = 'full',
+                        bay_obj = self._bays[trigger_config['bay_id']],
+                        change_type = trigger_config['change_type'],
+                        trigger_value = trigger_config['trigger_value'],
+                        when_triggered = trigger_config['when_triggered'],
+                        log_level = trigger_config['log_level']
+                    )
                 elif trigger_config['type'] == 'baycommand':
                     # Get the bay object reference.
-                    return_dict[trigger_id] = CobraBay.triggers.BayCommand(trigger_config, bay_obj)
-                elif trigger_config['type'] == 'range':
-                    # Range triggers also need the detector object.
-                    return_dict[trigger_id] = CobraBay.triggers.Range(trigger_config, bay_obj,
-                                                             self._detectors[trigger_config['detector']])
+                    return_dict[trigger_id] = CobraBay.triggers.BayCommand(
+                        id = trigger_config['id'],
+                        name = trigger_config['name'],
+                        topic = trigger_config['topic'],
+                        bay_obj = self._bays[trigger_config['bay_id']],
+                        log_level = trigger_config['log_level'])
+                # elif trigger_config['type'] == 'range':
+                #     # Range triggers also need the detector object.
+                #     return_dict[trigger_id] = CobraBay.triggers.Range(trigger_config, bay_obj,
+                #                                              self._detectors[trigger_config['detector']])
                 else:
                     # This case should be trapped by the config processor, but just in case, if trigger type
                     # is unknown, trap and ignore.

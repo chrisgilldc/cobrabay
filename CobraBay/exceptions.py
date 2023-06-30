@@ -7,8 +7,5 @@
 class CobraBayException(Exception):
     """CobraBay Exceptions"""
 
-class SensorValueException(CobraBayException):
-    """Raised when a sensor reads a value that indicates a non-range state."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args)
-        self.status = kwargs.get('status')
+class SensorException(CobraBayException):
+    """Sensor failure"""

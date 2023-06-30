@@ -1,8 +1,9 @@
 from setuptools import setup, find_packages
+import CobraBay
 
 setup(
     name="CobraBay",
-    version="0.1.0",
+    version=CobraBay.__version__,
     packages=find_packages(),
     package_data={
         "": ["*.ttf"]

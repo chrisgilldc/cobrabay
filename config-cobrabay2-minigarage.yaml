@@ -1,0 +1,126 @@
+system:
+  unit_system: imperial  # Defaults to 'metric' if set to anything other than 'imperial'.
+  system_name: CobraBay2  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
+  mqtt:
+    broker: cnc.jumpbeacon.net
+    port: 1883
+    username: cobrabay
+    password: "NbX2&38z@%H@$Cg0"
+  mqtt_commands: True  # Take MQTT commands to control system and bay.
+  interface: eth0  # Interface used to uplink. Used to show status on the display.
+  homeassistant: False # Integrate with Home Assistant. If yes, will send discovery messages.
+  # Logging definition
+  logging:
+    console: True
+    file: True
+    default_level: warning  # Warning if none defined.
+    detectors: debug
+    # Can specify the path for the log file. Will default to current system_name (specified above) in the current working
+    # directory. Log rotation is NOT handled natively, use something external like logrotate.
+    # Default level for the system. If not included, will default to WARNING.
+    # file_path: cwd/System_Name.log
+    # Major components can have logging levels set separately. These are:
+    # bays - All bays
+    # config - Configuration processor
+    # core - Operating core
+    # detectors - All detectors
+    # display - The display
+    # network - The network
+    # Individual bays or detectors can be included by ID under the appropriate key.
+
+# Triggers for actions. Need to have some enabled otherwise nothing ever happens!
+triggers:
+  # "Sensor" monitors an MQTT topic for a topic changes. Sensors are expected to be a single
+  # string, ie: "on"/"off" or "True"/"False"
+  garage_door:
+    topic: homeassistant/binary_sensor/door_garage/state
+    type: mqtt_sensor
+    bay: bay2
+    to: "on"
+    when_triggered: occupancy
+  test:
+    topic: CobraBay/test
+    type: mqtt_sensor
+    bay: bay2
+    to: "on"
+    when_triggered: occupancy
+
+# Settings for the display. Only one is supported! If you want to build a multi-panel display, treat it as one and do it
+# in hardware.
+display:
+  matrix:
+    width: 64  # Columns on the Matrix
+    height: 32  # Rows on the Matrix
+    gpio_slowdown: 4  # How much to slow down the matrix to prevent flicker.
+  strobe_speed: 100 ms
+  mqtt_image: True  # Should image updates be sent via MQTT
+  mqtt_update_interval: 5 s  # How often should a new image be spent. Keeps from spamming the server.
+# Define detectors. These are individual sensing units that then get assigned to a bay later.
+detectors:
+  range:  # Key here is the Bay ID, which is used elsewhere. IF you see a mention of 'bay_id', this is it.
+#    # Range sensors have a type of Range. Obvs.
+    type: Range
+#    # Name is used for reporting MQTT, as distinct from the key. This will be prepended with the Bay's Name and
+#    # appended with "Detector". So "Range" here for "Bay 1" will become "Bay 1 Range Detector"
+    name: Range
+    error_margin: "2 cm"  # Amount of distance this sensor detector can vary and still be counted as 'still'
+    sensor:
+      type: TFMini
+      port: serial0  # System will automatically prefix /dev if not included.
+      baud: 115200
+  front:
+    type: Lateral
+    name: Front
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x31
+      enable_board: 0x58
+      enable_pin: 1
+      distance_mode: medium
+      timing: 200ms
+  middle:
+    type: Lateral
+    name: Middle
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x32
+      enable_board: 0x58
+      enable_pin: 2
+      distance_mode: medium
+      timing: 200ms
+  rear:
+    type: Lateral
+    name: Rear
+    sensor:
+      type: VL53L1X
+      i2c_bus: 1
+      i2c_address: 0x33
+      enable_board: 0x58
+      enable_pin: 3
+      distance_mode: medium
+      timing: 200ms
+
+bays:
+  bay2:
+    name: "Bay 2"
+    log_level: debug
+    motion_timeout: 120s
+    depth: 276 in
+    stop_point: 0 in
+    longitudinal:
+      defaults:
+        spread_park: 2 in
+      detectors:
+        - detector: range
+    lateral:
+      # Lateral detectors are those that run perpendicular to the path of vehicle's travel.
+      defaults:
+        offset: 23 in
+        spread_ok: 1 in
+        spread_warn: 3 in
+        side: R
+      detectors:
+        - detector: middle
+          intercept: 77.5 in
