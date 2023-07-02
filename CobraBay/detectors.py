@@ -270,12 +270,13 @@ class SingleDetector(Detector):
         be defined on a per-class basis.
         :return:
         """
-        self._logger.debug("Creating adjusted value from latest value: {}".format(self.value_raw))
+        value_raw = self.value_raw
+        self._logger.debug("Creating adjusted value from latest value: {}".format(value_raw))
         self._logger.debug("Defined offset is: {}".format(self.offset))
-        if isinstance(self.value_raw, Quantity):
-            return self.value_raw - self.offset
+        if isinstance(value_raw, Quantity):
+            return value_raw - self.offset
         else:
-            return self.value_raw
+            return value_raw
 
     @property
     def value_raw(self):
