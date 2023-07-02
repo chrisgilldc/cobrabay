@@ -68,18 +68,32 @@ Details on assembly, including models for 3d printing enclosures can be found he
 The system will look for a configuration file on startup.
 The configuration file is a yaml file with several major sections.
 
-#### System
-| Option               | Required? | Valid Options                   | Units   | Description                                                                                                                                                                     |
-|----------------------|-----------|---------------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| units                | No        | **'metric'**, 'imperial'        | N/A     | Sets units to use for other options and display.                                                                                                                                |
-| system_name          | No        | float                           | seconds | Time between sonic sensor firings. This should be tuned so that echos from one sensor doesn't interfere with another - exact timing will depend on the geometry of your garage. |
-| mqtt                 | Yes       | dict                            | N/A | Dictionary of MQTT settings. See below                                                                                                                                          |
-| mqtt_commands        | Yes       | bool                            | N/A | Should commands via MQTT be honored?                                                                                                                                            |
-| interface            | Yes       | Any valid Linux interface name. | N/A | Interface to monitor for connectivity status on the display.                                                                                                                    |
-| homeassistant        | Yes       | bool                            | N/A | Integrate with Home Assistant? Will control sending of HA discovery options.                                                                                                    |
-| logging | No     | dict                       | N/A | Options for logging system-wide or within specific modules. See below for details.                                                                                              |
+#### Config Sections
+All sections are **required**, even if empty. Can be defined in any order.
 
-##### mqtt
+| Section                 | Description |
+|-------------------------| --- |
+| [System](#System)       | Basic system configuration |
+| [Triggers](#Triggers)   | Triggers define how the system detects docking or undocking behavior. |
+| [Display](#Display)     | The display mounted in the garage. |
+| [Detectors](#Detectors) | Sensing units placed around the garage. |
+| [Bays](#Bays)           | Dimensions and behavior for a particular parking spot. Currently only one Bay is supported. |
+
+
+#### System
+| Option              | Required? | Valid Options                   | Units   | Description                                                                                                                                                                     |
+|---------------------|-----------|---------------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| units               | No        | **'metric'**, 'imperial'        | N/A     | Sets units to use for other options and display.                                                                                                                                |
+| system_name         | No        | float                           | seconds | Time between sonic sensor firings. This should be tuned so that echos from one sensor doesn't interfere with another - exact timing will depend on the geometry of your garage. |
+| [mqtt](#mqtt)       | Yes       | dict                            | N/A | Dictionary of MQTT settings. See below                                                                                                                                          |
+| mqtt_commands       | Yes       | bool                            | N/A | Should commands via MQTT be honored?                                                                                                                                            |
+| interface           | Yes       | Any valid Linux interface name. | N/A | Interface to monitor for connectivity status on the display.                                                                                                                    |
+| homeassistant       | Yes       | bool                            | N/A | Integrate with Home Assistant? Will control sending of HA discovery options.                                                                                                    |
+| [logging](#Logging) | No     | dict                       | N/A | Options for logging system-wide or within specific modules. See below for details.                                                                                              |
+
+##### System Subsections
+
+###### mqtt
 
 MQTT section, within the system segment.
 
@@ -90,9 +104,9 @@ MQTT section, within the system segment.
 | username  | Yes | Username to log into the broker with.                      |
 | password  | Yes | Password to log into the broker with.                      |
 
-##### Logging
+###### Logging
 
-Logging options, system wide or for specific modules.
+Logging options, system-wide or for specific modules.
 
 | Options    | Required? | Default               | Description                                  |
 |------------|-----------|-----------------------|----------------------------------------------|
@@ -108,11 +122,15 @@ Logging options, system wide or for specific modules.
 | display               | No     | None                  | Log level for the Display module.                 |
 | network               | No     | None                  | Log level for the Network module.                 |
 
-
 #### Triggers
-Triggers are used to set when and how the system should take options. The triggers section can define a series of 
+Triggers are used to set when and how the system should take change mode. The triggers section can define a series of 
 triggers, as many as are needed.
+The key name used for the trigger is the trigger's name.
+ 
+Supported trigger types:
+* MQTT Trigger - Monitors an MQTT topic for state change.
 
+##### MQTT Trigger
 | Options | Required? | Default | Description |
 | --- | -- | --- | --- |
 | type | Yes | mqtt_sensor | Type of trigger this should be. Currently only 'mqtt_sensor' is supported. |
@@ -121,32 +139,93 @@ triggers, as many as are needed.
 | to | No | None | Topic payload to match that will set off this trigger. |
 | from | Yes, if 'to' is not set. | None | A change of the topic payload to any state *other* than this value will set off the trigger. |
 
+#### Display
+Configuration for the display in the garage, to be viewed by the driver. This should be an LED matrix display, no other
+display has been tested.
+
+
+| Options | Required? | Valid Options | Default | Description |
+| --- | -- | --- |--------| --- |
+| matrix | Yes | Dict | None | Physical configuration, see below. |
+| strobe_speed | Yes | str, int | 100 ms | Speed of the bottom strobe. Must be a time value. |
+| mqtt_image | No | bool | Yes | Should display image be sent to MQTT. Mostly for debugging, but may be interesting. |
+| mqtt_update_interval | No | str, int | 5 s | If sending the display image to MQTT server, how often to update. |
+
+##### Display Subsections
+
+###### Matrix
+| Options | Required? | Valid Options | Default | Description                     |
+| --- | --- | --- | --- |---------------------------------|
+| width | Yes | int | None | Width of the matrix, in pixels  | 
+| height | Yes | int | None | Height of the matrix, in pixels |
+| gpio_slowdown | Yes | int | None | GPIO Slowdown setting to prevent flicker. Check [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix) docs for recommendations. Likely requires testing.
+
+#### Detectors
+Detectors define sensing devices used to measure vehicle position. This is currently is a 1:1 mapping, where each 
+physical sensor is defined as one detector. This may change in the future.
+As always, the ID of a detector is the key used to define it in the config file.
+Detectors are divided into two sections:
+
+* Longitudinal - Detectors looking in parallel with the direction of vehicle travel
+* Lateral - Detectors looking across the direction of vehicle travel
+
+Define each detector under 'longitudinal' or 'lateral'
+
+Detector definition
+
+| Options | Required? | Valid Options | Default | Description                     |
+| --- | --- | --- | --- |---------------------------------|
+| name | No | str | Detector ID | Friendly name of the detector, used when creating Home Assistant entities. If not defined, will default to the detector ID. |
+| sensor | Yes | Dict | None | Configuration for the underlying sensor | 
+
+##### Sensor definition
+Two types of sensor are currently supported - the serial TFMini-S and the I2C VL53L1X. 
+
+###### TFMini-S
+| Options | Required? | Valid Options         | Default                      | Description                                                                                |
+| --- | --- |---|--|--------------------------------------------------------------------------------------------|
+| type | Yes | str | None | TFMini sensor type.                                                         |
+| port | Yes | str | None | Serial port to used. Will be prefixed with '/dev/' if not included. IE: 'serial0', 'ttyS0' |
+| baud | Yes | int | None | baud rate of the sensor. You probably want 115200                                          |
+
+###### VL53L1X
+| Options | Required? | Valid Options | Default | Description                     |
+|---| --- | --- | --- |---------------------------------|
+| type | Yes | str | VL53L1X | VL53L1X sensor type. |
+| i2c_bus | Yes | int | None | I2C bus to use. On Raspberry Pi, should be 1. |
+| i2c_address | Yes | str (hex) | None | I2C address for the sensor. Should be a hex string, ie: "0x33" |
+| enable_board | Yes | str (hex) | None | Board which holds the pin used to enable and disable the sensor.<br>If that pin is on an AW9523, this should be a hex address of the AW9523.<br>If directly on the Pi, should be 0 |
+| enable_pin | Yes | int | None | Pin to enable and disable the board. |
+| distance_mode | Yes | str | None | Distance mode to set the sensor to |
+| timing | Yes | str | None | Timing for the sensor. Can be one of:<br>15 (short mode only), 20, 33, 50, 100, 200, 500 |
 
 #### Bay Options
-Dimensions for the parking bay. All units are either in centimeters or inches, depending on the master units setting.
+Define the bay the vehicle stops in. Currently all should be defined under a single key, which is the bay id. In the
+future multiple bays may be possible.
 
-| Options | Required? | Description |
-| --- | --- | --- |
-| detect_range | Yes | Maximum detection range for the approach. Can be less than your maximum possible range if the far ranges are known to be unreliable and you want to trim them off. |
-| park_range | Yes | Distance from the sensor where the car should stop. Sets the '0' mark when displaying distance. |
-| height | Yes | Height of the garage when vacant. |
-| vehicle_height | Yes | Height of the vehicle. Used along with overall height to detect when car is moving sideways out of its bay. |
+| Options | Required? | Valid Options          | Default | Description                                                                                          |
+| --- | --- |------------------------|---------|------------------------------------------------------------------------------------------------------|
+| name | No        | str                    | Bay ID  | Friendly name of the bay, used for Home Assistant discovery. If not defined, defaults to the bay ID. | 
+| motion_timeout | Yes | time quantity          | None    | After this amount of time, consider a dock or undock complete. Prevents premature termination.       |
+| depth | Yes | distance quantity | None    | Total distance from the longitudinal sensor point to the garage door.                                |
+| stop_point | Yes | distance quantity | None | Where the vehicle should stop, as distance from the longitudinal sensor point. |
+| longitudinal | Yes | dict | None | Longitudinal detectors for this bay. |
+| lateral | Yes | dict | None | Lateral detectors for this bay. |
 
-#### Sensor Options
-| Options | Sensor Type | Required? | Valid Options | Units | Description |
-| --- | --- | --- | --- | --- | --- |
-| type | N/A | Yes | 'vl53', 'hcsr04' | N/A | Type of sensor. Note, HCSR04 mode should work for any compatible sensor, such as the US-100. |
-| address | vl53 | Yes | 0x29, 0x.... | N/A | I2C address of the sensor. |
-| distance_mode | vl53 | No | **'long'**, 'short' | N/A | Distance sensing mode |
-| timing_budget | vl53 | No | 15 (short mode only), 20, 33, **50**, 100, 200, 500 | ms | Ranging duration. Increasing and improve reliability. Only certain values are supported by the base library. |
-| board | hcsr04 | Yes | **'local'**,'0x58','0x59','0x5A','0x5B' | N/A | Where the GPIO pins for trigger and echo are. 'Local' uses on-board pins from the board. If using an AW9523 GPIO expander, specify the I2C address of the board. |
-| trigger | hcsr04 | Yes | int | N/A | Pin to trigger ping. |
-| echo | hcsr04 | Yes | int | N/A | Pin to listen for echo on. |
-| timeout | hcsr04 | Yes | float | seconds | How long to wait for the echo. |
+##### Longitudinal and Lateral assignments
+Both the longitudinal and lateral dictionaries have a 'defaults' and 'detectors' key. A default will apply to all
+detectors in that direction, unless a detector has a specific value assigned.
+
+| Options | Required? | Defaultable? | Valid Options | Default | Lat | Long | Description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| offset | Yes | Yes | distance quantity | None | Yes | Yes | Lateral: Distance the side of the vehicle should be from the sensor aperture when correctly parked. |
+| spread_park | Yes | Yes | distance quantity | None | No | Yes | Maximum deviation from the stop point that can still be considered "OK" |
+| spread_ok | Yes | Yes | distance quantity | None | Yes | No | Maximum deviation from the offset point that can still be considered "OK" |
+| spread_warn | Yes | Yes | distance_quantity | None | Yes | No | Maximum deviation from the offset point that be considered a "WARN" |
+| side | Yes | Yes | L, R | None | Yes | No | Which side of the bay, looking out the garage door, the detector is mounted on. |
 
 
-
-
+# Rewrite needed below here!
 
 ## MQTT Topics
 
@@ -166,22 +245,26 @@ Topic: '/cobrabay/_MAC_/connectivity'
 
 **Note:** This topic is also the last-will for the device. If Connectivity goes to offline, it can be safely assumed that all other topics are unavailable. 
 
+**CPU**
+
+Topic: '/cobrabay'/_
+
 **Memory**
 
 Topic: '/cobrabay/_MAC_/mem'
 
 Available memory on the device, in kilobytes. Largely useful in debugging where we can wander into MemoryExceptions.
 
+
 ### Device Commands
 
 A Device can accept the following commands through the topic 'cobrabay/_MAC_/cmd'
 
-| Command        | Options                                     | Action                                                                                                | 
-|----------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------|
-| reset          | None                                        | Perform a soft reset of the whole system                                                              |
-| rescan_sensors | None                                        | Rescan the defined sensors                                                                            |
-| display_sensor | sensor: *sensor_id*<br />timeout: *seconds* | Display reading from *sensor_id* on the display for *timeout* seconds. Timeout defaults to 360s (5m). | 
-| rediscover     | None                                        | Recalculate discovery and resend to Home Assistant.                                                   |
+| Command | Action                                                                                                | 
+|---------|-------------------------------------------------------------------------------------------------------|
+| reboot  | Perform a soft reset of the whole system                                                              |
+| rescan | Rescan hardware and reinitalize all detectors. |
+| rediscover | Resend Home Assistant Discovery. |
 
 ### Bay Sensors
 Bay sensors are reported as a child of the device, under '/CobraBay/_MAC_/_bay_name_/_sensor_'
@@ -232,19 +315,20 @@ A progression of sensors would look like this:*
 | --- | --- |
 | dock | Start the docking process. |
 | undock | Start the undocking process. |
-| complete | Mark the docking as complete based on an external criteria |
 | abort | Abort a running docking or undocking. |
-| verify | Check occupancy of bay and update status. |
 
 
-# Future Enhancements
-Not-quite-bugs:
-* Get Syslog handler to attach to children.
+# Future Enhancements & Bug Fixes
+## Enhancements:
+* Better separate undock and dock modes. Currently undock uses too much of the dock behavior.
+* Range-based trigger. Start process based on range changes
+* Replace strober with progress bar
+* Ability to save current system settings to config file
+* Ability to soft-reload system from config file
+* Ability to save current vehicle position as offsets
+* Even better sensor handling. Reset sensors if they go offline.
 
-Sort of working but not done yet:
-* Home Assistant Discovery
 
-Features
-* Include NTP client so real timestamps can be included
-* Separate configuration into YAML
-* Add ability to load/reload/save configuration via MQTT commands
+## Known Bugs:
+* Detector offsets sometimes don't apply.
+
