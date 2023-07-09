@@ -223,6 +223,11 @@ class CBConfig:
         config_dict = {}
         # Bring in the unit system.
         config_dict['unit_system'] = self._config['system']['unit_system']
+        # Bottom box settings
+        try:
+            config_dict['bottom_box'] = self._config['display']['bottom_box']
+        except KeyError:
+            config_dict['bottom_box'] = 'strobe'
         # Set the strobe update speed.
         try:
             config_dict['strobe_speed'] = Quantity(self._config['display']['strobe_speed']).to('nanosecond').magnitude
@@ -233,8 +238,6 @@ class CBConfig:
         config_dict['matrix_width'] = self._config['display']['matrix']['width']
         config_dict['matrix_height'] = self._config['display']['matrix']['height']
         config_dict['gpio_slowdown'] = self._config['display']['matrix']['gpio_slowdown']
-        config_dict['mqtt_image'] = self._config['display']['mqtt_image']
-        config_dict['mqtt_update_interval'] = Quantity(self._config['display']['mqtt_update_interval'])
         # Default font is the packaged-in OpenSans Light.
         with importlib.resources.path("CobraBay.data", 'OpenSans-Light.ttf') as p:
             core_font_path = p

@@ -16,22 +16,49 @@ import math
 
 ureg = UnitRegistry()
 
-
 class CBDisplay:
-    def __init__(self, config):
+    def __init__(self,
+                 matrix_width,
+                 matrix_height,
+                 gpio_slowdown,
+                 core_font,
+                 cbcore,
+                 bottom_box=None,
+                 unit_system="metric",
+                 strobe_speed=None):
+        """
+
+        :param unit_system: Unit system. "imperial" or "metric", defaults to "metric"
+        :type unit_system: str
+        :param matrix_width: Width of the LED matrix, in pixels
+        :type matrix_width: int
+        :param matrix_height: Height of the LED matrix, in pixels
+        :type matrix_height: int
+        :param gpio_slowdown: GPIO pacing to prevent flicker
+        :type gpio_slowdown: int
+        :param bottom_box: Which bottom box to be. Can be "strobe", "progress" or "none"
+        :type bottom_box: str
+        :param strobe_speed: How fast the strober bugs should move.
+        :type strobe_speed: Quantity(ms)
+        :param core_font: Path to the font to use. Must be a TTF.
+        :type core_font: Path
+        :param cbcore: Reference to the Core object
+        """
         # Get a logger!
         self._logger = logging.getLogger("CobraBay").getChild("Display")
-        self._logger.setLevel(config.get_loglevel('display'))
         self._logger.info("Display initializing...")
-        # Initialize the internal settings.
-        self._settings = config.display()
-        self._logger.info("Now have settings: {}".format(self._settings))
+        
+        # Save parameters
+        self._matrix_width = matrix_width
+        self._matrix_height = matrix_height
+        self._bottom_box = bottom_box
+        self._strobe_speed = strobe_speed
+        self._core_font = core_font
+        self._unit_system = unit_system
+        self._cbcore = cbcore
 
         # Operating settings. These get reset on every start.
-        self._running = {}
-        self._running['strobe_offset'] = 0
-        self._running['strobe_timer'] = monotonic_ns()
-
+        self._running = {'strobe_offset': 0, 'strobe_timer': monotonic_ns()}
         self._current_image = None
 
         # Layers dict.
@@ -43,7 +70,7 @@ class CBDisplay:
         self._setup_layers()
 
         # Set up the matrix object itself.
-        self._create_matrix(self._settings['matrix_width'], self._settings['matrix_height'], self._settings['gpio_slowdown'])
+        self._create_matrix(self._matrix_width, self._matrix_height, gpio_slowdown)
 
     # Method to set up image layers for use. This takes a command when the bay is ready so lateral zones can be prepped.
     def _setup_layers(self):
@@ -65,11 +92,11 @@ class CBDisplay:
             return None
 
         # For convenient reference later.
-        w = self._settings['matrix_width']
-        h = self._settings['matrix_height']
+        w = self._matrix_width
+        h = self._matrix_height
 
         # Calculate the available pixels for each zones.
-        avail_height = self._settings['matrix_height'] - 6  #
+        avail_height = self._matrix_height - 6  #
         pixel_lengths = self._parts(avail_height, len(display_reg_info['lateral_order']))
         self._logger.debug("Split {} pixels for {} lateral zones into: {}".
                            format(avail_height,len(display_reg_info['lateral_order']),pixel_lengths))
@@ -155,7 +182,7 @@ class CBDisplay:
             raise ValueError("Show did not get a valid mode.")
 
         # Make a base layer.
-        img = Image.new("RGBA", (self._settings['matrix_width'], self._settings['matrix_height']), (0,0,0,255))
+        img = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0,0,0,255))
         # If enabled, put status icons at the bottom of the display.
         if icons:
             # Network status icon, shows overall network and MQTT status.
@@ -182,8 +209,8 @@ class CBDisplay:
             return
 
         # For easy reference.
-        w = self._settings['matrix_width']
-        h = self._settings['matrix_height']
+        w = self._matrix_width
+        h = self._matrix_height
         # Make a base image, black background.
         final_image = Image.new("RGBA", (w, h), (0,0,0,255))
         ## Center area, the range number.
@@ -194,12 +221,21 @@ class CBDisplay:
         )
         final_image = Image.alpha_composite(final_image, range_layer)
 
-        ## Bottom strobe box.
-        final_image = Image.alpha_composite(final_image,
-                                            self._strobe(
-                                                range_quality=bay_obj.range.quality,
-                                                range_pct=bay_obj.range_pct
-                                            ))
+        # ## Bottom strobe box.
+        try:
+            if self._bottom_box.lower() == 'strobe':
+
+                final_image = Image.alpha_composite(final_image,
+                                                    self._strobe(
+                                                        range_quality=bay_obj.range.quality,
+                                                        range_pct=bay_obj.range_pct))
+            elif self._bottom_box.lower() == 'progress':
+                self._logger.debug("Compositing in progress for bottom box.")
+                final_image = Image.alpha_composite(final_image,
+                                                    self._progress_bar(range_pct=bay_obj.range_pct))
+        except AttributeError:
+            self._logger.debug("Bottom box disabled.")
+            pass
 
         for lateral_detector in bay_obj.lateral_sorted:
             detector = bay_obj.detectors[lateral_detector]
@@ -218,14 +254,14 @@ class CBDisplay:
         :param range_pct: Percentage of distance from garage door to the parking point.
         :return:
         '''
-        w = self._settings['matrix_width']
-        h = self._settings['matrix_height']
+        w = self._matrix_width
+        h = self._matrix_height
         # Set up a base image to draw on.
         img = Image.new("RGBA", (w, h), (0,0,0,0))
         draw = ImageDraw.Draw(img)
         # Back up and emergency distances, we flash the whole bar.
         if range_quality in ('back_up','emergency'):
-            if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
+            if monotonic_ns() > self._running['strobe_timer'] + self._strobe_speed:
                 try:
                     if self._running['strobe_color'] == 'red':
                         self._running['strobe_color'] = 'black'
@@ -267,7 +303,7 @@ class CBDisplay:
                 # draw.line([(right_strobe_start, h - 2), (right_strobe_stop, h - 2)], fill="red")
                 draw.rectangle([(right_strobe_start, h - 3), (right_strobe_stop, h - 1)], fill="red")
             # If time is up, move the strobe bug forward.
-            if monotonic_ns() > self._running['strobe_timer'] + self._settings['strobe_speed']:
+            if monotonic_ns() > self._running['strobe_timer'] + self._strobe_speed:
                 self._running['strobe_offset'] += 1
                 self._running['strobe_timer'] = monotonic_ns()
                 # Don't let the offset push the bugs out to infinity.
@@ -277,8 +313,8 @@ class CBDisplay:
 
     # Methods to create image objects that can then be composited.
     def _frame_approach(self):
-        w = self._settings['matrix_width']
-        h = self._settings['matrix_height']
+        w = self._matrix_width
+        h = self._matrix_height
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         draw.rectangle([(0, h - 3), (w - 1, h - 1)], width=1)
@@ -286,8 +322,8 @@ class CBDisplay:
 
     def _frame_lateral(self):
         # Localize matrix width and height, just to save readability
-        w = self._settings['matrix_width']
-        h = self._settings['matrix_height']
+        w = self._matrix_width
+        h = self._matrix_height
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         # Left Rectangle
@@ -314,12 +350,12 @@ class CBDisplay:
 
         # Default to lower right placement if no alternate positions given.
         if x_input is None:
-            x_input = self._settings['matrix_width']-5
+            x_input = self._matrix_width-5
         if y_input is None:
-            y_input = self._settings['matrix_height']-5
+            y_input = self._matrix_height-5
 
-        w = self._settings['matrix_width']
-        h = self._settings['matrix_height']
+        w = self._matrix_width
+        h = self._matrix_height
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         draw.rectangle([x_input+1,y_input,x_input+3,y_input+2], outline="white", fill=mqtt_color)
@@ -343,7 +379,7 @@ class CBDisplay:
                 range_string = "CLEAR!"
         elif input_range == 'Beyond range':
             range_string = "APPROACH"
-        elif self._settings['unit_system'] == 'imperial':
+        elif self._unit_system.lower() == 'imperial':
             as_inches = input_range.to('in')
             if as_inches.magnitude < 12:
                 range_string = "{}\"".format(round(as_inches.magnitude,1))
@@ -361,7 +397,7 @@ class CBDisplay:
         elif range_quality == 'warning':
             text_color = 'yellow'
         elif range_quality == 'door_open':
-            text_color = 'blue'
+            text_color = 'white'
         else:
             text_color = 'green'
         # Now we can get it formatted and return it.
@@ -371,15 +407,26 @@ class CBDisplay:
     # Generalized placard creator. Make an image for arbitrary text.
     def _placard(self,text,color,w_adjust=8,h_adjust=4):
         # Localize matrix and adjust.
-        w = self._settings['matrix_width']
-        h = self._settings['matrix_height']
+        w = self._matrix_width
+        h = self._matrix_height
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         # Find the font size we can use.
-        font = ImageFont.truetype(font=self._settings['core_font'],
+        font = ImageFont.truetype(font=self._core_font,
                                   size=self._scale_font(text, w-w_adjust, h-h_adjust))
         # Make the text. Center it in the middle of the area, using the derived font size.
         draw.text((w/2, (h-4)/2), text, fill=ImageColor.getrgb(color), font=font, anchor="mm")
+        return img
+
+    def _progress_bar(self, range_pct):
+        img = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0,0,0,0))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle((0,0,self._matrix_width-1,self._matrix_height-1),fill=None, outline='white', width=1)
+        self._logger.debug("Total matrix width: {}".format(self._matrix_width))
+        self._logger.debug("Range percentage: {}".format(range_pct))
+        progress_pixels = int((self._matrix_width-2)*range_pct)
+        self._logger.debug("Progress bar pixels: {}".format(progress_pixels))
+        draw.line((1,self._matrix_height-2,1+progress_pixels,self._matrix_height-2),fill='green', width=1)
         return img
 
     # Utility method to find the largest font size that can fit in a space.
@@ -387,7 +434,7 @@ class CBDisplay:
         # Start at font size 1.
         fontsize = 1
         while True:
-            font = ImageFont.truetype(font=self._settings['core_font'], size=fontsize)
+            font = ImageFont.truetype(font=self._core_font, size=fontsize)
             bbox = font.getbbox(text)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]

@@ -75,10 +75,13 @@ class CBCore:
             bay_config = self._cbconfig.bay(bay_id)
             self._logger.debug("Bay config:")
             self._logger.debug(pformat(bay_config))
-            self._bays[bay_id] = CobraBay.CBBay(**bay_config, detectors=self._detectors, cbcore=self)
+            self._bays[bay_id] = CobraBay.CBBay(**bay_config, system_detectors=self._detectors, cbcore=self)
 
         self._logger.info('Creating display...')
-        self._display = CobraBay.CBDisplay(self._cbconfig)
+        display_config = self._cbconfig.display()
+        self._logger.debug("Using display config:")
+        self._logger.debug(pformat(display_config))
+        self._display = CobraBay.CBDisplay(**display_config, cbcore=self)
         # Inform the network about the display. This is so the network can send display images. Nice to have, very
         # useful for debugging!
         self._network.display = self._display
