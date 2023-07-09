@@ -460,6 +460,8 @@ class CBNetwork:
         outbound_messages.append({'topic': topic_base + 'status', 'payload': input_obj.status, 'repeat': False})
         # Is the detector in fault?
         outbound_messages.append({'topic': topic_base + 'fault', 'payload': input_obj.fault, 'repeat': False})
+        # The detector's current offset
+        outbound_messages.append({'topic': topic_base + 'offset', 'payload': input_obj.offset, 'repeat': False})
         # Send value, raw value and quality if detector is ranging.
         if input_obj.status == 'ranging':
             # Detector Value.
