@@ -13,7 +13,7 @@ from functools import wraps
 from .exceptions import SensorException
 import CobraBay
 
-# Scan the detectors if we're asked for a property that needs a fresh can and we haven't scanned recently enough.
+# Scan the detectors if we're asked for a property that needs a fresh and we haven't scanned recently enough.
 # def scan_if_stale(func):
 #     @wraps(func)
 #     def wrapper(self, *args, **kwargs):
@@ -62,7 +62,7 @@ class CBBay:
                  stop_point,
                  motion_timeout,
                  output_unit,
-                 detectors,
+                 system_detectors,
                  detector_settings,
                  selected_range,
                  intercepts,
@@ -81,9 +81,9 @@ class CBBay:
         :type motion_timeout: Quantity(Time)
         :param output_unit: Unit to output measurements in. Should be a distance unit understood by Pint (ie: 'in', 'cm', etc)
         :type output_unit: str
-        :param detectors: Dictionary of detector objects.
-        :type detectors: dict
-        :param detector_settings: Dictionary of detector configuration settings.
+        :param system_detectors: Dictionary of detector objects available on the system.
+        :type system_detectors: dict
+        :param detector_settings: Dictionary of detector configuration settings for this bay.
         :type detector_settings: dict
         :param selected_range: Of longitudinal sensors, which should be used as the default range sensor.
         :type selected_range: str
@@ -105,8 +105,7 @@ class CBBay:
         self._logger = logging.getLogger("CobraBay").getChild(self.id)
         self._logger.setLevel(log_level)
         self._logger.info("Initializing bay: {}".format(id))
-        self._logger.debug("Bay received detectors: {}".format(detectors))
-
+        self._logger.debug("Bay received system detectors: {}".format(system_detectors))
 
         # Save the remaining parameters.
         self._name = name
@@ -114,14 +113,11 @@ class CBBay:
         self._stop_point = stop_point
         self.motion_timeout = motion_timeout
         self._output_unit = output_unit
-        self._detectors = detectors
-        self._detector_settings = detector_settings
+        self._detectors = None
         self._selected_range = selected_range
         self._intercepts = intercepts
         self.lateral_sorted = self._sort_lateral(intercepts)
         self._cbcore = cbcore
-        # Create a logger.
-
 
         # Initialize variables.
         self._position = {}
@@ -130,19 +126,18 @@ class CBBay:
         self._previous_scan_ts = 0
         self._state = None
         self._occupancy = None
-        self._previous = {
+        self._previous = {}
 
-        }
         # Calculate the adjusted depth.
         self._adjusted_depth = self._depth - self._stop_point
 
         # Create a unit registry.
         self._ureg = UnitRegistry
 
-        # Store the detector objects
-        self._detectors = detectors
         # Apply our configurations to the detectors.
-        self._setup_detectors()
+        self._detectors = self._setup_detectors(system_detectors, detector_settings)
+
+        # Report configured detectors
         self._logger.info("Detectors configured:")
         for detector in self._detectors.keys():
             try:
@@ -452,48 +447,48 @@ class CBBay:
             return_list.append(detector_message)
         return return_list
 
-    # Tells the detectors to update.
-    # Note, this does NOT trigger timer operations.
-    def _scan_detectors(self, filter_lateral=True):
-        self._logger.debug("Starting detector scan.")
-        self._logger.debug("Have detectors: {}".format(self._detectors))
-        # Staging dicts. This makes sure we wipe any items that need to be wiped.
-        position = {}
-        quality = {}
-        # Check all the detectors.
-        for detector_name in self._detectors:
-            try:
-                position[detector_name] = self._detectors[detector_name].value
-            except SensorException:
-                # For now, pass. Need to add logic here to actually set the overall bay status.
-                pass
-
-            quality[detector_name] = self._detectors[detector_name].quality
-            self._logger.debug("Read of detector {} returned value '{}' and quality '{}'".
-                               format(self._detectors[detector_name].name, position[detector_name],
-                                      quality[detector_name]))
-
-        if filter_lateral:
-            # Pull the raw range value once, use it to test all the intercepts.
-            raw_range = self._detectors[self._selected_range].value_raw
-            for lateral_name in self.lateral_sorted:
-                # If intercept range hasn't been met yet, we wipe out any value, it's meaningless.
-                # Have a bug where this is sometimes erroring out due to a None range value.
-                # Trapping and logging for now.
-                try:
-                    if raw_range > self._intercepts[lateral_name]:
-                        quality[lateral_name] = "Not Intercepted"
-                        self._logger.debug("Sensor {} with intercept {}. Range {}, not intercepted.".
-                                           format(lateral_name,
-                                                  self._intercepts[lateral_name].to('cm'),
-                                                  raw_range.to('cm')))
-                except ValueError:
-                    self._logger.debug("For lateral sensor {} cannot compare intercept {} to range {}".
-                                       format(lateral_name,
-                                              self._intercepts[lateral_name],
-                                              raw_range))
-        self._position = position
-        self._quality = quality
+    # # Tells the detectors to update.
+    # # Note, this does NOT trigger timer operations.
+    # def _scan_detectors(self, filter_lateral=True):
+    #     self._logger.debug("Starting detector scan.")
+    #     self._logger.debug("Have detectors: {}".format(self._detectors))
+    #     # Staging dicts. This makes sure we wipe any items that need to be wiped.
+    #     position = {}
+    #     quality = {}
+    #     # Check all the detectors.
+    #     for detector_name in self._detectors:
+    #         try:
+    #             position[detector_name] = self._detectors[detector_name].value
+    #         except SensorException:
+    #             # For now, pass. Need to add logic here to actually set the overall bay status.
+    #             pass
+    #
+    #         quality[detector_name] = self._detectors[detector_name].quality
+    #         self._logger.debug("Read of detector {} returned value '{}' and quality '{}'".
+    #                            format(self._detectors[detector_name].name, position[detector_name],
+    #                                   quality[detector_name]))
+    #
+    #     if filter_lateral:
+    #         # Pull the raw range value once, use it to test all the intercepts.
+    #         raw_range = self._detectors[self._selected_range].value_raw
+    #         for lateral_name in self.lateral_sorted:
+    #             # If intercept range hasn't been met yet, we wipe out any value, it's meaningless.
+    #             # Have a bug where this is sometimes erroring out due to a None range value.
+    #             # Trapping and logging for now.
+    #             try:
+    #                 if raw_range > self._intercepts[lateral_name]:
+    #                     quality[lateral_name] = "Not Intercepted"
+    #                     self._logger.debug("Sensor {} with intercept {}. Range {}, not intercepted.".
+    #                                        format(lateral_name,
+    #                                               self._intercepts[lateral_name].to('cm'),
+    #                                               raw_range.to('cm')))
+    #             except ValueError:
+    #                 self._logger.debug("For lateral sensor {} cannot compare intercept {} to range {}".
+    #                                    format(lateral_name,
+    #                                           self._intercepts[lateral_name],
+    #                                           raw_range))
+    #     self._position = position
+    #     self._quality = quality
 
     # Calculate the ordering of the lateral sensors.
     def _sort_lateral(self, intercepts):
@@ -527,17 +522,28 @@ class CBBay:
             raise ValueError("'{}' not a valid state for detectors.".format(target_status))
 
     # Apply specific config options to the detectors.
-    def _setup_detectors(self):
-        # For each detector we use, apply its properties.
-        self._logger.debug("Detectors: {}".format(self._detectors.keys()))
-        for dc in self._detector_settings.keys():
-            self._logger.info("Configuring detector {}".format(dc))
-            self._logger.debug("Settings: {}".format(self._detector_settings[dc]))
-            # Apply all the bay-specific settings to the detector. Usually these are defined in the detector-settings.
-            for item in self._detector_settings[dc]:
-                self._logger.info(
-                    "Setting property {} to {}".format(item, self._detector_settings[dc][item]))
-                setattr(self._detectors[dc], item, self._detector_settings[dc][item])
-            # Bay depth is a bay global. For range sensors, this also needs to get applied.
-            if isinstance(self._detectors[dc], CobraBay.detectors.Range):
-                setattr(self._detectors[dc], "bay_depth", self._depth)
+    def _setup_detectors(self, system_detectors, detector_settings):
+        # Output dictionary.
+        configured_detectors = {}
+        # Some debug outfit.
+        self._logger.debug("Available detectors on system: {}".format(system_detectors.keys()))
+        self._logger.debug("Detectors to configure: {}".format(detector_settings.keys()))
+        for dc in detector_settings.keys():
+            # Try to copy the object to the configured dict.
+            try:
+                configured_detectors[dc] = system_detectors[dc]
+            except KeyError:
+                self._logger.warning("Bay references detector '{}', but is not defined! Ignoring.".format(dc))
+            else:
+                self._logger.info("Configuring detector {}".format(dc))
+                self._logger.debug("Settings: {}".format(detector_settings[dc]))
+                # Apply all the bay-specific settings to the detector. Usually these are defined in the detector-settings.
+                for item in detector_settings[dc]:
+                    self._logger.info(
+                        "Setting property {} to {}".format(item, detector_settings[dc][item]))
+                    setattr(configured_detectors[dc], item, detector_settings[dc][item])
+                # Bay depth is a bay global. For range sensors, this also needs to get applied.
+                if isinstance(configured_detectors[dc], CobraBay.detectors.Range):
+                    setattr(configured_detectors[dc], "bay_depth", self._depth)
+        self._logger.debug("Configured detectors: {}".format(configured_detectors.keys()))
+        return configured_detectors
