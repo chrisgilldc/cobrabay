@@ -9,9 +9,10 @@ from math import floor
 import logging
 # from pprint import pformat, pprint
 from functools import wraps
-# import sys
-from .exceptions import SensorException
-import CobraBay
+# from .exceptions import SensorException
+from collections import namedtuple
+# import CobraBay
+import sys
 
 # Scan the detectors if we're asked for a property that needs a fresh and we haven't scanned recently enough.
 # def scan_if_stale(func):
@@ -61,13 +62,11 @@ class CBBay:
                  depth,
                  stop_point,
                  motion_timeout,
-                 output_unit,
+                 longitudinal,
+                 lateral,
                  system_detectors,
-                 detector_settings,
-                 selected_range,
-                 intercepts,
                  cbcore,
-                 log_level="WARNING", **kwargs):
+                 log_level="WARNING"):
         """
         :param id: ID for the bay. Cannot have spaces.
         :type id: str
@@ -79,20 +78,12 @@ class CBBay:
         :type stop_point: Quantity(Distance)
         :param motion_timeout: During a movement, how long the bay must be still to be considered complete.
         :type motion_timeout: Quantity(Time)
-        :param output_unit: Unit to output measurements in. Should be a distance unit understood by Pint (ie: 'in', 'cm', etc)
-        :type output_unit: str
         :param system_detectors: Dictionary of detector objects available on the system.
         :type system_detectors: dict
-        :param detector_settings: Dictionary of detector configuration settings for this bay.
-        :type detector_settings: dict
-        :param selected_range: Of longitudinal sensors, which should be used as the default range sensor.
-        :type selected_range: str
         :param longitudinal: Detectors which are arranged as longitudinal.
-        :type longitudinal: list
+        :type longitudinal: dict
         :param lateral: Detectors which are arranged as lateral.
-        :type lateral: list
-        :param intercepts: For lateral sensors, the raw distance from the end of the bay each lateral crosses the parking area.
-        :type intercepts: list
+        :type lateral: dict
         :param cbcore: Object reference to the CobraBay core.
         :type cbcore: object
         :param log_level: Log level for the bay, must be a Logging level.
@@ -103,7 +94,7 @@ class CBBay:
         self.id = id
 
         self._logger = logging.getLogger("CobraBay").getChild(self.id)
-        self._logger.setLevel(log_level)
+        self._logger.setLevel(log_level.upper())
         self._logger.info("Initializing bay: {}".format(id))
         self._logger.debug("Bay received system detectors: {}".format(system_detectors))
 
@@ -112,12 +103,14 @@ class CBBay:
         self._depth = depth
         self._stop_point = stop_point
         self.motion_timeout = motion_timeout
-        self._output_unit = output_unit
         self._detectors = None
-        self._selected_range = selected_range
-        self._intercepts = intercepts
-        self.lateral_sorted = self._sort_lateral(intercepts)
         self._cbcore = cbcore
+
+        # Select a longitudinal detector to be the main range detector.
+        # Only one supported currently.
+        self._selected_range = self._select_range(longitudinal)
+        # Sort the lateral detectors by intercept.
+        self.lateral_sorted = self._sort_lateral(lateral['detectors'])
 
         # Initialize variables.
         self._position = {}
@@ -135,7 +128,7 @@ class CBBay:
         self._ureg = UnitRegistry
 
         # Apply our configurations to the detectors.
-        self._detectors = self._setup_detectors(system_detectors, detector_settings)
+        self._detectors = self._setup_detectors(longitudinal=longitudinal, lateral=lateral, system_detectors=system_detectors)
 
         # Report configured detectors
         self._logger.info("Detectors configured:")
@@ -490,23 +483,51 @@ class CBBay:
     #     self._position = position
     #     self._quality = quality
 
+    def _select_range(self, longitudinal):
+        """
+        Select a primary longitudinal sensor to use for range from among those presented.
+
+        :param longitudinal:
+        :return: str
+        """
+        if len(longitudinal['detectors']) == 0:
+            raise ValueError("No longitudinal detectors defined. Cannot select a range!")
+        elif len(longitudinal['detectors']) > 1:
+            raise ValueError("Cannot select a range! More than one longitudinal detector not currently supported.")
+        else:
+            return list(longitudinal.keys())[0]
+
     # Calculate the ordering of the lateral sensors.
-    def _sort_lateral(self, intercepts):
-        self._logger.debug("Sorting intercepts: {}".format(intercepts))
+    def _sort_lateral(self, lateral_detectors):
+        """
+        Sort the lateral detectors by distance.
+
+        :param lateral_detectors: List of lateral detector definition dicts.
+        :type lateral_detectors: list
+        :return:
+        """
+        # Create the named tuple type to store both detector name and intercept distance.
+        Intercept = namedtuple('Intercept', ['lateral','intercept'])
+
+        self._logger.debug("Creating sorted intercepts from laterals: {}".format(lateral_detectors))
         lateral_sorted = []
-        for detector_name in intercepts:
-            detector_intercept = intercepts[detector_name]
+        for item in lateral_detectors:
+            # Make a named tuple out of the detector's config.
+            this_detector = Intercept(item['detector'], item['intercept'])
             if len(lateral_sorted) == 0:
-                lateral_sorted.append(detector_name)
+                # If this is the first detector, append and we're done.
+                lateral_sorted.append(this_detector)
             else:
+                # Otherwise, search and insert in the appropriate location.
                 i=0
                 while i < len(lateral_sorted):
-                    if detector_intercept < intercepts[lateral_sorted[i]]:
-                        lateral_sorted.insert(i, detector_name)
+                    if this_detector.intercept < lateral_sorted[i].intercept:
+                        lateral_sorted.insert(i, this_detector)
                         break
                     i += 1
+                # If we haven't inserted anywhere yet, this is larger than all others, so append.
                 if i == len(lateral_sorted):
-                    lateral_sorted.append(detector_name)
+                    lateral_sorted.append(this_detector)
         self._logger.debug("Lateral detectors sorted to order: {}".format(lateral_sorted))
         return lateral_sorted
 
@@ -521,29 +542,38 @@ class CBBay:
         else:
             raise ValueError("'{}' not a valid state for detectors.".format(target_status))
 
-    # Apply specific config options to the detectors.
-    def _setup_detectors(self, system_detectors, detector_settings):
+    # Configure system detectors for this bay.
+    def _setup_detectors(self, longitudinal, lateral, system_detectors):
         # Output dictionary.
         configured_detectors = {}
-        # Some debug outfit.
-        self._logger.debug("Available detectors on system: {}".format(system_detectors.keys()))
-        self._logger.debug("Detectors to configure: {}".format(detector_settings.keys()))
-        for dc in detector_settings.keys():
-            # Try to copy the object to the configured dict.
-            try:
-                configured_detectors[dc] = system_detectors[dc]
-            except KeyError:
-                self._logger.warning("Bay references detector '{}', but is not defined! Ignoring.".format(dc))
-            else:
-                self._logger.info("Configuring detector {}".format(dc))
-                self._logger.debug("Settings: {}".format(detector_settings[dc]))
-                # Apply all the bay-specific settings to the detector. Usually these are defined in the detector-settings.
-                for item in detector_settings[dc]:
-                    self._logger.info(
-                        "Setting property {} to {}".format(item, detector_settings[dc][item]))
-                    setattr(configured_detectors[dc], item, detector_settings[dc][item])
-                # Bay depth is a bay global. For range sensors, this also needs to get applied.
-                if isinstance(configured_detectors[dc], CobraBay.detectors.Range):
-                    setattr(configured_detectors[dc], "bay_depth", self._depth)
-        self._logger.debug("Configured detectors: {}".format(configured_detectors.keys()))
+        # Some debug output
+        self._logger.debug("Available detectors on system: {}".format(system_detectors))
+        self._logger.debug("Bay Longitudinal settings: {}".format(longitudinal))
+        self._logger.debug("Bay Lateral settings: {}".format(lateral))
+
+        for direction in ( longitudinal, lateral ):
+            for detector_settings in direction['detectors']:
+                # Merge in the defaults.
+                for item in direction['defaults']:
+                    if item not in detector_settings:
+                        detector_settings[item] = direction['defaults'][item]
+                detector_id = detector_settings['detector']
+                del(detector_settings['detector'])
+                try:
+                    configured_detectors[detector_id] = system_detectors[detector_id]
+                except KeyError:
+                    self._logger.error("Bay references unconfigured detector '{}'".format(detector_id))
+                else:
+                    self._logger.info("Configuring detector {}".format(detector_id))
+                    self._logger.debug("Settings: {}".format(detector_settings))
+                    # Apply all the bay-specific settings to the detector. Usually these are defined in the detector-settings.
+                    for item in detector_settings:
+                        self._logger.info(
+                            "Setting property {} to {}".format(item, detector_settings[item]))
+                        setattr(configured_detectors[detector_id], item, detector_settings[item])
+                    # Bay depth is a bay global. For range sensors, this also needs to get applied.
+                    if direction is longitudinal:
+                        self._logger.debug("Applying bay depth '{}' to longitudinal detector.".format(self._depth))
+                        setattr(configured_detectors[detector_id], "bay_depth", self._depth)
+        self._logger.debug("Configured detectors: {}".format(configured_detectors))
         return configured_detectors

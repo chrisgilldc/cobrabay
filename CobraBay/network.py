@@ -6,7 +6,7 @@
 
 import logging
 from json import dumps as json_dumps
-#from json import loads as json_loads
+from json import loads as json_loads
 import time
 import sys
 
@@ -33,22 +33,23 @@ class CBNetwork:
                  unit_system,
                  system_name,
                  interface,
-                 mqtt_broker,
-                 mqtt_port,
-                 mqtt_username,
-                 mqtt_password,
+                 broker,
+                 port,
+                 username,
+                 password,
                  cbcore,
-                 homeassistant=True,
+                 ha_discover=True,
+                 accept_commands=True,
                  log_level="WARNING",
                  mqtt_log_level="WARNING"):
         # Save parameters.
         self._pistatus = None
         self._display_obj = None
-        self._mqtt_broker = mqtt_broker
-        self._mqtt_port = mqtt_port
-        self._mqtt_username = mqtt_username
-        self._mqtt_password = mqtt_password
-        self._use_homeassistant = homeassistant
+        self._mqtt_broker = broker
+        self._mqtt_port = port
+        self._mqtt_username = username
+        self._mqtt_password = password
+        self._perform_ha_discover = ha_discover
         self._unit_system = unit_system
         self._system_name = system_name
         self._interface = interface
@@ -318,7 +319,7 @@ class CBNetwork:
             return False
 
         # Send a discovery message and an online notification.
-        if self._use_homeassistant:
+        if self._perform_ha_discover:
             self._ha_discovery()
             # Reset the topic history so any newly discovered entities get sent to.
             self._topic_history = {}
@@ -581,7 +582,8 @@ class CBNetwork:
         discovery_topic = "homeassistant/{}/CobraBay_{}/{}/config".\
             format(type,self._client_id,discovery_dict['object_id'])
         self._logger.info("Publishing HA discovery to topic '{}'\n\t{}".format(discovery_topic, discovery_json))
-        self._mqtt_client.publish(discovery_topic, discovery_json)
+        # All discovery messages should be retained.
+        self._mqtt_client.publish(topic=discovery_topic, payload=discovery_json, retain=True)
         # Remove this topic from the topic history if it exists.
         try:
             self._logger.debug("Removed previous value '{}' for topic '{}'".format(self._topic_history[topic], topic))
@@ -658,7 +660,7 @@ class CBNetwork:
             name="{} State".format(bay_obj.name),
             topic=topic_base + "state",
             type="sensor",
-            entity="{}_state".format(bay_obj.id),
+            entity="{}_{}_state".format(self._system_name.lower(), bay_obj.id),
             value_template="{{ value|capitalize }}"
         )
         # Bay Vector
@@ -666,7 +668,7 @@ class CBNetwork:
             name="{} Speed".format(bay_obj.name),
             topic=topic_base + "vector",
             type="sensor",
-            entity="{}_speed".format(bay_obj.id),
+            entity="{}_{}_speed".format(self._system_name.lower(), bay_obj.id),
             value_template="{{ value_json.speed }}",
             unit_of_measurement=self._uom('speed')
 
@@ -675,7 +677,7 @@ class CBNetwork:
             name="{} Direction".format(bay_obj.name),
             topic=topic_base + "vector",
             type="sensor",
-            entity="{}_direction".format(bay_obj.id),
+            entity="{}_{}_direction".format(self._system_name.lower(), bay_obj.id),
             value_template="{{ value_json.direction|capitalize }}",
         )
 
@@ -686,7 +688,7 @@ class CBNetwork:
             name="{} Occupied".format(bay_obj.name),
             topic=topic_base + "occupancy",
             type="binary_sensor",
-            entity="{}_occupied".format(bay_obj.id),
+            entity="{}_{}_occupied".format(self._system_name.lower(), bay_obj.id),
             payload_on="true",
             payload_off="false",
             payload_not_available="error"
@@ -702,21 +704,21 @@ class CBNetwork:
                 name="Detector - {} State".format(det_obj.name),
                 topic=detector_base + "state",
                 type="sensor",
-                entity="{}_{}_{}_state".format(self._system_name, bay_obj.id, det_obj.id),
+                entity="{}_{}_{}_state".format(self._system_name.lower(), bay_obj.id, det_obj.id),
                 value_template="{{ value|capitalize }}"
             )
             self._ha_discover(
                 name="Detector - {} Status".format(det_obj.name),
                 topic=detector_base + "status",
                 type="sensor",
-                entity="{}_{}_{}_status".format(self._system_name, bay_obj.id, det_obj.id),
+                entity="{}_{}_{}_status".format(self._system_name.lower(), bay_obj.id, det_obj.id),
                 value_template="{{ value|capitalize }}"
             )
             self._ha_discover(
                 name="Detector - {} Fault".format(det_obj.name),
                 topic=detector_base + "fault",
                 type="binary_sensor",
-                entity="{}_{}_{}_state".format(self._system_name, bay_obj.id, det_obj.id),
+                entity="{}_{}_{}_fault".format(self._system_name.lower(), bay_obj.id, det_obj.id),
                 payload_on = "true",
                 payload_off = "false"
             )
@@ -724,11 +726,11 @@ class CBNetwork:
                 name="Detector - {} Reading".format(det_obj.name),
                 topic=detector_base + "reading",
                 type="sensor",
-                entity="{}_{}_{}_reading".format(self._system_name, bay_obj.id, det_obj.id),
+                entity="{}_{}_{}_reading".format(self._system_name.lower(), bay_obj.id, det_obj.id),
             )
             self._ha_discover(
                 name="Detector - {} Raw Reading".format(det_obj.name),
                 topic=detector_base + "raw_reading",
                 type="sensor",
-                entity="{}_{}_{}_raw_reading".format(self._system_name, bay_obj.id, det_obj.id),
+                entity="{}_{}_{}_raw_reading".format(self._system_name.lower(), bay_obj.id, det_obj.id),
             )

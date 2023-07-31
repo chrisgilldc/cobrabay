@@ -10,53 +10,44 @@ memory-management issues, it has been converted to a standard Python application
 Raspberry Pi OS Lite 64-bit. Any other Pi with Raspberry Pi OS should work.
 
 ### System Configuration
-* Install OS
+* Install OS - I use RaspberryPiOS 64 Lite
 * Configure network (Wifi or Ethernet, as appropriate)
 * Enable I2C
 
-
 ### Required Libraries
 
-* [paho-mqtt](https://github.com/eclipse/paho.mqtt.python)
-* Packages not available through PIP:
-  * [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix) - Build per instructions.
-  * [TFMini-I2C-Python](https://github.com/madewhatnow/TFmini-I2C-Python) - Copy TFmini_I2C.py into the cobrabay/lib directory.
+* Install a few extra packages (if you used Lite)
+* ```sudo apt install gcc python3-dev git```
+* Install requirements.
+* ```pip3 install -r requirements.txt```
+* Install the RGB Matrix library using the Adafruit scripts
+  * ```curl https://raw.githubusercontent.com/adafruit/Raspberry-Pi-Installer-Scripts/main/rgb-matrix.sh >rgb-matrix.sh sudo bash rgb-matrix.sh```
+  * Select "Y" to Continue
+  * Select "2", Matrix HAT + RTC
+  * Select "1" for Quality
+* Update system configuration
+  * Add 'isolcpus=3' to the end of /boot/cmdline.txt
+  * Blacklist the sound module. The Adafruit installation script currently doesn't do this correctly for the latest RPiOS version ([#253](https://github.com/adafruit/Raspberry-Pi-Installer-Scripts/issues/253))
+  ```sudo echo -n "blacklist snd_bcm2835" > /etc/modprobe.d/alsa-blacklist.conf```
+* Enable serial port for TFMini support
+  * ```raspi-config```
+  * 3 Interfaces
+  * I6 Serial Port
+  * Login shell over serial -> NO
+  * Serial port hardware enabled -> YES
+  * reboot (should prompt when done)
 
 ### CobraBay
+
 * Copy 'cobrabay' to _device_/lib/cobrabay
 * Copy 'code.py' to _device_/code.py
 
-Install the following libraries:
-  * adafruit_aw9523
-  * adafruit_bitmap_font
-  * adafruit_display_shapes
-  * adafruit_display_text
-  * adafruit_esp32spi
-  * adafruit_hcsr04
-  * adafruit_register
-  * adafruit_vl53l1x
-  * paho-mqtt
-
-To install modules:
-```
-pip3 install adafruit-circuitpython-aw9523 adafruit_circuitpython_bitmap_font \
-  adafruit_circuitpython_display_shapes adafruit_circuitpython_display_text \
-  adafruit_circuitpython_hcsr04 adafruit_circuitpython_vl53l1x \
-  paho-mqtt
-```
-
-Optionally, if you want to send to remote syslog:
-* [syslog_handler](https://github.com/chrisgilldc/circuitpython_syslog_handler)
-
-### Fonts
-Place the fonts directory from the repo into _device_/fonts
-
 ### Hardware
 System has been built and tested with the following hardware:
-* Metro M4 Airlift
+* Raspberry Pi 4
 * 64x32 RGB LED Matrix
 * AW9523 GPIO Expander
-* US-100 ultrasonic rangefinder
+* TFMini
 * VL53L1X IR rangefinder
 
 It *may* work on other hardware configurations that are equivilent, but I haven't tested them and make no guarantees.
@@ -154,11 +145,11 @@ display has been tested.
 ##### Display Subsections
 
 ###### Matrix
-| Options | Required? | Valid Options | Default | Description                     |
-| --- | --- | --- | --- |---------------------------------|
-| width | Yes | int | None | Width of the matrix, in pixels  | 
-| height | Yes | int | None | Height of the matrix, in pixels |
-| gpio_slowdown | Yes | int | None | GPIO Slowdown setting to prevent flicker. Check [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix) docs for recommendations. Likely requires testing.
+| Options       | Required? | Valid Options | Default | Description                                                                                                                                                            |
+|---------------|-----------|---------------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| width         | Yes       | int           | None    | Width of the matrix, in pixels                                                                                                                                         | 
+| height        | Yes       | int           | None    | Height of the matrix, in pixels                                                                                                                                        |
+| gpio_slowdown | Yes       | int           | None    | GPIO Slowdown setting to prevent flicker. Check [rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix) docs for recommendations. Likely requires testing. |
 
 #### Detectors
 Detectors define sensing devices used to measure vehicle position. This is currently is a 1:1 mapping, where each 
@@ -320,15 +311,16 @@ A progression of sensors would look like this:*
 
 # Future Enhancements & Bug Fixes
 ## Enhancements:
-* Better separate undock and dock modes. Currently undock uses too much of the dock behavior.
+* Better separate undock and dock modes. Currently, undock uses too much of the dock behavior.
 * Range-based trigger. Start process based on range changes
-* Replace strober with progress bar
+* Replace strober with progress bar - **In progress**
 * Ability to save current system settings to config file
 * Ability to soft-reload system from config file
 * Ability to save current vehicle position as offsets
-* Even better sensor handling. Reset sensors if they go offline.
+* Even better sensor handling. Reset sensors if they go offline. - **In progress**
 
 
-## Known Bugs:
+## Known Issues:
 * Detector offsets sometimes don't apply.
+* If MQTT broker is inaccessible during startup, an MQTT trigger will cause system to go into a loop.
 

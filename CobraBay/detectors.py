@@ -26,6 +26,7 @@ def check_ready(func):
                 return
         self._ready = True
         self._when_ready()
+
     return wrapper
 
 
@@ -39,6 +40,7 @@ def only_if_ready(func):
                                "Current settings:\n{}".format(self._settings))
         else:
             return func(self, *args, **kwargs)
+
     return wrapper
 
 
@@ -61,6 +63,7 @@ def use_value_cache(func):
             value = self._sensor_obj.range
         # Send whichever value it is into the function.
         return func(self, value)
+
     return wrapper
 
 
@@ -99,6 +102,7 @@ def read_if_stale(func):
             self._history = self._history[:10]
         # Call the wrapped function.
         return func(self)
+
     return wrapper
 
 
@@ -109,7 +113,7 @@ class Detector:
         self._name = name
         # Create a logger.
         self._logger = logging.getLogger("CobraBay").getChild("Detector").getChild(self._name)
-        self._logger.setLevel(log_level)
+        self._logger.setLevel(log_level.upper())
         # A unit registry
         self._ureg = UnitRegistry()
         # Is the detector ready for use?
@@ -178,21 +182,21 @@ class Detector:
 # Single Detectors add wrappers around a single sensor. Sensor arrays are not currently supported, but may be in the
 # future.
 class SingleDetector(Detector):
-    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="DEBUG", **kwargs):
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING", **kwargs):
         super().__init__(detector_id=detector_id, name=name, log_level=log_level)
         self._logger.debug("Creating sensor object using options: {}".format(sensor_settings))
         if sensor_type == 'VL53L1X':
             self._logger.debug("Setting up VL53L1X with sensor settings: {}".format(sensor_settings))
-            self._sensor_obj = CB_VL53L1X(**sensor_settings, log_level=log_level)
+            self._sensor_obj = CB_VL53L1X(**sensor_settings, parent_logger=self._logger)
         elif sensor_type == 'TFMini':
             self._logger.debug("Setting up TFMini with sensor settings: {}".format(sensor_settings))
-            self._sensor_obj = TFMini(**sensor_settings, log_level=log_level)
+            self._sensor_obj = TFMini(**sensor_settings, parent_logger=self._logger)
         elif sensor_type == 'FileSensor':
             self._logger.debug("Setting up FileSensor with sensor settings: {}".format(sensor_settings))
-            self._sensor_obj = FileSensor(**sensor_settings, sensor=detector_id, log_level=log_level)
+            self._sensor_obj = FileSensor(**sensor_settings, sensor=detector_id, parent_logger=self._logger)
         else:
             raise ValueError("Detector {} trying to use unknown sensor type {}".format(
-                 self._name, sensor_settings))
+                self._name, sensor_settings))
         self._status = None
 
     # Allow adjustment of timing.
@@ -260,7 +264,7 @@ class SingleDetector(Detector):
         elif isinstance(self._sensor_obj, FileSensor):
             iface = iface_info("file", self._sensor_obj.file)
         else:
-            iface = iface_info("unknown","unknown")
+            iface = iface_info("unknown", "unknown")
         return iface
 
     @property
@@ -282,13 +286,15 @@ class SingleDetector(Detector):
     def value_raw(self):
         raise NotImplementedError("Raw value method should be implemented on a class basis.")
 
+
 # Detector that measures range progress.
-class Range(SingleDetector):
+class Longitudinal(SingleDetector):
     def __init__(self, detector_id, name, error_margin, sensor_type, sensor_settings, log_level="WARNING"):
-        super().__init__(detector_id, name, sensor_type, sensor_settings, log_level)
+        super().__init__(detector_id=detector_id, name=name, error_margin=error_margin, sensor_type=sensor_type,
+                         sensor_settings=sensor_settings, log_level=log_level)
         # Required properties. These are checked by the check_ready decorator function to see if they're not None.
         # Once all required properties are not None, the object is set to ready. Doesn't check for values being *correct*.
-        self._required = ['bay_depth','spread_park','pct_warn','pct_crit']
+        self._required = ['bay_depth', 'spread_park', 'pct_warn', 'pct_crit']
         # Save parameters
         self._error_margin = error_margin
 
@@ -300,8 +306,6 @@ class Range(SingleDetector):
         self._pct_crit = None
         self._dist_warn = None
         self._dist_crit = None
-
-
 
     # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
@@ -325,7 +329,8 @@ class Range(SingleDetector):
     @property
     @read_if_stale
     def quality(self):
-        self._logger.debug("Creating quality from latest value: {} ({})".format(self._history[0][0], type(self._history[0][0])))
+        self._logger.debug(
+            "Creating quality from latest value: {} ({})".format(self._history[0][0], type(self._history[0][0])))
         self._logger.debug("90% of bay depth is: {}".format(self.bay_depth * .9))
         current_value = self._history[0][0]
         if isinstance(current_value, Quantity):
@@ -389,7 +394,7 @@ class Range(SingleDetector):
         # Grab the movement
         movement = self._movement
         print("Movement: {}".format(movement))
-        if not isinstance(movement,dict):
+        if not isinstance(movement, dict):
             return "Unknown"
         elif abs(self._movement['net_dist']) > Quantity(self._error_margin):
             return True
@@ -480,9 +485,9 @@ class Range(SingleDetector):
         self._logger.debug("Calculating derived distances.")
         adjusted_distance = self.bay_depth - self._offset
         self._logger.debug("Adjusted distance: {}".format(adjusted_distance))
-        self._dist_warn = ( adjusted_distance.magnitude * self.pct_warn )/100 * adjusted_distance.units
+        self._dist_warn = (adjusted_distance.magnitude * self.pct_warn) / 100 * adjusted_distance.units
         self._logger.debug("Warning distance: {}".format(self._dist_warn))
-        self._dist_crit = ( adjusted_distance.magnitude * self.pct_crit )/100 * adjusted_distance.units
+        self._dist_crit = (adjusted_distance.magnitude * self.pct_crit) / 100 * adjusted_distance.units
         self._logger.debug("Critical distance: {}".format(self._dist_crit))
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
@@ -494,7 +499,7 @@ class Range(SingleDetector):
 
     @offset.setter
     def offset(self, new_offset):
-        super(Range, self.__class__).offset.fset(self, new_offset)
+        super(Longitudinal, self.__class__).offset.fset(self, new_offset)
 
     @property
     def status(self):
@@ -502,12 +507,14 @@ class Range(SingleDetector):
 
     @status.setter
     def status(self, target_status):
-        super(Range, self.__class__).status.fset(self, target_status)
+        super(Longitudinal, self.__class__).status.fset(self, target_status)
+
 
 # Detector for lateral position
 class Lateral(SingleDetector):
     def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING"):
-        super().__init__(detector_id, name, sensor_type, sensor_settings, log_level)
+        super().__init__(detector_id=detector_id, name=name, sensor_type=sensor_type, sensor_settings=sensor_settings,
+                         log_level=log_level)
         self._required = ['side', 'spread_ok', 'spread_warn']
         self._side = None
         self._spread_ok = None

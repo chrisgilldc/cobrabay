@@ -33,12 +33,12 @@ def main():
 
     # Create a CobraBay config object.
     try:
-        cbconfig = CobraBay.CBConfig(config_file=arg_config, reset_sensors=True)
+        cbconfig = CobraBay.CBConfig(config_file=arg_config)
     except ValueError as e:
         print(e)
         sys.exit(1)
 
-    # Initialize the object.
+    # Initialize the system
     cb = CobraBay.CBCore(config_obj=cbconfig)
 
     # Start the main operating loop.

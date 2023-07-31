@@ -23,10 +23,27 @@ import CobraBay.util
 
 
 class BaseSensor:
-    def __init__(self, logger, log_level='WARNING'):
+    def __init__(self, sensor_name, parent_logger=None, log_level="WARNING"):
+        """
+        Base class for Sensors.
+
+        :param sensor_name:
+        :param parent_logger: Parent logger to attach to.
+        :type parent_logger: logger
+        :param log_level: If no parent logger provided, log level of the new logger to create.
+        :type log_level: str
+        """
 
         # Create a unit registry for the object.
         self._ureg = UnitRegistry()
+
+        # Set up the logger.
+        if parent_logger is None:
+            # If no parent detector is given this sensor is being used in a testing capacity. Create a null logger.
+            self._logger = logging.getLogger(self._name)
+            self._logger.setLevel(log_level)
+        else:
+            self._logger = parent_logger.getChild(self._name)
 
         # Initialize variables.
         self._previous_timestamp = monotonic()
@@ -130,13 +147,28 @@ class BaseSensor:
 
 class I2CSensor(BaseSensor):
     aw9523_boards = {}
-    def __init__(self, i2c_bus, i2c_address, logger, log_level='WARNING'):
-        super().__init__(logger, log_level)
-        # Check for the Base I2C Sensors
-        # Create a logger
+    def __init__(self, i2c_bus, i2c_address, parent_logger=None, log_level="WARNING"):
+        """
+
+        :param i2c_bus: I2C Bus to use
+        :type i2c_bus: int
+        :param i2c_address: Address of the sensor.
+        :type i2c_address: int or str(hex)
+        :param parent_logger: Parent logger to attach to.
+        :type parent_logger: logger
+        :param log_level: If no parent logger provided, log level of the new logger to create.
+        :type log_level: str
+        """
+        # Define our own name based on class name, bus and address.
         self._name = "{}-{}-{}".format(type(self).__name__, i2c_bus, hex(i2c_address))
-        self._logger = logging.getLogger("CobraBay").getChild("Sensor").getChild(self._name)
-        self._logger.setLevel(log_level)
+        # Do base sensor initialization
+        try:
+
+            super().__init__(sensor_name=self._name, parent_logger=parent_logger, log_level=log_level)
+        except ValueError:
+            raise
+
+        # Create a logger
         self._logger.info("Initializing sensor...")
 
         # Set the I2C bus and I2C Address
@@ -182,20 +214,24 @@ class I2CSensor(BaseSensor):
 
 
 class SerialSensor(BaseSensor):
-    def __init__(self, port, baud, logger, log_level='WARNING'):
+    def __init__(self, port, baud, parent_logger=None, log_level="WARNING"):
         """
+        :type port: str
         :type baud: int
-        :type logger: str
+        :type parent_logger: str
+        :param parent_logger: Parent logger to attach to.
+        :type parent_logger: logger
+        :param log_level: If no parent logger provided, log level of the new logger to create.
+        :type log_level: str
         """
+        # Define our own name, based on type name and port.
+        self._name = "{}-{}".format(type(self).__name__, port)
+        # To base sensor initialization.
         try:
-            super().__init__(logger, log_level)
+            super().__init__(sensor_name=self._name, parent_logger=parent_logger, log_level=log_level)
         except ValueError:
             raise
-        # Create a logger
-        self._name = "{}-{}".format(type(self).__name__, port)
-        self._logger = logging.getLogger("CobraBay").getChild("Sensors").getChild(self._name)
         self._logger.info("Initializing sensor...")
-        self._logger.setLevel(log_level)
         self._serial_port = None
         self._baud_rate = None
         self.serial_port = port
@@ -236,19 +272,21 @@ class CB_VL53L1X(I2CSensor):
 
     instances = WeakSet()
 
-    def __init__(self, i2c_bus, i2c_address, enable_board, enable_pin, timing, logger, distance_mode ="long",
-                 log_level="WARNING"):
+    def __init__(self, i2c_bus, i2c_address, enable_board, enable_pin, timing, distance_mode ="long",
+                 parent_logger=None, log_level="WARNING"):
         """
         :type i2c_bus: int
         :type i2c_address: hex
         :type enable_board: str
         :type enable_pin: str
-        :type logger: str
         :type distance_mode: str
+        :param parent_logger: Parent logger to attach to.
+        :type parent_logger: logger
+        :param log_level: If no parent logger provided, log level of the new logger to create.
         :type log_level: str
         """
         try:
-            super().__init__(i2c_bus=i2c_bus, i2c_address=i2c_address, logger=logger, log_level=log_level)
+            super().__init__(i2c_bus=i2c_bus, i2c_address=i2c_address, parent_logger=parent_logger, log_level=log_level)
         except ValueError:
             raise
 
@@ -569,9 +607,20 @@ class CB_VL53L1X(I2CSensor):
             raise CobraBay.exceptions.SensorException
 
 class TFMini(SerialSensor):
-    def __init__(self, port, baud, logger, log_level):
+    def __init__(self, port, baud, parent_logger=None, log_level="WARNING"):
+        """
+
+        :param port: Serial port
+        :type port: str OR Path
+        :param baud: Bitrate for the sensor.
+        :type baud: int
+        :param parent_logger: Parent logger to attach to.
+        :type parent_logger: logger
+        :param log_level: If no parent logger provided, log level of the new logger to create.
+        :type log_level: str
+        """
         try:
-            super().__init__(port=port, baud=baud, logger=logger, log_level=log_level)
+            super().__init__(port=port, baud=baud, parent_logger=parent_logger,  log_level=log_level)
         except ValueError:
             raise
 
@@ -678,9 +727,21 @@ class TFMini(SerialSensor):
         return Quantity('10000000 ns')
 
 class FileSensor(BaseSensor):
-    def __init__(self, csv_file, sensor, rate, direction, unit, logger, log_level='WARNING'):
+    def __init__(self, csv_file, sensor, rate, direction, unit, parent_logger=None, log_level='WARNING'):
+        """
+
+        :param csv_file: File to read
+        :type csv_file: str
+        :param sensor:
+        :param rate:
+        :param direction:
+        :param unit:
+        :param parent_logger: Parent logger to create a child of.
+        :type parent_logger: logger
+        :param log_level: If no parent logger provided, log level of the new logger to create.
+        """
         try:
-            super().__init__(logger, log_level)
+            super().__init__(parent_logger=parent_logger, log_level=log_level)
         except ValueError:
             raise
 
