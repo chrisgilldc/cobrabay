@@ -8,25 +8,12 @@ import logging
 from json import dumps as json_dumps
 from json import loads as json_loads
 import time
-import sys
-
 # from getmac import get_mac_address
 import psutil
 from paho.mqtt.client import Client
-
 from .util import Convertomatic
 from .version import __version__
-
-#
-# {'units': 'imperial',
-# 'system_name': 'CobraBay1',
-# 'homeassistant': True,
-# 'interface': 'eth0',
-# 'mqtt':
-#   {'broker': 'cnc.jumpbeacon.net',
-#   'port': 1883,
-#   'username': 'cobrabay',
-#   'password': 'NbX2&38z@%H@$Cg0'}}
+from CobraBay.const import *
 
 class CBNetwork:
     def __init__(self,
@@ -41,7 +28,7 @@ class CBNetwork:
                  ha_discover=True,
                  accept_commands=True,
                  log_level="WARNING",
-                 mqtt_log_level="WARNING"):
+                 mqtt_log_level="DISABLED"):
         # Save parameters.
         self._pistatus = None
         self._display_obj = None
@@ -57,14 +44,18 @@ class CBNetwork:
 
         # Set up logger.
         self._logger = logging.getLogger("CobraBay").getChild("Network")
-        self._logger.setLevel(log_level)
+        self._logger.setLevel(log_level.upper())
         self._logger.info("Network initializing...")
 
-        # Sub-logger for just MQTT
+        # Create a sublogger for the MQTT client.
         self._logger_mqtt = logging.getLogger("CobraBay").getChild("MQTT")
-        self._logger_mqtt.setLevel(mqtt_log_level)
-        if self._logger_mqtt.level != self._logger.level:
-            self._logger.info("MQTT Logging level set to {}".format(self._logger_mqtt.level))
+        # If MQTT logging is disabled, send it to a null logger.
+        if mqtt_log_level == 'DISABLE':
+            self._logger.info("MQTT client logging is disabled. Set 'mqtt' in logging section if you want it enabled.")
+            self._logger_mqtt.addHandler(logging.NullHandler())
+            self._logger_mqtt.propagate = False
+        else:
+            self._logger_mqtt.setLevel(mqtt_log_level.upper())
 
         # Create a convertomatic instance.
         self._cv = Convertomatic(self._unit_system)
@@ -114,8 +105,9 @@ class CBNetwork:
             username=self._mqtt_username,
             password=self._mqtt_password
         )
-        # Send MQTT logging to the network logger.
-        # self._mqtt_client.enable_logger(self._logger)
+        # Send MQTT logging to the MQTT sublogger
+        if mqtt_log_level != 'DISABLE':
+            self._mqtt_client.enable_logger(self._logger_mqtt)
 
         # Connect callback.
         self._mqtt_client.on_connect = self._on_connect
@@ -192,9 +184,14 @@ class CBNetwork:
 
     # Message publishing method
     def _pub_message(self, topic, payload, repeat):
+        self._logger.debug("Processing message publication on topic '{}'".format(topic))
         # Set the send flag initially. If we've never seen the topic before or we're set to repeat, go ahead and send.
         # This skips some extra logic.
-        if topic not in self._topic_history or repeat:
+        if topic not in self._topic_history:
+            self._logger.debug("Topic not in history, sending...")
+            send = True
+        elif repeat:
+            self._logger.debug("Repeat explicitly enabled, sending...")
             send = True
         else:
             send = False
@@ -205,29 +202,36 @@ class CBNetwork:
 
         # If we're not already sending, then we've seen the topic before and should check for changes.
         if send is False:
-            previous_state = self._topic_history[topic]
+            previous_payload = self._topic_history[topic]
             # Both strings, compare and send if different
-            if isinstance(message, str) and isinstance(previous_state, str):
-                if message != previous_state:
+            if ( isinstance(message, str) and isinstance(previous_payload, str) ) or \
+                ( isinstance(message, (int, float)) and isinstance(previous_payload, (int, float)) ):
+                if message != previous_payload:
+                    self._logger.debug("Payload '{}' does not match previous payload '{}'. Publishing.".format(payload, previous_payload))
                     send = True
                 else:
+                    self._logger.debug("Payload has not changed, will not publish")
                     return
             # For dictionaries, compare individual elements. This doesn't handle nested dicts, but those aren't used.
-            elif isinstance(message, dict) and isinstance(previous_state, dict):
+            elif isinstance(message, dict) and isinstance(previous_payload, dict):
                 for item in message:
-                    if item not in previous_state:
+                    if item not in previous_payload:
+                        self._logger.debug("Payload dict contains new key, publishing.")
                         send = True
                         break
-                    if message[item] != previous_state[item]:
+                    if message[item] != previous_payload[item]:
+                        self._logger.debug("Payload dict key '{}' has changed value, publishing.".format(item))
                         send = True
                         break
-            else:
-                # If type has changed, which is odd,  (and it shouldn't, usually), send it.
-                if type(message) != type(previous_state):
-                    send = True
+            # If type has changed, which is odd,  (and it shouldn't, usually), send it.
+            elif type(message) != type(previous_payload):
+                self._logger.debug("Payload type has changed from '{}' to '{}'. Unusual, but publishing anyway.".
+                                   format(type(previous_payload), type(payload)))
+                send = True
 
         # If we're sending do it.
         if send:
+            self._logger.debug("Publishing message...")
             # New message becomes the previous message.
             self._topic_history[topic] = message
             # Convert the message to JSON if it's a dict, otherwise just send it.
@@ -260,6 +264,7 @@ class CBNetwork:
             # Has is been 30s since the previous attempt?
             try:
                 if time.monotonic() - self._reconnect_timestamp > 30:
+                    self._logger.info("30s since previous connection attempt. Retrying...")
                     try_reconnect = True
                     self._reconnect_timestamp = time.monotonic()
             except TypeError:
@@ -270,6 +275,7 @@ class CBNetwork:
                 reconnect = self._connect_mqtt()
                 # If we failed to reconnect, mark it as failure and return.
                 if not reconnect:
+                    self._logger.warning("Could not connect to MQTT server. Will retry in 30s.")
                     return return_data
 
         # Network/MQTT is up, proceed.
@@ -288,7 +294,7 @@ class CBNetwork:
             else:
                 force_repeat = False
             for message in self._mqtt_messages(force_repeat=force_repeat):
-                self._logger_mqtt.debug("Publishing MQTT message: {}".format(message))
+                #self._logger_mqtt.debug("Publishing MQTT message: {}".format(message))
                 self._pub_message(**message)
             # Check for any incoming commands.
             self._mqtt_client.loop()
@@ -464,7 +470,7 @@ class CBNetwork:
         # The detector's current offset
         outbound_messages.append({'topic': topic_base + 'offset', 'payload': input_obj.offset, 'repeat': False})
         # Send value, raw value and quality if detector is ranging.
-        if input_obj.status == 'ranging':
+        if input_obj.status == SENSTATE_RANGING:
             # Detector Value.
             outbound_messages.append({'topic': topic_base + 'reading', 'payload': input_obj.value, 'repeat': False})
             # Detector reading unadjusted by depth.
@@ -492,14 +498,16 @@ class CBNetwork:
 
     # Create HA discovery message.
     def _ha_discover(self, name, topic, type, entity, device_info=True, system_avail=True, avail=None, avail_mode=None, **kwargs):
-
+        allowed_types = ('camera','binary_sensor','sensor','select')
         # Trap unknown types.
-        if type not in ('camera','binary_sensor','sensor'):
-            raise ValueError("Type must be 'camera','binary_sensor' or 'sensor'")
+        if type not in allowed_types:
+            raise ValueError("Type must be one of {}".format(allowed_types))
 
         # Adjust the topic key based on the type, because the syntax varries.
         if type == 'camera':
             topic_key = 'topic'
+        elif type == 'select':
+            topic_key = 'command_topic'
         else:
             topic_key = 'state_topic'
 
@@ -512,10 +520,14 @@ class CBNetwork:
             'unique_id': self._client_id + '.' + entity,
             'availability': []
         }
-        # Add device info.
+        # Add device info if asked to.
         if device_info:
             discovery_dict['device'] = self._device_info
 
+        # This is how we handle varying requirements for different types.
+        # 'required' - must exist *and* be defined
+        # 'nullable' - must exist, may be null
+        # 'optional' - may be defined or undefined.
         if type == 'camera':
             required_parameters = ['image_encoding']
             nullable_parameters = []
@@ -528,8 +540,12 @@ class CBNetwork:
             required_parameters = []
             nullable_parameters = []
             optional_parameters = ['icon','unit_of_measurement', 'value_template']
+        elif type == 'select':
+            required_parameters = ['options']
+            nullable_parameters = []
+            optional_parameters = []
         else:
-            raise
+            raise ValueError('Discovery is of unknown type {}'.format(type))
 
         for param in required_parameters:
             try:
@@ -607,7 +623,7 @@ class CBNetwork:
         self._ha_discover(
             name="{} CPU Use".format(self._system_name),
             topic="CobraBay/" + self._client_id + "/cpu_pct",
-            type="sensor",
+            type='sensor',
             entity="{}_cpu_pct".format(self._system_name.lower()),
             unit_of_measurement="%",
             icon="mdi:chip"
@@ -616,7 +632,7 @@ class CBNetwork:
         self._ha_discover(
             name="{} CPU Temperature".format(self._system_name),
             topic="CobraBay/" + self._client_id + "/cpu_temp",
-            type="sensor",
+            type='sensor',
             entity="{}_cpu_temp".format(self._system_name.lower()),
             unit_of_measurement=self._uom('temp'),
             icon="mdi:thermometer"
@@ -625,7 +641,7 @@ class CBNetwork:
         self._ha_discover(
             name="{} Memory Free".format(self._system_name),
             topic="CobraBay/" + self._client_id + "/mem_info",
-            type="sensor",
+            type='sensor',
             entity="{}_mem_info".format(self._system_name.lower()),
             value_template='{{ value_json.mem_pct }}',
             unit_of_measurement='%',
@@ -635,7 +651,7 @@ class CBNetwork:
         self._ha_discover(
             name="{} Undervoltage".format(self._system_name),
             topic="CobraBay/" + self._client_id + "/undervoltage",
-            type="binary_sensor",
+            type='binary_sensor',
             entity="{}_undervoltage".format(self._system_name.lower()),
             payload_on="true",
             payload_off="false",
@@ -645,11 +661,26 @@ class CBNetwork:
         self._ha_discover(
             name="{} Display".format(self._system_name),
             topic="CobraBay/" + self._client_id + "/display",
-            type="camera",
+            type='camera',
             entity="{}_display".format(self._system_name.lower()),
             image_encoding='b64',
             icon="mdi:image-area"
         )
+
+        # System Commands
+        # By this point, a syscmd trigger *should* exist. Not existing is...odd.
+        try:
+            syscmd_trigger = self._trigger_registry['syscmd']
+        except KeyError:
+            self._logger.error("No System Command trigger defined. Cannot perform discovery on it.")
+        else:
+            self._ha_discover(
+                name="{} Command".format(self._system_name),
+                topic=syscmd_trigger.topic,
+                type='select',
+                entity='{}_cmd'.format(self._system_name.lower()),
+                options=["-","Rediscover","Restart","Rescan"]
+            )
 
     def _ha_discovery_bay(self, bay_id):
         bay_obj = self._bay_registry[bay_id]
@@ -659,15 +690,31 @@ class CBNetwork:
         self._ha_discover(
             name="{} State".format(bay_obj.name),
             topic=topic_base + "state",
-            type="sensor",
+            type='sensor',
             entity="{}_{}_state".format(self._system_name.lower(), bay_obj.id),
             value_template="{{ value|capitalize }}"
         )
+
+        # Bay Select, to allow setting state manually. Mostly useful for testing.
+        try:
+            baycmd_trigger = self._trigger_registry[bay_id]
+        except KeyError:
+            self._logger.error("No Command Trigger defined for bay '{}'. Cannot perform discovery for it.".format(bay_id))
+            self._logger.error("Available triggers: {}".format(self._trigger_registry.keys()))
+        else:
+            self._ha_discover(
+                name="{} Command".format(bay_obj.name),
+                topic=baycmd_trigger.topic,
+                type='select',
+                entity="{}_{}_cmd".format(self._system_name.lower(), bay_obj.id),
+                options=["-", "Dock", "Undock", "Abort"]
+            )
+
         # Bay Vector
         self._ha_discover(
             name="{} Speed".format(bay_obj.name),
             topic=topic_base + "vector",
-            type="sensor",
+            type='sensor',
             entity="{}_{}_speed".format(self._system_name.lower(), bay_obj.id),
             value_template="{{ value_json.speed }}",
             unit_of_measurement=self._uom('speed')
@@ -676,13 +723,13 @@ class CBNetwork:
         self._ha_discover(
             name="{} Direction".format(bay_obj.name),
             topic=topic_base + "vector",
-            type="sensor",
+            type='sensor',
             entity="{}_{}_direction".format(self._system_name.lower(), bay_obj.id),
             value_template="{{ value_json.direction|capitalize }}",
         )
 
         # # Bay Motion Timer
-        #
+        # TBI
         # # Bay Occupancy
         self._ha_discover(
             name="{} Occupied".format(bay_obj.name),
@@ -695,11 +742,12 @@ class CBNetwork:
         )
 
         # Discover the detectors....
-        print(bay_obj.detectors)
+
         for detector in bay_obj.detectors:
             det_obj = bay_obj.detectors[detector]
             detector_base = topic_base + "detectors/" + det_obj.id + "/"
-            # Detector reading.
+
+            # Current state of the detector.
             self._ha_discover(
                 name="Detector - {} State".format(det_obj.name),
                 topic=detector_base + "state",
@@ -714,6 +762,8 @@ class CBNetwork:
                 entity="{}_{}_{}_status".format(self._system_name.lower(), bay_obj.id, det_obj.id),
                 value_template="{{ value|capitalize }}"
             )
+
+            # Is the detector in fault?
             self._ha_discover(
                 name="Detector - {} Fault".format(det_obj.name),
                 topic=detector_base + "fault",
@@ -722,15 +772,27 @@ class CBNetwork:
                 payload_on = "true",
                 payload_off = "false"
             )
+
+            # Reading. Modified by offset.
             self._ha_discover(
                 name="Detector - {} Reading".format(det_obj.name),
                 topic=detector_base + "reading",
                 type="sensor",
                 entity="{}_{}_{}_reading".format(self._system_name.lower(), bay_obj.id, det_obj.id),
             )
+
+            # Raw reading, unmodified by offset.
             self._ha_discover(
                 name="Detector - {} Raw Reading".format(det_obj.name),
                 topic=detector_base + "raw_reading",
                 type="sensor",
                 entity="{}_{}_{}_raw_reading".format(self._system_name.lower(), bay_obj.id, det_obj.id),
+            )
+
+            # Quality of the detector.
+            self._ha_discover(
+                name="Detector - {} Quality".format(det_obj.name),
+                topic=detector_base + "quality",
+                type="sensor",
+                entity="{}_{}_{}_quality".format(self._system_name.lower(), bay_obj.id, det_obj.id),
             )
