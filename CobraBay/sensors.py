@@ -321,21 +321,16 @@ class CB_VL53L1X(I2CSensor):
         }
 
         # Enable the sensor.
-        try:
-            self.status = 'enabled'
-        except CobraBay.exceptions.SensorNotEnabledException:
-            # What to do if not enabled.
-            self._logger.error("Initialization failed. Sensor faulted until error is corrected.")
-        else:
-            # Get a test reading.
-            self.status = 'ranging'    # Start ranging.
-            self.measurement_time = Quantity(timing).to('microseconds').magnitude
-            self.distance_mode = 'long'
-            self._previous_reading = self._sensor_obj.distance
-            self._logger.debug("Test reading: {}".format(self._previous_reading))
-            self._logger.debug("Setting status back to enabled, stopping ranging.")
-            self.status = 'enabled'
-            self._logger.debug("Initialization complete.")
+        self.status = 'enabled'
+        # Get a test reading.
+        self.status = 'ranging'    # Start ranging.
+        self.measurement_time = Quantity(timing).to('microseconds').magnitude
+        self.distance_mode = 'long'
+        test_range = self.range
+        self._logger.debug("Test reading: {} ({})".format(test_range, type(test_range)))
+        self._logger.debug("Setting status back to enabled, stopping ranging.")
+        self.status = 'enabled'
+        self._logger.debug("Initialization complete.")
 
     def _start_ranging(self):
         self._logger.debug("Starting ranging")
@@ -456,7 +451,7 @@ class CB_VL53L1X(I2CSensor):
     def range(self):
         self._logger.debug("Range requsted. Sensor state is: {}".format(self.state))
         if self.state != 'ranging':
-            return CobraBay.const.STATE_NOTRANGING
+            return CobraBay.const.SENSTATE_NOTRANGING
         elif monotonic() - self._previous_timestamp < 0.2:
             # Make sure to pace the readings properly, so we're not over-running the native readings.
             # If a request comes in before the sleep time (200ms), return the previous reading.
@@ -591,18 +586,18 @@ class CB_VL53L1X(I2CSensor):
         if self._fault is True:
             # Fault while enabling.
             self._logger.debug("Fault found.")
-            return CobraBay.const.STATE_FAULT
+            return CobraBay.const.SENSTATE_FAULT
         elif self.enable_pin.value is True:
             self._logger.debug("Enable pin is on.")
             if self._ranging is True:
                 self._logger.debug("Sensor has been recorded as ranging.")
-                return CobraBay.const.STATE_RANGING
+                return CobraBay.const.SENSTATE_RANGING
             else:
                 self._logger.debug("Enabled, not ranging.")
-                return CobraBay.const.STATE_ENABLED
+                return CobraBay.const.SENSTATE_ENABLED
         elif self.enable_pin.value is False:
                 self._logger.debug("Enable pin is off.")
-                return CobraBay.const.STATE_DISABLED
+                return CobraBay.const.SENSTATE_DISABLED
         else:
             raise CobraBay.exceptions.SensorException
 
@@ -632,7 +627,7 @@ class TFMini(SerialSensor):
         # Create the sensor object.
         self._logger.debug("Creating TFMini object on serial port {}".format(self.serial_port))
         self._sensor_obj = TFMP(self.serial_port, self.baud_rate)
-        self._logger.debug("Test reading: {}".format(self.range))
+        self._logger.debug("Test reading: {} ({})".format(self.range, type(self.range)))
 
     # TFMini is always ranging, so enable here is just a dummy method.
     @staticmethod
@@ -707,7 +702,7 @@ class TFMini(SerialSensor):
         :return:
         """
         # The TFMini always ranges, so we can just return ranging.
-        return CobraBay.const.STATE_RANGING
+        return CobraBay.const.SENSTATE_RANGING
 
     @status.setter
     def status(self, target_status):

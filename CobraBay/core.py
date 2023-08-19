@@ -15,7 +15,7 @@ class CBCore:
         self._network = None
         self.system_state = 'init'
         # Register the exit handler.
-        # atexit.register(self.system_exit)
+        atexit.register(self.system_exit)
 
         # Get the master handler. This may have already been started by the command line invoker.
         self._master_logger = logging.getLogger("CobraBay")
@@ -39,8 +39,8 @@ class CBCore:
             # Save the passed CBConfig object.
             self._active_config = config_obj
 
-        # print("Active configuration:")
-        # pprint(self._active_config.config)
+        print("Active configuration:")
+        pprint(self._active_config.config)
 
         # Update the logging handlers.
         self._setup_logging_handlers(**self._active_config.log_handlers())
@@ -96,10 +96,6 @@ class CBCore:
             self._network.register_bay(self._bays[bay_id])
             self._display.register_bay(self._bays[bay_id].display_reg_info)
 
-        # # Collect messages from the bays.
-        # for bay_id in self._bays:
-        #     self._outbound_messages = self._outbound_messages + self._bays[bay_id].mqtt_messages(verify=True)
-
         # Create triggers.
         self._logger.info("Creating triggers...")
         self._triggers = self._setup_triggers()
@@ -115,10 +111,8 @@ class CBCore:
             if isinstance(trigger_obj, CobraBay.triggers.MQTTTrigger):
                 self._logger.debug("Registering Trigger {} with Network module.".format(trigger_id))
                 self._network.register_trigger(trigger_obj)
-            # Tell bays about their bay triggers.
-            # if trigger_obj.type in ('baycommand'):
-            #    self._bays[trigger_obj.bay_id].register_trigger(trigger_obj)
 
+            # Some unused code for Range triggers. Not fully implemented yet.
             # elif self._triggers[trigger_id].type == 'range':
             #     # Make sure the desired bay exists!
             #     try:
@@ -153,31 +147,28 @@ class CBCore:
         # We pass the caller name explicitly. There's inspect-fu that could be done, but that
         # may have portability issues.
         for trigger_id in self._triggers.keys():
-            self._logger.debug("Checking trigger: {}".format(trigger_id))
             trigger_obj = self._triggers[trigger_id]
-            # Disabling range triggers for the moment.
-            # Range objects need to be checked explicitly. So call it!
-            # if trigger_obj.type == 'range':
-            #     trigger_obj.check()
-            # self._logger.debug("Has trigger value: {}".format(trigger_obj.triggered))
+            # A trigger_obj.triggered returns true if it has any commands available for processing.
             if trigger_obj.triggered:
                 while trigger_obj.cmd_stack:
                     # Pop the command from the object.
                     cmd = trigger_obj.cmd_stack.pop(0)
                     # Route it appropriately.
+                    # System commands go directly to the core command processor.
                     if isinstance(trigger_obj, CobraBay.triggers.SysCommand):
                         self._core_command(cmd)
-                    else:
+                    # Bay commands will trigger a motion or an abort.
+                    elif isinstance(trigger_obj, CobraBay.triggers.BayCommand):
                         if cmd in ('dock', 'undock'):
-                            # Dock or undock, enter the motion routine.
+                            # On a dock or undock, call the motion method.
                             self._motion(trigger_obj.bay_id, cmd)
+                            # The call returns here
                             self._logger.debug("Returned from motion method to trigger method.")
                             break
                         elif cmd == 'abort':
                             # On an abort, call the bay's abort. This will set it ready and clean up.
                             # If we're in the _motion method, this will go back to run, if not, nothing happens.
                             self._bays[trigger_obj.bay_id].abort()
-            self._logger.debug("Trigger check complete.")
 
     # Main operating loop.
     def run(self):
@@ -312,39 +303,41 @@ class CBCore:
         return return_dict
 
     def _setup_triggers(self):
+        # Set the logging level for the trigger group.
+        trigger_logger = logging.getLogger("CobraBay").getChild("Triggers")
+        trigger_logger.setLevel("DEBUG")
+
         self._logger.debug("Creating triggers...")
         return_dict = {}
-        self._logger.info("Trigger list: {}".format(self._active_config.trigger_list))
-        for trigger_id in self._active_config.trigger_list:
-            self._logger.info("Trigger ID: {}".format(trigger_id))
+        self._logger.info("Trigger list: {}".format(self._active_config.triggers))
+        for trigger_id in self._active_config.triggers:
+            self._logger.debug("Trigger ID: {}".format(trigger_id))
             trigger_config = self._active_config.trigger(trigger_id)
-            self._logger.debug(trigger_config)
+            self._logger.debug("Has config: {}".format(trigger_config))
             # Create trigger object based on type.
             # All triggers except the system command handler will need a reference to the bay object.
-            if trigger_config['type'] == "syscommand":
+            if trigger_config['type'] == "syscmd":
                 return_dict[trigger_id] = CobraBay.triggers.SysCommand(
-                    id="sys_cmd",
-                    name="System Command Handler",
+                    id="syscmd",
                     topic=trigger_config['topic'],
                     log_level=trigger_config['log_level'])
             else:
-                if trigger_config['type'] == 'mqtt_sensor':
+                if trigger_config['type'] == 'mqtt_state':
                     return_dict[trigger_id] = CobraBay.triggers.MQTTSensor(
-                        id=trigger_config['id'],
-                        name=trigger_config['name'],
+                        id=trigger_id,
                         topic=trigger_config['topic'],
                         topic_mode='full',
-                        bay_obj=self._bays[trigger_config['bay_id']],
-                        change_type=trigger_config['change_type'],
-                        trigger_value=trigger_config['trigger_value'],
-                        when_triggered=trigger_config['when_triggered'],
+                        topic_prefix=None,
+                        bay_obj=self._bays[trigger_config['bay']],
+                        to_value=trigger_config['to_value'],
+                        from_value=trigger_config['from_value'],
+                        action=trigger_config['action'],
                         log_level=trigger_config['log_level']
                     )
-                elif trigger_config['type'] == 'baycommand':
+                elif trigger_config['type'] == 'baycmd':
                     # Get the bay object reference.
                     return_dict[trigger_id] = CobraBay.triggers.BayCommand(
-                        id=trigger_config['id'],
-                        name=trigger_config['name'],
+                        id=trigger_id,
                         topic=trigger_config['topic'],
                         bay_obj=self._bays[trigger_config['bay_id']],
                         log_level=trigger_config['log_level'])

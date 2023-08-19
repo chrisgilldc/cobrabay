@@ -285,10 +285,10 @@ class CBNetwork:
             # that values actually show up in HA.
             if self._ha_repeat_override:
                 if time.monotonic() - self._ha_timestamp <= 15:
-                    self._logger.debug("HA discovery {}s ago, sending all".format(time.monotonic() - self._ha_timestamp))
+                    self._logger.info("HA discovery {}s ago, sending all".format(time.monotonic() - self._ha_timestamp))
                     force_repeat = True
                 else:
-                    self._logger.debug("Have sent all messages for 15s after HA discovery. Disabling.")
+                    self._logger.info("Have sent all messages for 15s after HA discovery. Disabling.")
                     self._ha_repeat_override = False
                     force_repeat = False
             else:
@@ -437,9 +437,8 @@ class CBNetwork:
         outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
         # Bay vector
         outbound_messages.append({'topic': topic_base + 'vector', 'payload': input_obj.vector, 'repeat': False})
-        # Bay vector
+        # Bay motion timer
         outbound_messages.append({'topic': topic_base + 'motion_timer', 'payload': input_obj.motion_timer, 'repeat': False})
-
 
         # Bay occupancy. This value can get wonky as detectors are shutting down, so don't update during shutdown.
         if self._cbcore.system_state != 'shutdown':
@@ -719,6 +718,7 @@ class CBNetwork:
             value_template="{{ value_json.speed }}",
             unit_of_measurement=self._uom('speed')
 
+        # Bay Direction
         )
         self._ha_discover(
             name="{} Direction".format(bay_obj.name),
@@ -728,8 +728,14 @@ class CBNetwork:
             value_template="{{ value_json.direction|capitalize }}",
         )
 
-        # # Bay Motion Timer
-        # TBI
+        # Bay Motion Timer
+        self._ha_discover(
+            name="{} Motion Timer".format(bay_obj.name),
+            topic=topic_base + "motion_timer",
+            type="sensor",
+            entity="{}_{}_motiontimer".format(self._system_name.lower(), bay_obj.id),
+        )
+
         # # Bay Occupancy
         self._ha_discover(
             name="{} Occupied".format(bay_obj.name),

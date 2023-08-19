@@ -3,15 +3,13 @@
 ####
 import logging
 import pprint
-
-#from pint import Quantity
 import yaml
-import sys
 from pathlib import Path
 import pint
 import cerberus
 from collections import namedtuple
 from pprint import pformat
+import importlib.resources
 
 # Subclass Validator to add custom rules, maybe types.
 class CBValidator(cerberus.Validator):
@@ -84,7 +82,11 @@ class CBConfig:
                                       'default_setter': lambda doc: doc['default_level']},
                         'display': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
                                     'default_setter': lambda doc: doc['default_level']},
+                        'mqtt': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical', 'DISABLE'],
+                                    'default': 'DISABLE'},
                         'network': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
+                                    'default_setter': lambda doc: doc['default_level']},
+                        'triggers': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
                                     'default_setter': lambda doc: doc['default_level']}
                     }  # Figure out how to handle specific sensors detectors and bays.
                 }
@@ -100,10 +102,12 @@ class CBConfig:
             'valuesrules': {
                 'type': 'dict',
                 'schema': {
-                    'type': {'type': 'string', 'required': True, 'allowed': ['mqtt', 'range']},
-                    'bay': {'type': 'string', 'required': True},  # Include a dependency to reference a bay.
+                    'type': {'type': 'string', 'required': True, 'allowed': ['mqtt_state','syscmd','baycmd']},
+                    'bay': {'type': 'string', 'required': True, 'dependencies': {'type': 'mqtt_state'}},
                     'topic': {'type': 'string', 'required': True},
-                    'to': {'type': 'string'},
+                    'to': {'type': 'string', 'dependencies': {'type': 'mqtt_state'}, 'excludes': 'from'},
+                    'from': {'type': 'string', 'dependencies': {'type': 'mqtt_state'}, 'excludes': 'to'},
+                    'action': {'type': 'string', 'required': True, 'allowed': ['dock','undock','occupancy']}
                 }
             }
         },
@@ -114,6 +118,9 @@ class CBConfig:
                 'width': {'type': 'integer', 'required': True},
                 'height': {'type': 'integer', 'required': True},
                 'gpio_slowdown': {'type': 'integer', 'required': True, 'default': 4},
+                'font': {'type': 'string',
+                         'default_setter':
+                             lambda doc: str(importlib.resources.files('CobraBay.data').joinpath('OpenSans-Light.ttf')) },
                 'strobe_speed': { 'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity },
                 'mqtt_image': {'type': 'boolean', 'default': True},
                 'mqtt_update_interval': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity}
@@ -174,8 +181,10 @@ class CBConfig:
                                 'defaults': {
                                     'type': 'dict',
                                     'schema': {
-                                        'spread_park': {'type': 'string', 'default': '0 in'},
-                                        'offset': {'type': 'string', 'default': '0 in'}
+                                        'spread_park': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity, 'default': '2 in'},
+                                        'offset': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity, 'default': '0 in'},
+                                        'pct_warn': {'type': 'number', 'default': 70},
+                                        'pct_crit': {'type': 'number', 'default': 90}
                                     }
                                 },
                                 'detectors': {'type': 'list', 'empty': False}
@@ -189,9 +198,15 @@ class CBConfig:
                                 'defaults': {
                                     'type': 'dict',
                                     'schema': {
-                                        'offset': {'type': 'string', 'default': '0 in'},
-                                        'spread_ok': {'type': 'string', 'default': '0 in'},
-                                        'spread_warn': {'type': 'string', 'default': '0 in'},
+                                        'offset': { 'type': 'quantity', 'dimensionality': '[length]',
+                                                    'coerce': pint.Quantity, 'default': '0 in' },
+                                        'spread_ok': { 'type': 'quantity', 'dimensionality': '[length]',
+                                                       'coerce': pint.Quantity, 'default': '1 in' },
+                                        'spread_warn': { 'type': 'quantity', 'dimensionality': '[length]',
+                                                         'coerce': pint.Quantity, 'default': '3 in' },
+                                        'limit': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity, 'default': '96 in' },
+                                        'intercept': {'type': 'quantity', 'dimensionality': '[length]',
+                                                  'coerce': pint.Quantity, 'default': '96 in'},
                                         'side': {'type': 'string', 'empty': False}
                                     }
                                 },
@@ -324,16 +339,33 @@ class CBConfig:
             self._logger.error("Could not validate. '{}'".format(e))
             return CBValidation(False, mv.errors)
 
-        pprint.pprint(returnval)
+        # Trap return failures and kick back false and the errors.
+        if returnval is None:
+            return CBValidation(False, mv.errors)
+        else:
 
-        if returnval is not None:
+            # Inject the system command handler.
+            returnval['triggers']['syscmd'] = {
+                'type': 'syscmd',
+                'topic': 'cmd',
+                'topic_mode': 'suffix'
+            }
+            # Inject a bay command handler trigger for every define defined bay.
+            for bay_id in returnval['bays']:
+                returnval['triggers'][bay_id] = {
+                    'type': 'baycmd',
+                    'topic': 'cmd',
+                    'topic_mode': 'suffix',
+                    'bay_id': bay_id
+                }
+
             # Because the 'oneof' options in the schema don't normalize, we need to go back in and normalize those.
             # Subvalidate detectors.
             sv = CBValidator()
             for direction in ('longitudinal', 'lateral'):
                 for detector_id in returnval['detectors'][direction]:
-                    print("Detector settings before subvalidation.")
-                    pprint.pprint(returnval['detectors'][direction][detector_id]['sensor_settings'])
+                    # print("Detector settings before subvalidation.")
+                    # pprint.pprint(returnval['detectors'][direction][detector_id]['sensor_settings'])
                     # Select the correct target schema based on the sensor type.
                     if returnval['detectors'][direction][detector_id]['sensor_type'] == 'VL53L1X':
                         target_schema = self.SCHEMA_SENSOR_VL53L1X
@@ -359,8 +391,6 @@ class CBConfig:
                         returnval['detectors'][direction][detector_id]['sensor_settings'] = validated_ds
 
             return CBValidation(True, returnval)
-        else:
-            return CBValidation(False, mv.errors)
 
     # Quick fetchers.
     # These allow fetching subsections of the config.
@@ -382,7 +412,9 @@ class CBConfig:
             'unit_system': self._config['system']['unit_system'],
             'system_name': self._config['system']['system_name'],
             'interface': self._config['system']['interface'],
-            **self._config['system']['mqtt']}
+            **self._config['system']['mqtt'],
+            'log_level': self._config['system']['logging']['network'],
+            'mqtt_log_level': self._config['system']['logging']['mqtt']}
         return the_return
 
     @property
@@ -409,6 +441,14 @@ class CBConfig:
         """
         return list(self._config['bays'].keys())
 
+    @property
+    def triggers(self):
+        """
+        All defined triggers
+        :return: list
+        """
+        return list(self._config['triggers'].keys())
+
     def detector(self, detector_id, detector_type):
         """
         Retrieve configuration for a specific detector
@@ -417,7 +457,7 @@ class CBConfig:
         :type detector_id: str
         :param detector_type: Detector type, either "longitudinal" or "lateral"
         :type detector_type: str
-        :return: list
+        :return: dict
         """
         return {'detector_id': detector_id,
                 **self._config['detectors'][detector_type][detector_id],
@@ -427,9 +467,42 @@ class CBConfig:
         """
         Retrieve configuration for a specific bay.
         :param bay_id: ID of the requested bay
-        :return: list
+        :return: dict
         """
         return { **self._config['bays'][bay_id], 'log_level': self._config['system']['logging']['bays']}
+
+    def display(self):
+        """
+        Retrieve configuration for the display
+        :return: dict
+        """
+        return { **self._config['display'],
+                 'unit_system': self._config['system']['unit_system'],
+                 'log_level': self._config['system']['logging']['display']}
+
+    def trigger(self, trigger_id):
+        """
+        Retrieve configuration for a specific trigger.
+        :param trigger_id:
+        :return: list
+        """
+        ### Can probably do this in Cerberus, but that's being fiddly, so this is a quick hack.
+        # Ensure both 'to' and 'from' are set, even if only to None.
+        if 'to' not in self._config['triggers'][trigger_id] and 'to_value' not in self._config['triggers'][trigger_id]:
+            self._config['triggers'][trigger_id]['to'] = None
+        if 'from' not in self._config['triggers'][trigger_id] and 'from_value' not in self._config['triggers'][trigger_id]:
+            self._config['triggers'][trigger_id]['from'] = None
+
+        # Convert to _value.
+        self._config['triggers'][trigger_id]['to_value'] = self._config['triggers'][trigger_id]['to']
+        del self._config['triggers'][trigger_id]['to']
+        self._config['triggers'][trigger_id]['from_value'] = self._config['triggers'][trigger_id]['from']
+        del self._config['triggers'][trigger_id]['from']
+
+        return {
+            **self._config['triggers'][trigger_id],
+            'log_level': self._config['system']['logging']['triggers']
+        }
 
     def get_loglevel(self, mod_id, mod_type=None):
         requested_level = None

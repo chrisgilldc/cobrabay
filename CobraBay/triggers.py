@@ -6,15 +6,13 @@ from json import loads as json_loads
 import logging
 
 class Trigger:
-    def __init__(self, id, name, log_level="WARNING", **kwargs):
+    def __init__(self, id, log_level="WARNING", **kwargs):
         """
         :param id: str
-        :param name: str
         :param log_level: Log level for the bay, must be a Logging level.
         :param kwargs:
         """
         self.id = id
-        self.name = name
         # Create a logger.
         self._logger = logging.getLogger("CobraBay").getChild("Triggers").getChild(self.id)
         self._logger.setLevel(log_level)
@@ -45,28 +43,18 @@ class Trigger:
     def id(self, input):
         self._id = input.replace(" ","_").lower()
 
-    @property
-    def name(self):
-        return self._name
-
-    @name.setter
-    def name(self, input):
-        self._name = input
-
     # @property
     # def type(self):
     #     return self._settings['type']
 
 # Subclass for common MQTT elements
 class MQTTTrigger(Trigger):
-    def __init__(self, id, name, topic, topic_mode="full", topic_prefix = None, log_level="WARNING"):
+    def __init__(self, id, topic, topic_mode="full", topic_prefix = None, log_level="WARNING"):
         """
         General class for MQTT-based triggers.
 
         :param id: ID of this trigger. Case-insensitive, no spaces.
         :type id: str
-        :param name: Name of this trigger.
-        :type name: str
         :param topic: Topic for the trigger. If topic_mode is 'full', this will be the complete topic used.
         :param topic_mode: Use topic as-is or construct from elements. May be 'full' or 'suffix'.
         :type topic_mode: str
@@ -75,11 +63,15 @@ class MQTTTrigger(Trigger):
         :param log_level: Logging level for the trigger. Defaults to 'Warning'.
         :type log_level: str
         """
-        super().__init__(id, name, log_level)
+        super().__init__(id, log_level.upper())
 
         self._topic = topic
         self._topic_mode = topic_mode
         self._topic_prefix = topic_prefix
+        try:
+            self._logger.info("Trigger '{}' listening to MQTT topic '{}'".format(self.id, self.topic))
+        except TypeError:
+            self._logger.info("Trigger '{}' initialized, MQTT prefix not yet set".format(self.id))
 
     # This will need to be attached to a subscription.
     def callback(self, client, userdata, message):
@@ -92,6 +84,7 @@ class MQTTTrigger(Trigger):
     @topic_prefix.setter
     def topic_prefix(self, prefix):
         self._topic_prefix = prefix
+        self._logger.info("Trigger '{}' prefix updated, MQTT topic is now '{}'".format(self.id, self.topic))
 
     @property
     def topic_mode(self):
@@ -113,8 +106,8 @@ class MQTTTrigger(Trigger):
 
 # Take System commands directly from an outside agent.
 class SysCommand(MQTTTrigger):
-    def __init__(self, id, name, topic, topic_prefix=None, log_level="WARNING"):
-        super().__init__(id, name, topic, topic_mode='suffix')
+    def __init__(self, id, topic, topic_prefix=None, log_level="WARNING"):
+        super().__init__(id, topic, topic_mode='suffix', topic_prefix = topic_prefix, log_level = log_level)
 
         # Outbound command queues. These are separate based on their destination.
         ## Core queue
@@ -123,17 +116,20 @@ class SysCommand(MQTTTrigger):
         self._cmd_stack_network = []
 
     def callback(self, client, userdata, message):
+
         # Decode the JSON.
-        message = str(message.payload, 'utf-8').lower()
+        message_text = str(message.payload, 'utf-8').lower()
 
         # Commands need to get routed to the right module.
         # Core commands
-        if message.lower() in ('reboot', 'rescan'):
-            self._cmd_stack_core.append(message.lower())
-        elif message.lower() in ('rediscover'):
-            self._cmd_stack_core.append(message.lower())
+        if message_text in ('restart', 'rescan'):
+            self._logger.info("Received command {}. Adding to core command stack.".format(message_text))
+            self._cmd_stack_core.append(message_text)
+        elif message_text in ('rediscover'):
+            self._logger.info("Received command {}. Not yet implemented.".format(message_text))
+            # Do a call to Network HA here...
         else:
-            self._logger.warning("Ignoring invalid command: {}".format(message.text))
+            self._logger.warning("Ignoring invalid command: {}".format(message_text))
 
     # Return the first command from the stack.
     @property
@@ -161,8 +157,8 @@ class SysCommand(MQTTTrigger):
 
 # Take and handle bay commands.
 class BayCommand(MQTTTrigger):
-    def __init__(self, id, name, topic, bay_obj, log_level="WARNING"):
-        super().__init__(id, name, topic=bay_obj.id + "/" + topic, topic_mode="suffix", log_level=log_level)
+    def __init__(self, id, topic, bay_obj, log_level="WARNING"):
+        super().__init__(id, topic=bay_obj.id + "/" + topic, topic_mode="suffix", log_level=log_level)
 
         # Store the bay object reference.
         self._bay_obj = bay_obj
@@ -181,7 +177,7 @@ class BayCommand(MQTTTrigger):
         elif message_text in ('abort'):
             self._cmd_stack.append(message_text)
         else:
-            self._logger.warning("Ignoring invalid command: {}".format(message.text))
+            self._logger.warning("Ignoring invalid command: {}".format(message_text))
 
     # Get the ID of the bay object to be returned. This is used by the core to find the bay object directly.
     @property
@@ -198,7 +194,11 @@ class BayCommand(MQTTTrigger):
 
 # State-based MQTT triggers
 class MQTTSensor(MQTTTrigger):
-    def __init__(self, id, name, topic, bay_obj, change_type, trigger_value, when_triggered, topic_mode="full",
+    def __init__(self, id, topic, bay_obj,
+                 to_value=None,
+                 from_value=None,
+                 action=None,
+                 topic_mode="full",
                  topic_prefix=None, log_level="WARNING"):
         """
         Trigger which will take action based on an MQTT value change. Defining an MQTT Sensor trigger subscribes the system
@@ -206,33 +206,34 @@ class MQTTSensor(MQTTTrigger):
 
         :param id: ID of this trigger. Case-insensitive, no spaces.
         :type id: str
-        :param name: Name of this trigger.
-        :type name: str
         :param topic: Topic for the trigger. If topic_mode is 'full', this will be the complete topic used.
         :param topic_mode: Use topic as-is or construct from elements. May be 'full' or 'suffix'.
         :type topic_mode: str
         :param topic_prefix: If using suffix topic mode, the topic prefix to use.
         :type topic_prefix: str
         :param bay_obj: The object of the bay this trigger is attached to.
-        :param change_type: Type of payload change to monitor for. May be 'to' or 'from'.
-        :type change_type: str
-        :param trigger_value: Value which will activate this trigger. If change_type is 'to', trigger activates when the
-        topic changes to this value. If change_type is 'from', trigger activates when the topic changes to any value
-        other than this value. Only strings are supported currently, not more complex structures (ie: JSON)
-        :type trigger_value: str
-        :param when_triggered: Action taken when trigger is activated. May be 'dock', 'undock', or 'occupancy'. The
+        :param action: Action taken when trigger is activated. May be 'dock', 'undock', or 'occupancy'. The
         'occupancy' setting will choose 'dock' or 'undock' contextually based on the current occupancy of the bay. If
         unoccupied, dock, if occupied dock. You're presumably not going to park again when there's already a car there!
-        :type when_triggered: str
+        :type action: str
         :param log_level: Logging level for the trigger. Defaults to 'Warning'.
         :type log_level: str
         """
-        super().__init__(id, name, topic, topic_mode, topic_prefix, log_level)
+        super().__init__(id, topic, topic_mode, topic_prefix, log_level)
 
         # Save settings
-        self._change_type = change_type
-        self._trigger_value = trigger_value
-        self._when_triggered = when_triggered
+        if to_value is not None and from_value is not None:
+            raise ValueError("Cannot have both a 'to' and 'from' value set.")
+
+        # This is arguably a hack from the old method and should be replaced eventually.
+        if to_value is not None:
+            self._change_type = 'to'
+            self._trigger_value = to_value
+        elif from_value is not None:
+            self._change_type = 'from'
+            self._trigger_value = from_value
+
+        self._action = action
         self._bay_obj = bay_obj
 
         # Initialize a previous value variable.
@@ -260,7 +261,7 @@ class MQTTSensor(MQTTTrigger):
 
     def _trigger_action(self):
         # If action is supposed to be occupancy determined, check the bay.
-        if self._when_triggered == 'occupancy':
+        if self._action == 'occupancy':
             if self._bay_obj.occupied == 'Occupied':
                 # If bay is occupied, vehicle must be leaving.
                 self._cmd_stack.append('undock')
@@ -269,7 +270,7 @@ class MQTTSensor(MQTTTrigger):
                 self._cmd_stack.append('dock')
         else:
             # otherwise drop the action through.
-            self._cmd_stack.append(self._when_triggered)
+            self._cmd_stack.append(self._action)
 
     @property
     def bay_id(self):

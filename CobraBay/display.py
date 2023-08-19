@@ -18,44 +18,50 @@ ureg = UnitRegistry()
 
 class CBDisplay:
     def __init__(self,
-                 matrix_width,
-                 matrix_height,
+                 width,
+                 height,
                  gpio_slowdown,
-                 core_font,
+                 font,
                  cbcore,
                  bottom_box=None,
                  unit_system="metric",
-                 strobe_speed=None):
+                 mqtt_image=True,
+                 mqtt_update_interval=None,
+                 strobe_speed=None,
+                 log_level="WARNING"):
         """
 
         :param unit_system: Unit system. "imperial" or "metric", defaults to "metric"
         :type unit_system: str
-        :param matrix_width: Width of the LED matrix, in pixels
-        :type matrix_width: int
-        :param matrix_height: Height of the LED matrix, in pixels
-        :type matrix_height: int
+        :param width: Width of the LED matrix, in pixels
+        :type width: int
+        :param height: Height of the LED matrix, in pixels
+        :type height: int
         :param gpio_slowdown: GPIO pacing to prevent flicker
         :type gpio_slowdown: int
         :param bottom_box: Which bottom box to be. Can be "strobe", "progress" or "none"
         :type bottom_box: str
         :param strobe_speed: How fast the strober bugs should move.
         :type strobe_speed: Quantity(ms)
-        :param core_font: Path to the font to use. Must be a TTF.
-        :type core_font: Path
+        :param font: Path to the font to use. Must be a TTF.
+        :type font: Path
         :param cbcore: Reference to the Core object
         """
         # Get a logger!
         self._logger = logging.getLogger("CobraBay").getChild("Display")
+        self._logger.setLevel(log_level.upper())
         self._logger.info("Display initializing...")
+        self._logger.info("Display unit system: {}".format(unit_system))
         
         # Save parameters
-        self._matrix_width = matrix_width
-        self._matrix_height = matrix_height
+        self._matrix_width = width
+        self._matrix_height = height
         self._bottom_box = bottom_box
         self._strobe_speed = strobe_speed
-        self._core_font = core_font
         self._unit_system = unit_system
         self._cbcore = cbcore
+
+        self._core_font = font
 
         # Operating settings. These get reset on every start.
         self._running = {'strobe_offset': 0, 'strobe_timer': monotonic_ns()}
@@ -111,7 +117,8 @@ class CBDisplay:
         # Add in the used height of each bar to this variable. Since they're not guaranteed to be the same, we can't
         # just multiply.
         accumulated_height = 0
-        for lateral in display_reg_info['lateral_order']:
+        for intercept in display_reg_info['lateral_order']:
+            lateral = intercept.lateral
             self._logger.debug("Processing lateral zone: {}".format(lateral))
             self._layers[bay_id][lateral] = {}
             for side in ('L','R'):
@@ -201,7 +208,7 @@ class CBDisplay:
 
     # Specific displayer for docking.
     def show_motion(self, direction, bay_obj):
-        self._logger.debug("Show Dock received bay '{}'".format(bay_obj.name))
+        self._logger.debug("Show Motion received bay '{}'".format(bay_obj.name))
 
         # Don't do motion display if the bay isn't in a motion state.
         if bay_obj.state not in ('docking','undocking'):
@@ -237,8 +244,8 @@ class CBDisplay:
             self._logger.debug("Bottom box disabled.")
             pass
 
-        for lateral_detector in bay_obj.lateral_sorted:
-            detector = bay_obj.detectors[lateral_detector]
+        for intercept in bay_obj.lateral_sorted:
+            detector = bay_obj.detectors[intercept.lateral]
             if detector.quality in ('ok','warning','critical'):
                 self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(detector.name, detector.side, detector.quality))
                 selected_layer = self._layers[bay_obj.id][detector.id][detector.side][detector.quality]
@@ -358,7 +365,7 @@ class CBDisplay:
         h = self._matrix_height
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-        draw.rectangle([x_input+1,y_input,x_input+3,y_input+2], outline="white", fill=mqtt_color)
+        draw.rectangle([x_input+1,y_input,x_input+3,y_input+2], outline=mqtt_color, fill=mqtt_color)
         # Base network line.
         draw.line([x_input,y_input+4,x_input+4,y_input+4],fill=net_color)
         # Network stem

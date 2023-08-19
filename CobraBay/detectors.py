@@ -4,7 +4,7 @@
 import pint.errors
 
 from .sensors import CB_VL53L1X, TFMini, FileSensor, I2CSensor, SerialSensor
-import CobraBay.const
+from CobraBay.const import *
 import CobraBay.exceptions
 from pint import UnitRegistry, Quantity, DimensionalityError
 from time import monotonic_ns
@@ -76,7 +76,7 @@ def read_if_stale(func):
         read_sensor = False  # Assume we won't read the sensor.
         if self._sensor_obj.status != 'ranging':
             # If sensor object isn't ranging, return immediately with a not_ranging result.
-            return CobraBay.const.STATE_NOTRANGING
+            return SENSTATE_NOTRANGING
         else:
             if len(self._history) > 0:
                 # Time difference between now and the most recent read.
@@ -146,8 +146,9 @@ class Detector:
 
     @offset.setter
     @check_ready
-    def offset(self, input):
-        self._offset = self._convert_value(input)
+    def offset(self, the_input):
+        self._logger.info("Offset is now - {}".format(the_input))
+        self._offset = self._convert_value(the_input)
 
     @property
     def id(self):
@@ -333,29 +334,33 @@ class Longitudinal(SingleDetector):
             "Creating quality from latest value: {} ({})".format(self._history[0][0], type(self._history[0][0])))
         self._logger.debug("90% of bay depth is: {}".format(self.bay_depth * .9))
         current_value = self._history[0][0]
+        self._logger.debug("Evaluating longitudinal quality for value '{}' ({})".format(current_value, type(current_value)))
+        self._logger.debug("Evaluation targets: Bay Depth - {}, Critical - {}, Warn - {}".
+                           format(self.bay_depth, self._dist_crit, self._dist_warn))
+
         if isinstance(current_value, Quantity):
             # Actual reading, evaluate.
             if current_value < Quantity("2 in"):
-                qv = 'emergency'
+                return DETECTOR_QUALITY_EMERG
             elif (self.bay_depth * 0.90) <= current_value:
                 self._logger.debug(
                     "Reading is more than 90% of bay depth ({})".format(self.bay_depth * .9))
-                qv = 'no_object'
+                return DETECTOR_QUALITY_NOOBJ
             # Now consider the adjusted values.
             elif current_value < 0 and abs(current_value) > self.spread_park:
-                return CobraBay.const.DETECTOR_QUALITY_BACKUP
+                return DETECTOR_QUALITY_BACKUP
             elif abs(current_value) < self.spread_park:
-                return CobraBay.const.DETECTOR_QUALITY_PARK
+                return DETECTOR_QUALITY_PARK
             elif current_value <= self._dist_crit:
-                return CobraBay.const.DETECTOR_QUALITY_FINAL
+                return DETECTOR_QUALITY_FINAL
             elif current_value <= self._dist_warn:
-                return CobraBay.const.DETECTOR_QUALITY_BASE
+                return DETECTOR_QUALITY_BASE
             else:
-                return CobraBay.const.DETECTOR_QUALITY_OK
-        elif current_value == CobraBay.const.SENSOR_VALUE_WEAK:
-            return CobraBay.const.DETECTOR_QUALITY_DOOROPEN
-        elif current_value in (CobraBay.const.SENSOR_VALUE_FLOOD, CobraBay.const.SENSOR_VALUE_STRONG):
-            return CobraBay.const.DETECTOR_NOREADING
+                return DETECTOR_QUALITY_OK
+        elif current_value == SENSOR_VALUE_WEAK:
+            return DETECTOR_QUALITY_DOOROPEN
+        elif current_value in (SENSOR_VALUE_FLOOD, SENSOR_VALUE_STRONG):
+            return DETECTOR_NOREADING
         else:
             raise CobraBay.exceptions.SensorException
 
@@ -393,9 +398,8 @@ class Longitudinal(SingleDetector):
     def motion(self):
         # Grab the movement
         movement = self._movement
-        print("Movement: {}".format(movement))
         if not isinstance(movement, dict):
-            return "Unknown"
+            return GEN_UNKNOWN
         elif abs(self._movement['net_dist']) > Quantity(self._error_margin):
             return True
         else:
@@ -406,23 +410,20 @@ class Longitudinal(SingleDetector):
 
         # Grab the movement value.
         movement = self._movement
-        # Movement should trigger a read and get a new state value. If that returns NOTRANGING, we can't
-        # process the vector and both speed and direction should be flagged unknown.
-        if movement == CobraBay.const.STATE_NOTRANGING:
-            return {"speed": "unknown", "direction": "unknown"}
+
+        # Can't determine a vector if sensor is NOT RANGING or return UNKNOWN.
+        if movement in (SENSTATE_NOTRANGING,GEN_UNKNOWN):
+            return {"speed": GEN_UNKNOWN, "direction": GEN_UNKNOWN}
         # Determine a direction.
         self._logger.debug("Have movement value: {}".format(movement))
-        if movement == 'unknown':
-            # If movement couldn't be determined, we also can't determine vector, so this is unknown.
-            return {"speed": "unknown", "direction": "unknown"}
 
         # Okay, not none, so has value!
         if movement['net_dist'] > Quantity(self._error_margin):
-            return {'speed': abs(movement['speed']), 'direction': 'forward'}
+            return {'speed': abs(movement['speed']), 'direction': DIR_REV}
         elif movement['net_dist'] < (Quantity(self._error_margin) * -1):
-            return {'speed': abs(movement['speed']), 'direction': 'reverse'}
+            return {'speed': abs(movement['speed']), 'direction': DIR_FWD}
         else:
-            return {'speed': Quantity("0 kph"), 'direction': 'still'}
+            return {'speed': Quantity("0 kph"), 'direction': DIR_STILL}
 
     # Gets called when the rangefinder has all settings and is being made ready for use.
     def _when_ready(self):
@@ -465,8 +466,9 @@ class Longitudinal(SingleDetector):
 
     @pct_warn.setter
     @check_ready
-    def pct_warn(self, input):
-        self._pct_warn = input / 100
+    def pct_warn(self, the_input):
+        self._logger.info("Percent warn is - {}".format(the_input))
+        self._pct_warn = the_input / 100
 
     @property
     def pct_crit(self):
@@ -477,18 +479,19 @@ class Longitudinal(SingleDetector):
 
     @pct_crit.setter
     @check_ready
-    def pct_crit(self, input):
-        self._pct_crit = input / 100
+    def pct_crit(self, the_input):
+        self._logger.info("Percent critical is - {}".format(the_input))
+        self._pct_crit = the_input / 100
 
     # Pre-bake distances for warn and critical to make evaluations a little easier.
     def _derived_distances(self):
-        self._logger.debug("Calculating derived distances.")
+        self._logger.info("Calculating derived distances.")
         adjusted_distance = self.bay_depth - self._offset
-        self._logger.debug("Adjusted distance: {}".format(adjusted_distance))
+        self._logger.info("Adjusted distance: {}".format(adjusted_distance))
         self._dist_warn = (adjusted_distance.magnitude * self.pct_warn) / 100 * adjusted_distance.units
-        self._logger.debug("Warning distance: {}".format(self._dist_warn))
+        self._logger.info("Warning distance: {}".format(self._dist_warn))
         self._dist_crit = (adjusted_distance.magnitude * self.pct_crit) / 100 * adjusted_distance.units
-        self._logger.debug("Critical distance: {}".format(self._dist_crit))
+        self._logger.info("Critical distance: {}".format(self._dist_crit))
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
@@ -519,6 +522,7 @@ class Lateral(SingleDetector):
         self._side = None
         self._spread_ok = None
         self._spread_warn = None
+        self._limit = None
 
     # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
@@ -531,7 +535,7 @@ class Lateral(SingleDetector):
             raise self._history[0][0]
         else:
             # Anything else, treat it as the sensor returning no reading.
-            return CobraBay.const.DETECTOR_NOREADING
+            return DETECTOR_NOREADING
 
     @property
     @read_if_stale
@@ -541,22 +545,21 @@ class Lateral(SingleDetector):
         if isinstance(self.value, Quantity):
             self._logger.debug("Comparing to OK ({}) and WARN ({})".format(
                 self.spread_ok, self.spread_warn))
-            if self.value > Quantity('90 in'):
-                # A standard vehicle width (in the US, at least) is 96 inches. If we can reach across a significant
-                # proportion of the bay, we're not finding a vehicle, so deem it to be no vehicle.
-                qv = "no_vehicle"
+            # if self.value > Quantity('90 in'):
+            if self.value > self._limit:
+                qv = DETECTOR_QUALITY_NOOBJ
             elif abs(self.value) <= self.spread_ok:
-                qv = "ok"
+                qv = DETECTOR_QUALITY_OK
             elif abs(self.value) <= self.spread_warn:
-                qv = "warning"
+                qv = DETECTOR_QUALITY_WARN
             elif abs(self.value) > self.spread_warn:
-                qv = "critical"
+                qv = DETECTOR_QUALITY_CRIT
             else:
                 # Total failure to return a value means the light didn't reflect off anything. That *probably* means
                 # nothing is there, but it could be failing for other reasons.
-                qv = "unknown"
+                qv = GEN_UNKNOWN
         else:
-            qv = "unknown"
+            qv = GEN_UNKNOWN
         self._logger.debug("Quality {}".format(qv))
         return qv
 
@@ -594,6 +597,14 @@ class Lateral(SingleDetector):
             raise ValueError("Lateral side must be 'R' or 'L'")
         else:
             self._side = m_input.upper()
+
+    @property
+    def limit(self):
+        return self._limit
+
+    @limit.setter
+    def limit(self, new_limit):
+        self._limit = new_limit
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
