@@ -112,6 +112,7 @@ Logging options, system-wide or for specific modules.
 | <detector_name> | No     | None                  | Log level for a specific detector.                |
 | display               | No     | None                  | Log level for the Display module.                 |
 | network               | No     | None                  | Log level for the Network module.                 |
+| mqtt | No | DISABLE | Log level for MQTT client. This is disabled by default and will be **very** chatty if enabled. |
 
 #### Triggers
 Triggers are used to set when and how the system should take change mode. The triggers section can define a series of 
@@ -204,16 +205,28 @@ future multiple bays may be possible.
 | lateral | Yes | dict | None | Lateral detectors for this bay. |
 
 ##### Longitudinal and Lateral assignments
-Both the longitudinal and lateral dictionaries have a 'defaults' and 'detectors' key. A default will apply to all
-detectors in that direction, unless a detector has a specific value assigned.
+Assign detectors to either longitudinal or lateral roles and specify their configuration around the bay.
 
-| Options | Required? | Defaultable? | Valid Options | Default | Lat | Long | Description |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| offset | Yes | Yes | distance quantity | None | Yes | Yes | Lateral: Distance the side of the vehicle should be from the sensor aperture when correctly parked. |
-| spread_park | Yes | Yes | distance quantity | None | No | Yes | Maximum deviation from the stop point that can still be considered "OK" |
-| spread_ok | Yes | Yes | distance quantity | None | Yes | No | Maximum deviation from the offset point that can still be considered "OK" |
-| spread_warn | Yes | Yes | distance_quantity | None | Yes | No | Maximum deviation from the offset point that be considered a "WARN" |
-| side | Yes | Yes | L, R | None | Yes | No | Which side of the bay, looking out the garage door, the detector is mounted on. |
+Within each role, settings are prioritized like so:
+
+1. Settings from the detector-specific configuration
+2. Settings from the role's configured defaults.
+3. Settings from the system defaults, if available.
+
+
+
+| Options     | Required? | Defaultable? | Valid Options     | Default | Lat | Long | Description                                                                                 |
+|-------------|-----------|--------------|-------------------|---------|-----|------|---------------------------------------------------------------------------------------------|
+| offset      | No        | Yes          | distance quantity | 0"      | Yes | Yes  | Where the zero-point for this detector should be.                                           |
+| pct_warn    | No        | Yes          | number            | 70      | No  | Yes  | Switch to 'warn' once this percentage of the bay distance is covered                        |
+| pct_crit    | No        | Yes          | number            | 90      | No  | Yes  | Switch to 'crit' once this percentage of the bay distance is covered                        |
+| spread_park | No        | Yes          | distance quantity | 2"      | No  | Yes  | Maximum deviation from the stop point that can still be considered "OK"                     |
+| spread_ok   | No        | Yes          | distance quantity | 1"      | Yes | No   | Maximum deviation from the offset point that can still be considered "OK"                   |
+| spread_warn | No        | Yes          | distance_quantity | 3"      | Yes | No   | Maximum deviation from the offset point that be considered a "WARN"                         |
+| limit       | No        | Yes          | distance_quantity | 96"     | Yes | No   | Reading limit of the lateral sensor. Any reading beyond this will be treated as "no_object" |
+| side        | Yes       | Yes          | L, R              | None    | Yes | No   | Which side of the bay, looking out the garage door, the detector is mounted on.             |
+| intercept   | Yes       | No           | distance_quantity | None    | Yes | No   | Absolute distance from the longitudinal detector where this detector crosses the bay.       |
+
 
 
 # Rewrite needed below here!
