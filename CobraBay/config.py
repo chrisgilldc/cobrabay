@@ -34,7 +34,7 @@ class CBConfig:
         'i2c_address': {'type': 'integer', 'required': True},
         'enable_board': {'type': 'integer', 'required': True},
         'enable_pin': {'type': 'integer', 'required': True},
-        'distance_mode': {'type': 'string', 'default': 'medium'},
+        'distance_mode': {'type': 'string', 'allowed': ['long','short'], 'default': 'long'},
         'timing': {'type': 'string', 'default': '200ms'}
     }
     SCHEMA_SENSOR_TFMINI = {
@@ -205,12 +205,25 @@ class CBConfig:
                                         'spread_warn': { 'type': 'quantity', 'dimensionality': '[length]',
                                                          'coerce': pint.Quantity, 'default': '3 in' },
                                         'limit': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity, 'default': '96 in' },
-                                        'intercept': {'type': 'quantity', 'dimensionality': '[length]',
-                                                  'coerce': pint.Quantity, 'default': '96 in'},
+                                        'intercept': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
                                         'side': {'type': 'string', 'empty': False}
                                     }
                                 },
-                                'detectors': {'type': 'list', 'empty': False}
+                                'detectors': {
+                                    'type': 'list',
+                                    'schema': {
+                                        'type': 'dict',
+                                        'schema': {
+                                            'detector': { 'type': 'string', 'required': True },
+                                            'offset': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
+                                            'spread_ok': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
+                                            'spread_warn': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
+                                            'limit': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
+                                            'intercept': { 'type': 'quantity', 'required': True, 'dimensionality': '[length]', 'coerce': pint.Quantity },
+                                            'side': { 'type': 'string', 'empty': False }
+                                        }
+                                    }
+                                }
                             }
                     }
                 }
