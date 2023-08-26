@@ -8,6 +8,7 @@ from math import floor
 # from .detectors import CB_VL53L1X
 import logging
 from functools import wraps
+from operator import attrgetter
 from collections import namedtuple
 from CobraBay.const import *
 
@@ -205,14 +206,6 @@ class CBBay:
                 'type': self._detectors[item].detector_type
             }
             return_dict['detectors'].append(detector)
-        return return_dict
-
-    @property
-    def display_reg_info(self):
-        return_dict = {
-            'id': self.id,
-            'lateral_order': self.lateral_sorted
-        }
         return return_dict
 
     @property
@@ -512,23 +505,12 @@ class CBBay:
 
         self._logger.debug("Creating sorted intercepts from laterals: {}".format(lateral_detectors))
         lateral_sorted = []
+        # Create named tuples and put it in the list.
         for item in lateral_detectors:
             # Make a named tuple out of the detector's config.
             this_detector = Intercept(item['detector'], item['intercept'])
-            if len(lateral_sorted) == 0:
-                # If this is the first detector, append and we're done.
-                lateral_sorted.append(this_detector)
-            else:
-                # Otherwise, search and insert in the appropriate location.
-                i=0
-                while i < len(lateral_sorted):
-                    if this_detector.intercept < lateral_sorted[i].intercept:
-                        lateral_sorted.insert(i, this_detector)
-                        break
-                    i += 1
-                # If we haven't inserted anywhere yet, this is larger than all others, so append.
-                if i == len(lateral_sorted):
-                    lateral_sorted.append(this_detector)
+            lateral_sorted.append(this_detector)
+        lateral_sorted = sorted(lateral_sorted, key=attrgetter('intercept'))
         self._logger.debug("Lateral detectors sorted to order: {}".format(lateral_sorted))
         return lateral_sorted
 
