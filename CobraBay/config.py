@@ -167,69 +167,89 @@ class CBConfig:
             },
             'valuesrules': {
                 'type': 'dict',
+                'allow_unknown': True,
                 'schema': {
-                    'name': {'type': 'string'},
-                    'motion_timeout': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
-                    'depth': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity},
-                    'stop_point': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity},
-                    # 'longitudinal': {'type': 'dict'},
+                    'name': { 'type': 'string' },
+                    'motion_timeout': { 'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity },
+                    'depth': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
+                    'stop_point': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
                     'longitudinal': {
                         'type': 'dict',
-                        'required': True,
-                        'schema':
-                            {
-                                'defaults': {
+                        'allow_unknown': True,
+                        'schema': {
+                            'defaults': {
+                                'type': 'dict',
+                                'schema': {
+                                    'spread_park': { 'type': 'quantity', 'dimensionality': '[length]',
+                                                     'coerce': pint.Quantity, 'default': '2 in' },
+                                    'offset': { 'type': 'quantity', 'dimensionality': '[length]',
+                                                'coerce': pint.Quantity, 'default': '0 in' },
+                                    'pct_warn': { 'type': 'number', 'min': 0, 'max': 100, 'default': 70 },
+                                    'pct_crit': { 'type': 'number', 'min': 0, 'max': 100, 'default': 90 }
+                                }
+                            },
+                            'detectors': {
+                                'type': 'list',
+                                'schema': {
                                     'type': 'dict',
                                     'schema': {
-                                        'spread_park': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity, 'default': '2 in'},
-                                        'offset': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity, 'default': '0 in'},
-                                        'pct_warn': {'type': 'number', 'default': 70},
-                                        'pct_crit': {'type': 'number', 'default': 90}
-                                    }
-                                },
-                                'detectors': {'type': 'list', 'empty': False}
-                            }
-                    },
-                    'lateral': {
-                        'type': 'dict',
-                        'required': True,
-                        'schema':
-                            {
-                                'defaults': {
-                                    'type': 'dict',
-                                    'schema': {
-                                        'offset': { 'type': 'quantity', 'dimensionality': '[length]',
-                                                    'coerce': pint.Quantity, 'default': '0 in' },
-                                        'spread_ok': { 'type': 'quantity', 'dimensionality': '[length]',
-                                                       'coerce': pint.Quantity, 'default': '1 in' },
-                                        'spread_warn': { 'type': 'quantity', 'dimensionality': '[length]',
-                                                         'coerce': pint.Quantity, 'default': '3 in' },
-                                        'limit': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity, 'default': '96 in' },
-                                        'intercept': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
-                                        'side': {'type': 'string', 'empty': False}
-                                    }
-                                },
-                                'detectors': {
-                                    'type': 'list',
-                                    'schema': {
-                                        'type': 'dict',
-                                        'schema': {
-                                            'detector': { 'type': 'string', 'required': True },
-                                            'offset': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
-                                            'spread_ok': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
-                                            'spread_warn': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
-                                            'limit': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
-                                            'intercept': { 'type': 'quantity', 'required': True, 'dimensionality': '[length]', 'coerce': pint.Quantity },
-                                            'side': { 'type': 'string', 'empty': False }
-                                        }
+                                        'spread_park': {'type': 'quantity', 'dimensionality': '[length]',
+                                                        'coerce': pint.Quantity},
+                                        'offset': {'type': 'quantity', 'dimensionality': '[length]',
+                                                   'coerce': pint.Quantity},
+                                        'pct_warn': {'type': 'number', 'min': 0, 'max': 100},
+                                        'pct_crit': {'type': 'number', 'min': 0, 'max': 100}
                                     }
                                 }
                             }
+                        }
+                    },
+                    'lateral': {
+                        'type': 'dict',
+                        'allow_unknown': True,
+                        'schema': {
+                            'defaults': {
+                                'type': 'dict',
+                                'schema': {
+                                    'offset': {'type': 'quantity', 'dimensionality': '[length]',
+                                               'coerce': pint.Quantity, 'default': '0 in'},
+                                    'spread_ok': {'type': 'quantity', 'dimensionality': '[length]',
+                                                  'coerce': pint.Quantity, 'default': '1 in'},
+                                    'spread_warn': {'type': 'quantity', 'dimensionality': '[length]',
+                                                    'coerce': pint.Quantity, 'default': '3 in'},
+                                    'limit': {'type': 'quantity', 'dimensionality': '[length]',
+                                              'coerce': pint.Quantity, 'default': '96 in'},
+                                    'side': {'type': 'string', 'allowed': ['L', 'R']}
+                                }
+                            },
+                            'detectors': {
+                                'type': 'list',
+                                'schema': {
+                                    'type': 'dict',
+                                    'schema': {
+                                        'detector': {'type': 'string', 'required': True},
+                                        'offset': {'type': 'quantity', 'dimensionality': '[length]',
+                                                   'coerce': pint.Quantity},
+                                        'spread_ok': {'type': 'quantity', 'dimensionality': '[length]',
+                                                      'coerce': pint.Quantity},
+                                        'spread_warn': {'type': 'quantity', 'dimensionality': '[length]',
+                                                        'coerce': pint.Quantity},
+                                        'limit': {'type': 'quantity', 'dimensionality': '[length]',
+                                                  'coerce': pint.Quantity},
+                                        'intercept': {'type': 'quantity', 'required': True, 'dimensionality': '[length]',
+                                                      'coerce': pint.Quantity},
+                                        'side': {'type': 'string', 'allowed': ['L', 'R']}
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+
+
 
     def __init__(self, config_file=None, auto_load=True, log_level="WARNING"):
         """
