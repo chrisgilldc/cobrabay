@@ -94,7 +94,7 @@ class CBCore:
         # Register the bay with the network and display.
         for bay_id in self._bays:
             self._network.register_bay(self._bays[bay_id])
-            self._display.register_bay(self._bays[bay_id].display_reg_info)
+            self._display.register_bay(self._bays[bay_id])
 
         # Create triggers.
         self._logger.info("Creating triggers...")
