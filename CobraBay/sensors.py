@@ -272,14 +272,13 @@ class CB_VL53L1X(I2CSensor):
 
     instances = WeakSet()
 
-    def __init__(self, i2c_bus, i2c_address, enable_board, enable_pin, timing, distance_mode ="long",
+    def __init__(self, i2c_bus, i2c_address, enable_board, enable_pin, timing, distance_mode='long',
                  parent_logger=None, log_level="WARNING"):
         """
         :type i2c_bus: int
         :type i2c_address: hex
         :type enable_board: str
         :type enable_pin: str
-        :type distance_mode: str
         :param parent_logger: Parent logger to attach to.
         :type parent_logger: logger
         :param log_level: If no parent logger provided, log level of the new logger to create.
@@ -304,7 +303,7 @@ class CB_VL53L1X(I2CSensor):
         self._ranging = False  # Ranging flag. The library doesn't actually store this!
         self._fault = False # Sensor fault state.
         self._status = 'disabled'  # Requested state of the sensor externally.
-        self._distance_mode = None  # Distance mode.
+        self._distance_mode = distance_mode  # Distance mode.
 
         # Save the input parameters.
         self.timing_budget = timing  # Timing budget
@@ -457,53 +456,103 @@ class CB_VL53L1X(I2CSensor):
             # If a request comes in before the sleep time (200ms), return the previous reading.
             return self._previous_reading
         else:
-            try:
-                reading = self._sensor_obj.distance
-            except OSError as e:
-                # Try to recover from sensor fault.
-                self._logger.critical("Attempt to read sensor threw error: {}".format(str(e)))
-                self._lifetime_faults = self._lifetime_faults + 1
-                self._logger.critical("Lifetime faults are now: {}".format(self._lifetime_faults))
+            # If the sensor doesn't have data ready yet, return the previous reading.
+            if not self._sensor_obj.data_ready:
+                return self._previous_reading
+            else:
+                reading = self._recoverable_reading()
+                self._sensor_obj.clear_interrupt()
+
+            # else:
+            if reading is None:
+                # The Adafruit VL53L1X wraps up all invalid statuses with a 'None' return. See
+                # https://github.com/adafruit/Adafruit_CircuitPython_VL53L1X/pull/8 for details.
+                self._previous_reading = CobraBay.const.SENSOR_VALUE_WEAK
+            elif reading <= 4:
+                self._logger.debug("Reading is less than 4cm. Too close to be realiable.")
+                return CobraBay.const.SENSOR_VALUE_TOOCLOSE
+            else:
+                self._previous_reading = Quantity(reading, 'cm')
+            self._previous_timestamp = monotonic()
+            return self._previous_reading
+
+    def _recoverable_reading(self):
+        '''
+        Get the distance reading from the VL53L1X sensor, and attempt auto-recovery if there's an error.
+
+        :return: float
+        '''
+
+        try:
+            reading = self._sensor_obj.distance
+        except OSError as e:
+            # Try to recover from sensor fault.
+            self._logger.critical("Attempt to read sensor threw error: {}".format(str(e)))
+            self._lifetime_faults = self._lifetime_faults + 1
+            self._logger.critical("Lifetime faults are now: {}".format(self._lifetime_faults))
+            hex_list = []
+            for address in self._i2c.scan():
+                hex_list.append(hex(address))
+            self._logger.debug("Current I2C bus: {}".format(hex_list))
+            # Decide on the last chance.
+            if self._last_chance:
+                self._logger.critical("This was the last chance. No more!")
+                if self._logger.isEnabledFor(logging.DEBUG):
+                    self._logger.debug("I2C Bus Scan:")
+                    hex_list = []
+                    for address in self._i2c.scan():
+                        hex_list.append(hex(address))
+                    self._logger.debug("Current I2C bus: {}".format(hex_list))
+                    self._logger.debug("Object Dump:")
+                    self._logger.debug(pformat(dir(self._sensor_obj)))
+                self._logger.critical("Cannot continue. Exiting.")
+                sys.exit(1)
+            else:  # Still have a last chance....
+                self._last_chance = True
                 hex_list = []
                 for address in self._i2c.scan():
                     hex_list.append(hex(address))
-                self._logger.debug("Current I2C bus: {}".format(hex_list))
-                # Decide on the last chance.
-                if self._last_chance:
-                    self._logger.critical("This was the last chance. No more!")
-                    if self._logger.isEnabledFor(logging.DEBUG):
-                        self._logger.debug("I2C Bus Scan:")
-                        hex_list = []
-                        for address in self._i2c.scan():
-                            hex_list.append(hex(address))
-                        self._logger.debug("Current I2C bus: {}".format(hex_list))
-                        self._logger.debug("Object Dump:")
-                        self._logger.debug(pformat(dir(self._sensor_obj)))
-                    self._logger.critical("Cannot continue. Exiting.")
-                    sys.exit(1)
-                else:  # Still have a last chance....
-                    self._last_chance = True
-                    hex_list = []
-                    for address in self._i2c.scan():
-                        hex_list.append(hex(address))
-                    self._logger.debug("I2C bus after fault: {}".format(hex_list))
-                    self._logger.debug("Resetting sensor to recover...")
-                    # Disable the sensor.
-                    self._disable()
-                    # Re-enable the sensor. This will re-enable the sensor and put it back at its correct address.
-                    self._enable()
-                    hex_list = []
-                    for address in self._i2c.scan():
-                        hex_list.append(hex(address))
-                    self._logger.debug("I2C bus after re-enabling: {}".format(hex_list))
-            else:
-                # A "none" means the sensor had no response.
-                if reading is None:
-                    self._previous_reading = CobraBay.const.SENSOR_VALUE_WEAK
-                else:
-                    self._previous_reading = Quantity(reading, 'cm')
-                self._previous_timestamp = monotonic()
-                return self._previous_reading
+                self._logger.debug("I2C bus after fault: {}".format(hex_list))
+                self._logger.debug("Resetting sensor to recover...")
+                # Disable the sensor.
+                self._disable()
+                # Re-enable the sensor. This will re-enable the sensor and put it back at its correct address.
+                self._enable()
+                hex_list = []
+                for address in self._i2c.scan():
+                    hex_list.append(hex(address))
+                self._logger.debug("I2C bus after re-enabling: {}".format(hex_list))
+        else:
+            return reading
+
+
+    # Not actually using this method, because it doesn't account for the sensor's timing budget. We wind up hitting the
+    # sensor within the same timing budget window and just get the same value back five times.
+    # # Method to get an average and stabilize the sensor.
+    # def _read_average(self):
+    #     readings = []
+    #     start = monotonic()
+    #     i = 0
+    #     while len(readings) < 5:
+    #         try:
+    #             new_reading = self._sensor_obj.distance
+    #         except OSError as e:
+    #             self._logger.critical("Attempt to read sensor returned error: {}".format(str(e)))
+    #             self._lifetime_faults += 1
+    #             self._logger.critical("Lifetime faults are now: {}".format(self._lifetime_faults))
+    #             hex_list = []
+    #             for address in self._i2c.scan():
+    #                 hex_list.append(hex(address))
+    #             self._logger.critical("I2C Bus after error: {}".format(hex_list))
+    #             # Do last_chance logic.
+    #         else:
+    #             readings.append(new_reading)
+    #             i += 1
+    #     self._logger.debug("Averaging readings: {}".format(readings))
+    #     average = sum(readings) / 5
+    #     self._logger.debug("Took {} cycles in {}s to get stable reading of {}.".
+    #                        format(i, round(monotonic() - start, 2), average))
+    #     return average
 
     # Method to find out if an address is on the I2C bus.
     def _addr_on_bus(self, i2c_address):
@@ -651,10 +700,11 @@ class TFMini(SerialSensor):
             return self._previous_reading
         elif reading.status == "Weak":
             return CobraBay.const.SENSOR_VALUE_WEAK
-        elif reading.status == "Flood":
-            raise CobraBay.const.SENSOR_VALUE_FLOOD
+        elif reading.status in ("Flood", "Saturation"):
+            return CobraBay.const.SENSOR_VALUE_FLOOD
         else:
-            raise CobraBay.exceptions.SensorException
+            raise CobraBay.exceptions.SensorException("TFMini sensor '{}' had unexpected reading '{}'".
+                                                      format(self._name, reading))
 
     # When this was tested in I2C mode, the TFMini could return unstable answers, even at rest. Unsure if
     # this is still true in serial mode, keeping this clustering method for the moment.
@@ -690,7 +740,8 @@ class TFMini(SerialSensor):
         elif reading.status == 'Strong':
             return CobraBay.const.SENSOR_VALUE_STRONG
         else:
-            raise CobraBay.exceptions.SensorException
+            raise CobraBay.exceptions.SensorException("TFMini sensor '{}' returned unexpected reading '{}'".
+                                                      format(self._name,reading))
 
     @property
     def status(self):
