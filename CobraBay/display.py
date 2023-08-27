@@ -87,15 +87,21 @@ class CBDisplay:
         self._layers['error'] = self._placard('ERROR','red')
 
     # Have a bay register. This creates layers for the bay in advance so they can be composited faster.
-    def register_bay(self, display_reg_info):
-        bay_id = display_reg_info['id']
-        self._logger.debug("Registering bay ID {} to display".format(bay_id))
-        self._logger.debug("Got registration input: {}".format(display_reg_info))
-        # Initialize a dict for this bay_id.
-        self._layers[bay_id] = {}
+    def register_bay(self, bay_obj):
+        '''
+        Register a bay with the display. This pre-creates all the needed images for display.
+
+        :param bay_obj: The bay object being registered.
+        :type bay_obj: CBBay
+        :return:
+        '''
+        self._logger.debug("Registering bay ID {} to display".format(bay_obj.id))
+        self._logger.debug("Setting up for laterals: {}".format(bay_obj.lateral_sorted))
+        # Initialize a dict for this bay.
+        self._layers[bay_obj.id] = {}
         # If no lateral detectors are defined, do nothing else.
-        if len(display_reg_info['lateral_order']) == 0:
-            return None
+        if len(bay_obj.lateral_sorted) == 0:
+            return
 
         # For convenient reference later.
         w = self._matrix_width
@@ -103,9 +109,9 @@ class CBDisplay:
 
         # Calculate the available pixels for each zones.
         avail_height = self._matrix_height - 6  #
-        pixel_lengths = self._parts(avail_height, len(display_reg_info['lateral_order']))
+        pixel_lengths = self._parts(avail_height, len(bay_obj.lateral_sorted))
         self._logger.debug("Split {} pixels for {} lateral zones into: {}".
-                           format(avail_height,len(display_reg_info['lateral_order']),pixel_lengths))
+                           format(avail_height,len(bay_obj.lateral_sorted),pixel_lengths))
 
         status_lookup = (
             ['ok',(0,128,0,255)],
@@ -117,12 +123,12 @@ class CBDisplay:
         # Add in the used height of each bar to this variable. Since they're not guaranteed to be the same, we can't
         # just multiply.
         accumulated_height = 0
-        for intercept in display_reg_info['lateral_order']:
+        for intercept in bay_obj.lateral_sorted:
             lateral = intercept.lateral
             self._logger.debug("Processing lateral zone: {}".format(lateral))
-            self._layers[bay_id][lateral] = {}
+            self._layers[bay_obj.id][lateral] = {}
             for side in ('L','R'):
-                self._layers[bay_id][lateral][side] = {}
+                self._layers[bay_obj.id][lateral][side] = {}
                 if side == 'L':
                     # line_w = 5
                     line_w = 0
@@ -144,7 +150,7 @@ class CBDisplay:
                     j += 2
 
                 # Save
-                self._layers[bay_id][lateral][side]['fault'] = img
+                self._layers[bay_obj.id][lateral][side]['fault'] = img
                 del(draw)
                 del(img)
 
@@ -161,7 +167,7 @@ class CBDisplay:
                         ],
                         fill=status[1],width=1)
                     # Put this in the right place in the lookup.
-                    self._layers[bay_id][lateral][side][status[0]] = img
+                    self._layers[bay_obj.id][lateral][side][status[0]] = img
                     # Write for debugging
                     # img.save("/tmp/CobraBay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
                     del(draw)
@@ -173,7 +179,7 @@ class CBDisplay:
             accumulated_height += pixel_lengths[i]
             # Increment to the next zone.
             i += 1
-        self._logger.debug("Created laterals for {}: {}".format(bay_id, self._layers[bay_id]))
+        self._logger.debug("Created laterals for {}: {}".format(bay_obj.id, self._layers[bay_obj.id]))
 
     # General purpose message displayer
     def show(self, system_status, mode, message=None, color="white", icons=True):
