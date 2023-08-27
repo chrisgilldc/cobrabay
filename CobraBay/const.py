@@ -22,6 +22,7 @@ SENSOR_VALUE_OK = 'ok'
 SENSOR_VALUE_WEAK = 'weak'
 SENSOR_VALUE_STRONG = 'strong'
 SENSOR_VALUE_FLOOD = 'flood'
+SENSOR_VALUE_TOOCLOSE = 'tooclose'
 
 # Detector quality values.
 DETECTOR_QUALITY_OK = 'ok'
@@ -35,6 +36,7 @@ DETECTOR_QUALITY_NOOBJ = 'no_object'
 DETECTOR_QUALITY_EMERG = 'emergency'
 DETECTOR_QUALITY_DOOROPEN = 'door_open'
 DETECTOR_NOREADING = 'no_reading'
+DETECTOR_NOINTERCEPT = 'not_intercepted'
 
 # Directional values
 DIR_FWD = 'forward'
