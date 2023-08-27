@@ -735,7 +735,7 @@ class TFMini(SerialSensor):
             return CobraBay.const.SENSOR_VALUE_OK
         elif reading.status == 'Weak':
             return CobraBay.const.SENSOR_VALUE_WEAK
-        elif reading.status == 'Flood':
+        elif reading.status in ('Flood', 'Saturation'):
             return CobraBay.const.SENSOR_VALUE_FLOOD
         elif reading.status == 'Strong':
             return CobraBay.const.SENSOR_VALUE_STRONG
