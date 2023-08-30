@@ -4,6 +4,12 @@
 GEN_UNKNOWN = 'unknown'
 GEN_UNAVAILABLE = 'unavailable'
 
+## Bay states
+BAYSTATE_DOCKING = 'docking'
+BAYSTATE_UNDOCKING = 'undocking'
+BAYSTATE_READY = 'ready'
+BAYSTATE_NOTREADY = 'not_ready'
+
 ## System States
 SYSSTATE_READY = 'ready'
 SYSSTATE_DOCKING = 'docking'
@@ -35,6 +41,7 @@ DETECTOR_QUALITY_BACKUP = 'backup'
 DETECTOR_QUALITY_NOOBJ = 'no_object'
 DETECTOR_QUALITY_EMERG = 'emergency'
 DETECTOR_QUALITY_DOOROPEN = 'door_open'
+DETECTOR_QUALITY_BEYOND = 'beyond_range'
 DETECTOR_NOREADING = 'no_reading'
 DETECTOR_NOINTERCEPT = 'not_intercepted'
 
