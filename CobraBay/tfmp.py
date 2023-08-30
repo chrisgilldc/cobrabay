@@ -1,3 +1,8 @@
+#
+# TFMini Plus Python Library
+# Reworked from Bud Ryerson's TFMini-Plus_python library (https://github.com/budryerson/TFMini-Plus_python/)
+#
+
 import importlib
 import time
 import pint
