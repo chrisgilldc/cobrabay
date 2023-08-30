@@ -246,6 +246,8 @@ class SingleDetector(Detector):
         :return: bool
         """
         if self.status != self.state:
+            self._logger.warning("Detector is in a fault state. Operating status '{}' does not equal running state '{}'".
+                                 format(self.status, self.state))
             return True
         else:
             return False
@@ -362,7 +364,7 @@ class Longitudinal(SingleDetector):
         elif current_value in (SENSOR_VALUE_FLOOD, SENSOR_VALUE_STRONG):
             return DETECTOR_NOREADING
         else:
-            raise CobraBay.exceptions.SensorException
+            return GEN_UNKNOWN
 
     # Determine the rate of motion being measured by the detector.
     @property
@@ -515,14 +517,16 @@ class Longitudinal(SingleDetector):
 
 # Detector for lateral position
 class Lateral(SingleDetector):
-    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING"):
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING" ):
         super().__init__(detector_id=detector_id, name=name, sensor_type=sensor_type, sensor_settings=sensor_settings,
                          log_level=log_level)
+        self._intercept = None
         self._required = ['side', 'spread_ok', 'spread_warn']
         self._side = None
         self._spread_ok = None
         self._spread_warn = None
         self._limit = None
+        self._bay_obj = None
 
     # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
@@ -543,9 +547,6 @@ class Lateral(SingleDetector):
         self._logger.debug("Assessing quality for value: {}".format(self.value))
         # Process quality if we get a quantity from the Detector.
         if isinstance(self.value, Quantity):
-            self._logger.debug("Comparing to OK ({}) and WARN ({})".format(
-                self.spread_ok, self.spread_warn))
-            # if self.value > Quantity('90 in'):
             if self.value > self._limit:
                 qv = DETECTOR_QUALITY_NOOBJ
             elif abs(self.value) <= self.spread_ok:
@@ -560,6 +561,20 @@ class Lateral(SingleDetector):
                 qv = GEN_UNKNOWN
         else:
             qv = GEN_UNKNOWN
+        # Check for interception. If this is enabled, we stomp over everything else.
+        if self.attached_bay is not None and self.intercept is not None:
+            self._logger.debug("Evaluating for interception.")
+            lv = self.attached_bay.range.value_raw
+            try:
+                if lv > self.intercept:
+                    self._logger.debug("Reported range '{}' greater than intercept '{}'. Not intercepted.".format(
+                        self.attached_bay.range.value, self.intercept
+                    ))
+                    qv = DETECTOR_NOINTERCEPT
+            except ValueError:
+                self._logger.warning("Cannot use longitudinal value '{}' to check for intercept".format(lv))
+        else:
+            self._logger.debug("Cannot evaluate for interception, not configured.")
         self._logger.debug("Quality {}".format(qv))
         return qv
 
@@ -605,6 +620,25 @@ class Lateral(SingleDetector):
     @limit.setter
     def limit(self, new_limit):
         self._limit = new_limit
+
+    @property
+    def attached_bay(self):
+        return self._bay_obj
+
+    @attached_bay.setter
+    def attached_bay(self, new_bay_obj):
+        self._bay_obj = new_bay_obj
+
+    @property
+    def intercept(self):
+        return self._intercept
+
+    @intercept.setter
+    def intercept(self, new_intercept):
+        if not isinstance(new_intercept, Quantity):
+            raise TypeError("Intercept must be a quantity.")
+        else:
+            self._intercept = new_intercept
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
