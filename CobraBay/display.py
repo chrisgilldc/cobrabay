@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor
 from base64 import b64encode
 from io import BytesIO
 import math
+from CobraBay.const import *
 
 ureg = UnitRegistry()
 
@@ -59,6 +60,11 @@ class CBDisplay:
         self._bottom_box = bottom_box
         self._strobe_speed = strobe_speed
         self._unit_system = unit_system
+        # Based on unit system, set the target unit.
+        if self._unit_system.lower() == 'imperial':
+            self._target_unit = 'in'
+        else:
+            self._target_unit = 'm'
         self._cbcore = cbcore
 
         self._core_font = font
@@ -114,9 +120,10 @@ class CBDisplay:
                            format(avail_height,len(bay_obj.lateral_sorted),pixel_lengths))
 
         status_lookup = (
-            ['ok',(0,128,0,255)],
-            ['warning',(255,255,0,255)],
-            ['critical',(255,0,0,255)]
+            {'status': DETECTOR_QUALITY_OK, 'border': (0,128,0,255), 'fill': (0,128,0,255)},
+            {'status': DETECTOR_QUALITY_WARN, 'border': (255,255,0,255), 'fill': (255,255,0,255)},
+            {'status': DETECTOR_QUALITY_CRIT,'border': (255,0,0,255), 'fill': (255,0,0,255)},
+            {'status': DETECTOR_NOINTERCEPT, 'border': (255,255,255,255), 'fill': (0,0,0,0)}
         )
 
         i = 0
@@ -140,40 +147,35 @@ class CBDisplay:
 
                 # Make an image for the 'fault' status.
                 img = Image.new('RGBA', (w, h), (0,0,0,0))
-                draw = ImageDraw.Draw(img)
-
-                j = 0
-                while j <= pixel_lengths[i]:
-                    draw.line([
-                        (line_w, accumulated_height + j),(line_w + 2, accumulated_height + j)
-                    ],fill=(255,0,0,255),width=1)
-                    j += 2
-
-                # Save
+                # Make a striped box for fault.
+                img = self._rectangle_striped(
+                    img,
+                    (line_w, 1 + accumulated_height),
+                    (line_w + 2, 1 + accumulated_height + pixel_lengths[i]),
+                    pricolor='red',
+                    seccolor='yellow'
+                )
                 self._layers[bay_obj.id][lateral][side]['fault'] = img
-                del(draw)
                 del(img)
 
-                for status in status_lookup:
-                    self._logger.debug("Creating layer for side {}, status {} with color {}.".format(side, status[0], status[1]))
+                for item in status_lookup:
+                    self._logger.debug("Creating layer for side {}, status {} with border {}, fill {}."
+                                       .format(side, item['status'], item['border'], item['fill']))
                     # Make the image.
                     img = Image.new('RGBA', (w, h), (0,0,0,0))
                     draw = ImageDraw.Draw(img)
-
+                    # Draw the rectangle
                     draw.rectangle(
-                        [
-                            (line_w,1 + accumulated_height),
-                            (line_w+2,1 + accumulated_height + pixel_lengths[i])
-                        ],
-                        fill=status[1],width=1)
+                        [line_w,1 + accumulated_height,line_w+2,1 + accumulated_height + pixel_lengths[i]],
+                        fill=item['fill'],
+                        outline=item['border'],
+                        width=1)
                     # Put this in the right place in the lookup.
-                    self._layers[bay_obj.id][lateral][side][status[0]] = img
+                    self._layers[bay_obj.id][lateral][side][item['status']] = img
                     # Write for debugging
                     # img.save("/tmp/CobraBay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
                     del(draw)
                     del(img)
-
-
 
             # Now add the height of this bar to the accumulated height, to get the correct start for the next time.
             accumulated_height += pixel_lengths[i]
@@ -252,10 +254,30 @@ class CBDisplay:
 
         for intercept in bay_obj.lateral_sorted:
             detector = bay_obj.detectors[intercept.lateral]
-            if detector.quality in ('ok','warning','critical'):
-                self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(detector.name, detector.side, detector.quality))
-                selected_layer = self._layers[bay_obj.id][detector.id][detector.side][detector.quality]
-                final_image = Image.alpha_composite(final_image, selected_layer)
+            if detector.quality == DETECTOR_NOINTERCEPT:
+                # No intercept shows on both sides.
+                combined_layers = Image.alpha_composite(
+                    self._layers[bay_obj.id][detector.id]['L'][detector.quality],
+                    self._layers[bay_obj.id][detector.id]['R'][detector.quality]
+                )
+                final_image = Image.alpha_composite(final_image, combined_layers)
+            elif detector.quality in (DETECTOR_QUALITY_OK, DETECTOR_QUALITY_WARN, DETECTOR_QUALITY_CRIT):
+                # Pick which side the vehicle is offset towards.
+                if detector.value == 0:
+                    skew = ('L','R')  # In the rare case the value is exactly zero, show both sides.
+                elif detector.side == 'R' and detector.value > 0:
+                    skew = ('R')
+                elif detector.side == 'R' and detector.value < 0:
+                    skew = ('L')
+                elif detector.side == 'L' and detector.value > 0:
+                    skew = ('L')
+                elif detector.side == 'L' and detector.value < 0:
+                    skew = ('R')
+
+                self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(detector.name, skew, detector.quality))
+                for item in skew:
+                    selected_layer = self._layers[bay_obj.id][detector.id][item][detector.quality]
+                    final_image = Image.alpha_composite(final_image, selected_layer)
         self._output_image(final_image)
 
     def _strobe(self, range_quality, range_pct):
@@ -382,27 +404,35 @@ class CBDisplay:
     def _placard_range(self, input_range, range_quality, bay_state):
         self._logger.debug("Creating range placard with range {} and quality {}".format(input_range, range_quality))
         range_string = "NOVAL"
-        # Some range quality statuses need a text output, not a distance.
-        if range_quality == 'back_up':
-            range_string = "BACK UP"
-        elif range_quality == 'door_open':
-            if bay_state == 'docking':
+
+
+        # Convert to the proper target unit.
+        try:
+            range_converted = input_range.to(self._target_unit)
+        except AttributeError:
+            # If the range isn't a Quantity, we get an attribute error.
+            if range_quality == DETECTOR_QUALITY_BACKUP:
+                range_string = "BACK UP"
+            elif range_quality == DETECTOR_QUALITY_DOOROPEN:
+                if bay_state == BAYSTATE_DOCKING:
+                    range_string = "APPROACH"
+                elif bay_state == BAYSTATE_UNDOCKING:
+                    range_string = "CLEAR!"
+            elif input_range == DETECTOR_QUALITY_BEYOND:
                 range_string = "APPROACH"
-            elif bay_state == 'undocking':
-                range_string = "CLEAR!"
-        elif input_range == 'Beyond range':
-            range_string = "APPROACH"
-        elif self._unit_system.lower() == 'imperial':
-            as_inches = input_range.to('in')
-            if as_inches.magnitude < 12:
-                range_string = "{}\"".format(round(as_inches.magnitude,1))
             else:
-                feet = int(as_inches.to(ureg.inch).magnitude // 12)
-                inches = round(as_inches.to(ureg.inch).magnitude % 12)
-                range_string = "{}'{}\"".format(feet,inches)
+                range_string = "NOVAL"
         else:
-            as_meters = round(input_range.to('m').magnitude,2)
-            range_string = "{} m".format(as_meters)
+            # If we correctly converted,
+            if self._unit_system.lower() == 'imperial':
+                if range_converted.magnitude < 12:
+                    range_string = "{}\"".format(round(range_converted.magnitude,1))
+                else:
+                    feet = int(range_converted.to(ureg.inch).magnitude // 12)
+                    inches = round(range_converted.to(ureg.inch).magnitude % 12)
+                    range_string = "{}'{}\"".format(feet,inches)
+            else:
+                range_string = "{} m".format(round(range_converted.magnitude,2))
 
         # Determine a color based on quality
         if range_quality in ('critical','back_up'):
@@ -456,6 +486,48 @@ class CBDisplay:
             else:
                 break
         return fontsize
+
+    # Create a two-color, 45 degree striped rectangle
+    @staticmethod
+    def _rectangle_striped(input_image, start, end, pricolor='red', seccolor='yellow'):
+        # Simple breakout of input. Replace with something better later, maybe.
+        x_start = start[0]
+        y_start = start[1]
+        x_end = end[0]
+        y_end = end[1]
+
+        # Create a drawing object on the provided image.
+        draw = ImageDraw.Draw(input_image)
+
+        # Start out with the primary color.
+        current_color = pricolor
+        # track current column.
+        current_x = x_start - (y_end - y_start)
+        current_y = y_start
+        while current_x <= x_end:
+            line_start = [current_x, y_start]
+            line_end = [current_x + (y_end - y_start), y_end]
+            # Trim the lines.
+            if line_start[0] < x_start:
+                diff = x_start - line_start[0]
+                # Move the X start to the right and the Y start down.
+                line_start = [x_start, y_start + diff]
+            if line_end[0] > x_end:
+                diff = line_end[0] - x_end
+                # Move the X start back to the left and the Y start up.
+                line_end = [x_end, y_end - diff]
+            draw.line([line_start[0], line_start[1], line_end[0], line_end[1]],
+                      fill=current_color,
+                      width=1
+                      )
+            # Rotate the color.
+            if current_color == pricolor:
+                current_color = seccolor
+            else:
+                current_color = pricolor
+            # Increment the current X
+            current_x += 1
+        return input_image
 
     # Utility method to do all the matrix creation.
     def _create_matrix(self, width, height, gpio_slowdown):
