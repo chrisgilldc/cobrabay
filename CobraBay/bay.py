@@ -433,49 +433,6 @@ class CBBay:
             return_list.append(detector_message)
         return return_list
 
-    # # Tells the detectors to update.
-    # # Note, this does NOT trigger timer operations.
-    # def _scan_detectors(self, filter_lateral=True):
-    #     self._logger.debug("Starting detector scan.")
-    #     self._logger.debug("Have detectors: {}".format(self._detectors))
-    #     # Staging dicts. This makes sure we wipe any items that need to be wiped.
-    #     position = {}
-    #     quality = {}
-    #     # Check all the detectors.
-    #     for detector_name in self._detectors:
-    #         try:
-    #             position[detector_name] = self._detectors[detector_name].value
-    #         except SensorException:
-    #             # For now, pass. Need to add logic here to actually set the overall bay status.
-    #             pass
-    #
-    #         quality[detector_name] = self._detectors[detector_name].quality
-    #         self._logger.debug("Read of detector {} returned value '{}' and quality '{}'".
-    #                            format(self._detectors[detector_name].name, position[detector_name],
-    #                                   quality[detector_name]))
-    #
-    #     if filter_lateral:
-    #         # Pull the raw range value once, use it to test all the intercepts.
-    #         raw_range = self._detectors[self._selected_range].value_raw
-    #         for lateral_name in self.lateral_sorted:
-    #             # If intercept range hasn't been met yet, we wipe out any value, it's meaningless.
-    #             # Have a bug where this is sometimes erroring out due to a None range value.
-    #             # Trapping and logging for now.
-    #             try:
-    #                 if raw_range > self._intercepts[lateral_name]:
-    #                     quality[lateral_name] = "Not Intercepted"
-    #                     self._logger.debug("Sensor {} with intercept {}. Range {}, not intercepted.".
-    #                                        format(lateral_name,
-    #                                               self._intercepts[lateral_name].to('cm'),
-    #                                               raw_range.to('cm')))
-    #             except ValueError:
-    #                 self._logger.debug("For lateral sensor {} cannot compare intercept {} to range {}".
-    #                                    format(lateral_name,
-    #                                           self._intercepts[lateral_name],
-    #                                           raw_range))
-    #     self._position = position
-    #     self._quality = quality
-
     def _select_range(self, longitudinal):
         """
         Select a primary longitudinal sensor to use for range from among those presented.
@@ -549,7 +506,8 @@ class CBBay:
                 else:
                     self._logger.info("Configuring detector '{}'".format(detector_id))
                     self._logger.debug("Settings: {}".format(detector_settings))
-                    # Apply all the bay-specific settings to the detector. Usually these are defined in the detector-settings.
+                    # Apply all the bay-specific settings to the detector. Usually these are defined in the
+                    # detector-settings.
                     for item in detector_settings:
                         self._logger.info(
                             "Setting property {} to {}".format(item, detector_settings[item]))
@@ -558,5 +516,10 @@ class CBBay:
                     if direction is longitudinal:
                         self._logger.debug("Applying bay depth '{}' to longitudinal detector.".format(self._depth))
                         setattr(configured_detectors[detector_id], "bay_depth", self._depth)
+                    elif direction is lateral:
+
+                        setattr(configured_detectors[detector_id], "attached_bay", self )
+                        self._logger.debug("Attaching bay object reference '{}' to lateral detector.".
+                                           format(configured_detectors[detector_id].attached_bay))
         self._logger.debug("Configured detectors: {}".format(configured_detectors))
         return configured_detectors
