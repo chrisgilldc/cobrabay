@@ -58,11 +58,12 @@ class BaseSensor:
     @property
     def state(self):
         raise NotImplementedError("State should be overridden by specific sensor class.")
-        
+
     @property
     def status(self):
         """
-        Read the sensor status.  This is the requested status. It may not be the state if there have been intervening errors.
+        Read the sensor status.  This is the requested status. It may not be the state if there have been intervening
+        errors.
         :return: str
         """
         return self._status
@@ -119,7 +120,7 @@ class BaseSensor:
                     self._logger.debug("Successfully completed implicit enable to allow change to ranging")
             try:
                 self._start_ranging()
-            except TypeError as e:
+            except TypeError:
                 self._logger.warning("Could not start ranging. Sensor returned value that could not be interpreted.")
             except BaseException as e:
                 self._logger.error("Could not start ranging.")
@@ -145,8 +146,10 @@ class BaseSensor:
     def _stop_ranging(self):
         raise NotImplementedError("Stop Ranging method must be implemented by core sensor class.")
 
+
 class I2CSensor(BaseSensor):
     aw9523_boards = {}
+
     def __init__(self, i2c_bus, i2c_address, parent_logger=None, log_level="WARNING"):
         """
 
@@ -266,6 +269,7 @@ class SerialSensor(BaseSensor):
         """ Sensor name, type-port """
         return self._name
 
+
 class CB_VL53L1X(I2CSensor):
     _i2c_address: int
     _i2c_bus: int
@@ -301,7 +305,7 @@ class CB_VL53L1X(I2CSensor):
         # Initialize variables.
         self._sensor_obj = None  # Sensor object from base library.
         self._ranging = False  # Ranging flag. The library doesn't actually store this!
-        self._fault = False # Sensor fault state.
+        self._fault = False  # Sensor fault state.
         self._status = 'disabled'  # Requested state of the sensor externally.
         self._distance_mode = distance_mode  # Distance mode.
 
@@ -310,7 +314,7 @@ class CB_VL53L1X(I2CSensor):
         self.enable_board = enable_board  # Board where the enable pin is.
         self.enable_pin = enable_pin  # Pin for enabling.
         self._enable_attempt_counter = 1
-        
+
         # Add self to instance list.
         CB_VL53L1X.instances.add(self)
         # In principle, will use this in the future.
@@ -322,7 +326,7 @@ class CB_VL53L1X(I2CSensor):
         # Enable the sensor.
         self.status = 'enabled'
         # Get a test reading.
-        self.status = 'ranging'    # Start ranging.
+        self.status = 'ranging'  # Start ranging.
         self.measurement_time = Quantity(timing).to('microseconds').magnitude
         self.distance_mode = 'long'
         test_range = self.range
@@ -376,7 +380,11 @@ class CB_VL53L1X(I2CSensor):
             try:
                 self._sensor_obj = af_VL53L1X(self._i2c, address=0x29)
             except ValueError:
-                self._logger.error("Sensor not found at default address '0x29'. Check for configuration and hardware errors!")
+                self._logger.error("Sensor not found at default address '0x29'. Check configuration!")
+            except OSError as e:
+                self._logger.error("Sensor not responsive! Marking sensor as in fault. Base error was: '{} - {}'"
+                                   .format(e.__class__.__name__, str(e)))
+                self._fault = True
             else:
                 # Change the I2C address to the target address.
                 self._sensor_obj.set_address(new_address=self._i2c_address)
@@ -387,18 +395,21 @@ class CB_VL53L1X(I2CSensor):
             self._logger.error("Device did not appear on I2C bus! Check configuration and for hardware errors.")
 
         if self._enable_attempt_counter >= 3:
-            self._logger.error("Could not enable sensor after {} attempts. Marking as faulty.".format(self._enable_attempt_counter))
+            self._logger.error("Could not enable sensor after {} attempts. Marking as faulty.".
+                               format(self._enable_attempt_counter))
             self._fault = True
             raise CobraBay.exceptions.SensorException
         else:
-            self._logger.warning("Could not enable sensor on attempt {}. Disabling and retrying.".format(self._enable_attempt_counter))
+            self._logger.warning("Could not enable sensor on attempt {}. Disabling and retrying.".
+                                 format(self._enable_attempt_counter))
             self._enable_attempt_counter += 1
             self._disable()
             self._enable()
 
     def _disable(self):
         self.enable_pin.value = False
-        # Also set the internal ranging variable to false, since by definition, when the board gets killed, we stop ranging.
+        # Also set the internal ranging variable to false, since by definition, when the board gets killed,
+        # we stop ranging.
         self._ranging = False
 
     @property
@@ -525,7 +536,6 @@ class CB_VL53L1X(I2CSensor):
         else:
             return reading
 
-
     # Not actually using this method, because it doesn't account for the sensor's timing budget. We wind up hitting the
     # sensor within the same timing budget window and just get the same value back five times.
     # # Method to get an average and stabilize the sensor.
@@ -608,7 +618,15 @@ class CB_VL53L1X(I2CSensor):
                                           format(self.i2c_bus, self.enable_board))
                     raise e
                 else:
-                    CobraBay.util.aw9523_reset(self.__class__.aw9523_boards[awkey])
+                    try:
+                        CobraBay.util.aw9523_reset(self.__class__.aw9523_boards[awkey])
+                    except OSError as e:
+                        self._logger.error("Error while resetting pins on AW9523 board on bus '{}', address "
+                                           "'0x{:x}'. Base error was: '{} - {}'".
+                                           format(self.i2c_bus, self.enable_board, e.__class__.__name__, str(e)))
+                        self._logger.critical("Cannot continue!")
+                        sys.exit(1)
+
             # Can now create the pin
             self._enable_pin = self.__class__.aw9523_boards[awkey].get_pin(enable_pin)
 
@@ -620,7 +638,7 @@ class CB_VL53L1X(I2CSensor):
             #     self._logger.critical("Could not access AW9523 board.")
             #     raise e
             # # Get the pin from the AW9523.
-            #self._enable_pin = aw.get_pin(enable_pin)
+            # self._enable_pin = aw.get_pin(enable_pin)
         # Make sure this is an 'output' type pin.
         self._enable_pin.switch_to_output()
 
@@ -645,13 +663,14 @@ class CB_VL53L1X(I2CSensor):
                 self._logger.debug("Enabled, not ranging.")
                 return CobraBay.const.SENSTATE_ENABLED
         elif self.enable_pin.value is False:
-                self._logger.debug("Enable pin is off.")
-                return CobraBay.const.SENSTATE_DISABLED
+            self._logger.debug("Enable pin is off.")
+            return CobraBay.const.SENSTATE_DISABLED
         else:
             raise CobraBay.exceptions.SensorException
 
+
 class TFMini(SerialSensor):
-    def __init__(self, port, baud, parent_logger=None, log_level="WARNING"):
+    def __init__(self, port, baud, parent_logger=None, clustering=1, log_level="WARNING"):
         """
 
         :param port: Serial port
@@ -660,11 +679,13 @@ class TFMini(SerialSensor):
         :type baud: int
         :param parent_logger: Parent logger to attach to.
         :type parent_logger: logger
+        :param clustering: Should we cluster read, and if so how many to cluster?
+        :type clustering: int
         :param log_level: If no parent logger provided, log level of the new logger to create.
         :type log_level: str
         """
         try:
-            super().__init__(port=port, baud=baud, parent_logger=parent_logger,  log_level=log_level)
+            super().__init__(port=port, baud=baud, parent_logger=parent_logger, log_level=log_level)
         except ValueError:
             raise
 
@@ -672,6 +693,9 @@ class TFMini(SerialSensor):
             'max_range': Quantity('12m'),
             'min_range': Quantity('0.3m')
         }
+
+        # Cluster reading setting.
+        self._clustering = clustering
 
         # Create the sensor object.
         self._logger.debug("Creating TFMini object on serial port {}".format(self.serial_port))
@@ -690,30 +714,38 @@ class TFMini(SerialSensor):
 
     @property
     def range(self):
-        # TFMini is always ranging, so no need to pace it.
-        reading = self._clustered_read()  # Do a clustered read to ensure stability.
-        self._logger.debug("TFmini read values: {}".format(reading))
-        # Check the status to see if we got a value, or some kind of non-OK state.
-        if reading.status == "OK":
-            self._previous_reading = reading.distance
-            self._previous_timestamp = monotonic()
-            return self._previous_reading
-        elif reading.status == "Weak":
-            return CobraBay.const.SENSOR_VALUE_WEAK
-        elif reading.status in ("Flood", "Saturation"):
-            return CobraBay.const.SENSOR_VALUE_FLOOD
+        try:
+            reading = self._clustered_read(self._clustering)
+        except BaseException as e:
+            self._logger.error("Reading received exception - '{}: {}'".format(type(e).__name__, e))
+            self._state = CobraBay.const.SENSTATE_DISABLED
+            return
         else:
-            raise CobraBay.exceptions.SensorException("TFMini sensor '{}' had unexpected reading '{}'".
-                                                      format(self._name, reading))
+            self._state = CobraBay.const.SENSTATE_RANGING
+            self._logger.debug("TFmini read values: {}".format(reading))
+            # Check the status to see if we got a value, or some kind of non-OK state.
+            if reading.status == "OK":
+                self._previous_reading = reading.distance
+                self._previous_timestamp = monotonic()
+                return self._previous_reading
+            elif reading.status == "Weak":
+                return CobraBay.const.SENSOR_VALUE_WEAK
+            elif reading.status in ("Flood", "Saturation"):
+                return CobraBay.const.SENSOR_VALUE_FLOOD
+            elif reading.status == 'Strong':
+                return CobraBay.const.SENSOR_VALUE_STRONG
+            else:
+                raise CobraBay.exceptions.SensorException("TFMini sensor '{}' had unexpected reading '{}'".
+                                                          format(self._name, reading))
 
-    # When this was tested in I2C mode, the TFMini could return unstable answers, even at rest. Unsure if
-    # this is still true in serial mode, keeping this clustering method for the moment.
-    def _clustered_read(self):
+    # The clustered read method requires the sensor to be returning a consistent result to return.
+    # Passing '1' will require two consecutive reads of the same value.
+    def _clustered_read(self, reading_count):
         stable_count = 0
         i = 0
         previous_read = self._sensor_obj.data()
         start = monotonic()
-        while stable_count < 5:
+        while stable_count < reading_count:
             reading = self._sensor_obj.data()
             if reading.distance == previous_read.distance:
                 stable_count += 1
@@ -730,18 +762,7 @@ class TFMini(SerialSensor):
         State of the sensor.
         :return: str
         """
-        reading = self._sensor_obj.data()
-        if reading.status == 'OK':
-            return CobraBay.const.SENSOR_VALUE_OK
-        elif reading.status == 'Weak':
-            return CobraBay.const.SENSOR_VALUE_WEAK
-        elif reading.status in ('Flood', 'Saturation'):
-            return CobraBay.const.SENSOR_VALUE_FLOOD
-        elif reading.status == 'Strong':
-            return CobraBay.const.SENSOR_VALUE_STRONG
-        else:
-            raise CobraBay.exceptions.SensorException("TFMini sensor '{}' returned unexpected reading '{}'".
-                                                      format(self._name,reading))
+        return self._state
 
     @property
     def status(self):
@@ -771,6 +792,7 @@ class TFMini(SerialSensor):
         # The TFMini's default update rate is 100 Hz. 1s = 1000000000 ns / 100 = 10000000 ns.
         # This is static and assuming it hasn't been changed, so return it.
         return Quantity('10000000 ns')
+
 
 class FileSensor(BaseSensor):
     def __init__(self, csv_file, sensor, rate, direction, unit, parent_logger=None, log_level='WARNING'):
@@ -821,8 +843,8 @@ class FileSensor(BaseSensor):
     @property
     def range(self):
         if self._time_mark is not None:
-            motion_time = Quantity(monotonic_ns() - self._time_mark,'ns').to('ms')
-            index = floor( motion_time / self._rate )
+            motion_time = Quantity(monotonic_ns() - self._time_mark, 'ns').to('ms')
+            index = floor(motion_time / self._rate)
         else:
             motion_time = None
             index = 1
