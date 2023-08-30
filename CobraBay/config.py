@@ -38,8 +38,10 @@ class CBConfig:
         'timing': {'type': 'string', 'default': '200ms'}
     }
     SCHEMA_SENSOR_TFMINI = {
-        'port': {'type': 'string', 'required': True},
-        'baud': {'type': 'integer', 'default': 115200}
+        'port': { 'type': 'string', 'required': True },
+        'baud': { 'type': 'integer', 'default': 115200,
+                 'allowed': [9600, 14400, 19200, 56000, 115200, 460800, 921600] },
+        'clustering': { 'type': 'integer', 'default': 1, 'min': 1, 'max': 5 }
     }
     SCHEMA_MAIN = {
         'system': {
