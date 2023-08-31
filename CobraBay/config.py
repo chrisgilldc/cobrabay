@@ -174,7 +174,6 @@ class CBConfig:
                     'name': { 'type': 'string' },
                     'motion_timeout': { 'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity },
                     'depth': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
-                    'stop_point': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
                     'longitudinal': {
                         'type': 'dict',
                         'allow_unknown': True,

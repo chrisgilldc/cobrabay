@@ -14,3 +14,4 @@ rpi_bad_power
 pyserial~=3.5
 pid~=3.0.4
 PyYAML>=6.0
+cerberus>=1.3.4
