@@ -332,36 +332,40 @@ class Longitudinal(SingleDetector):
     @property
     @read_if_stale
     def quality(self):
-        self._logger.debug(
-            "Creating quality from latest value: {} ({})".format(self._history[0][0], type(self._history[0][0])))
-        self._logger.debug("90% of bay depth is: {}".format(self.bay_depth * .9))
-        current_value = self._history[0][0]
-        self._logger.debug("Evaluating longitudinal quality for value '{}' ({})".format(current_value, type(current_value)))
-        self._logger.debug("Evaluation targets: Bay Depth - {}, Critical - {}, Warn - {}".
-                           format(self.bay_depth, self._dist_crit, self._dist_warn))
-
-        if isinstance(current_value, Quantity):
+        # Pull the current value for evaluation.
+        current_raw_value = self.value_raw
+        self._logger.debug("Evaluating current raw value '{}' for quality".format(current_raw_value))
+        if isinstance(self.value_raw, Quantity):
+            # Make an adjusted value as well.
+            current_adj_value = current_raw_value - self.offset
             # Actual reading, evaluate.
-            if current_value < Quantity("2 in"):
+            if current_raw_value < Quantity("2 in"):
                 return DETECTOR_QUALITY_EMERG
-            elif (self.bay_depth * 0.90) <= current_value:
+            elif (self.bay_depth * 0.90) <= current_raw_value:
+                # Check the actual distance. If more than 90% of the bay distance is clear, probably nothing there.
                 self._logger.debug(
                     "Reading is more than 90% of bay depth ({})".format(self.bay_depth * .9))
                 return DETECTOR_QUALITY_NOOBJ
             # Now consider the adjusted values.
-            elif current_value < 0 and abs(current_value) > self.spread_park:
+            elif current_adj_value < 0 and abs(current_adj_value) > self.spread_park:
+                # Overshot stop point and too far to be considered an okay park, backup.
                 return DETECTOR_QUALITY_BACKUP
-            elif abs(current_value) < self.spread_park:
+            elif abs(current_adj_value) < self.spread_park:
+                # Just short of stop point, but within allowed range, parked.
                 return DETECTOR_QUALITY_PARK
-            elif current_value <= self._dist_crit:
+            elif current_adj_value <= self._dist_crit:
+                # Within critical range, this is "final"
                 return DETECTOR_QUALITY_FINAL
-            elif current_value <= self._dist_warn:
+            elif current_adj_value <= self._dist_warn:
+                # within warning range, this is "base"
                 return DETECTOR_QUALITY_BASE
             else:
+                # Too far to be in another status, but reading something, so this is the general 'OK' state.
                 return DETECTOR_QUALITY_OK
-        elif current_value == SENSOR_VALUE_WEAK:
+        # Handle non-Quantity values from the reading.
+        elif current_raw_value == SENSOR_VALUE_WEAK:
             return DETECTOR_QUALITY_DOOROPEN
-        elif current_value in (SENSOR_VALUE_FLOOD, SENSOR_VALUE_STRONG):
+        elif current_raw_value in (SENSOR_VALUE_FLOOD, SENSOR_VALUE_STRONG):
             return DETECTOR_NOREADING
         else:
             return GEN_UNKNOWN
@@ -447,6 +451,7 @@ class Longitudinal(SingleDetector):
     @check_ready
     def bay_depth(self, depth):
         self._bay_depth = self._convert_value(depth)
+        self._adjusted_bay_depth = self._bay_depth - self.offset
 
     @property
     def spread_park(self):

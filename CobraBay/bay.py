@@ -12,28 +12,6 @@ from operator import attrgetter
 from collections import namedtuple
 from CobraBay.const import *
 
-# Scan the detectors if we're asked for a property that needs a fresh and we haven't scanned recently enough.
-# def scan_if_stale(func):
-#     @wraps(func)
-#     def wrapper(self, *args, **kwargs):
-#         time_delta = time.monotonic() - self._previous_scan_ts
-#         if time_delta > 1:  # 1s is too long, read the sensor.
-#             do_scan = True
-#             self._logger.debug("Stale, do scan.")
-#         else:
-#             do_scan = False
-#             self._logger.debug("Not stale, no scan needed.")
-#
-#         # If flag is set, read the sensor and put its value into the history.
-#         if do_scan:
-#             self._scan_detectors()
-#             self._previous_scan_ts = time.monotonic()
-#
-#         # Send whichever value it is into the function.
-#         return func(self)
-#
-#     return wrapper
-
 def log_changes(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -59,7 +37,6 @@ class CBBay:
     def __init__(self, id,
                  name,
                  depth,
-                 stop_point,
                  motion_timeout,
                  longitudinal,
                  lateral,
@@ -73,8 +50,6 @@ class CBBay:
         :type name: str
         :param depth: Absolute distance of the bay, from the range sensor to the end. Must be a linear Quantity.
         :type depth: Quantity(Distance)
-        :param stop_point: Distance from the sensor where the vehicle should stop
-        :type stop_point: Quantity(Distance)
         :param motion_timeout: During a movement, how long the bay must be still to be considered complete.
         :type motion_timeout: Quantity(Time)
         :param system_detectors: Dictionary of detector objects available on the system.
@@ -100,7 +75,6 @@ class CBBay:
         # Save the remaining parameters.
         self._name = name
         self._depth = depth
-        self._stop_point = stop_point
         self.motion_timeout = motion_timeout
         self._detectors = None
         self._cbcore = cbcore
@@ -120,9 +94,6 @@ class CBBay:
         self._state = None
         self._occupancy = None
         self._previous = {}
-
-        # Calculate the adjusted depth.
-        self._adjusted_depth = self._depth - self._stop_point
 
         # Create a unit registry.
         self._ureg = UnitRegistry
@@ -316,9 +287,10 @@ class CBBay:
         # If it's not a Quantity, just return zero.
         self._logger.debug("Calculating range percentage")
         self._logger.debug("Range value: {} ({})".format(self.range.value,type(self.range.value)))
-        self._logger.debug("Adjusted depth: {} ({})".format(self._adjusted_depth,type(self._adjusted_depth)))
+        adjusted_depth = self._depth - self._detectors[self._selected_range].offset
+        self._logger.debug("Adjusted depth: {}".format(adjusted_depth))
         if isinstance(self.range.value, Quantity):
-            range_pct = self.range.value.to('cm') / self._adjusted_depth.to('cm')
+            range_pct = self.range.value.to('cm') / adjusted_depth.to('cm')
             # Singe this is dimensionless, just take the value and make it a Python scalar.
             range_pct = range_pct.magnitude
             return range_pct

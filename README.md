@@ -37,10 +37,18 @@ Raspberry Pi OS Lite 64-bit. Any other Pi with Raspberry Pi OS should work.
   * Serial port hardware enabled -> YES
   * reboot (should prompt when done)
 
-### CobraBay
+### Install CobraBay
 
-* Copy 'cobrabay' to _device_/lib/cobrabay
-* Copy 'code.py' to _device_/code.py
+Note: I have not yet made this a PIPable repository. Maybe some day. For now, you need to download the package manually 
+and do a local install.
+* Login as 'pi'
+* Download the [latest release](https://github.com/chrisgilldc/cobrabay/releases/latest) and extract.
+  ```wget https://github.com/chrisgilldc/cobrabay/archive/refs/tags/v0.2.0-alpha.tar.gz```
+* Extract the archive.
+  ```tar -xzf v0.2.0-alpha.tar.gz```
+* PIP install for the Pi user from the archive
+  ```pip install --user ./v0.2.0-alpha.tar.gz```
+
 
 ### Hardware
 System has been built and tested with the following hardware:
@@ -200,7 +208,6 @@ future multiple bays may be possible.
 | name | No        | str                    | Bay ID  | Friendly name of the bay, used for Home Assistant discovery. If not defined, defaults to the bay ID. | 
 | motion_timeout | Yes | time quantity          | None    | After this amount of time, consider a dock or undock complete. Prevents premature termination.       |
 | depth | Yes | distance quantity | None    | Total distance from the longitudinal sensor point to the garage door.                                |
-| stop_point | Yes | distance quantity | None | Where the vehicle should stop, as distance from the longitudinal sensor point. |
 | longitudinal | Yes | dict | None | Longitudinal detectors for this bay. |
 | lateral | Yes | dict | None | Lateral detectors for this bay. |
 
@@ -215,17 +222,17 @@ Within each role, settings are prioritized like so:
 
 
 
-| Options     | Required? | Defaultable? | Valid Options     | Default | Lat | Long | Description                                                                                 |
-|-------------|-----------|--------------|-------------------|---------|-----|------|---------------------------------------------------------------------------------------------|
-| offset      | No        | Yes          | distance quantity | 0"      | Yes | Yes  | Where the zero-point for this detector should be.                                           |
-| pct_warn    | No        | Yes          | number            | 70      | No  | Yes  | Switch to 'warn' once this percentage of the bay distance is covered                        |
-| pct_crit    | No        | Yes          | number            | 90      | No  | Yes  | Switch to 'crit' once this percentage of the bay distance is covered                        |
-| spread_park | No        | Yes          | distance quantity | 2"      | No  | Yes  | Maximum deviation from the stop point that can still be considered "OK"                     |
-| spread_ok   | No        | Yes          | distance quantity | 1"      | Yes | No   | Maximum deviation from the offset point that can still be considered "OK"                   |
-| spread_warn | No        | Yes          | distance_quantity | 3"      | Yes | No   | Maximum deviation from the offset point that be considered a "WARN"                         |
-| limit       | No        | Yes          | distance_quantity | 96"     | Yes | No   | Reading limit of the lateral sensor. Any reading beyond this will be treated as "no_object" |
-| side        | Yes       | Yes          | L, R              | None    | Yes | No   | Which side of the bay, looking out the garage door, the detector is mounted on.             |
-| intercept   | Yes       | No           | distance_quantity | None    | Yes | No   | Absolute distance from the longitudinal detector where this detector crosses the bay.       |
+| Options     | Required? | Defaultable? | Valid Options     | Default | Lat | Long | Description                                                                                                                     |
+|-------------|-----------|--------------|-------------------|---------|-----|------|---------------------------------------------------------------------------------------------------------------------------------|
+| offset      | No        | Yes          | distance quantity | 0"      | Yes | Yes  | Where the zero-point for this detector should be. On Longitudinal sensors, the offset indicates where the vehicle should stop.  |
+| pct_warn    | No        | Yes          | number            | 70      | No  | Yes  | Switch to 'warn' once this percentage of the bay distance is covered                                                            |
+| pct_crit    | No        | Yes          | number            | 90      | No  | Yes  | Switch to 'crit' once this percentage of the bay distance is covered                                                            |
+| spread_park | No        | Yes          | distance quantity | 2"      | No  | Yes  | Maximum deviation from the stop point that can still be considered "OK"                                                         |
+| spread_ok   | No        | Yes          | distance quantity | 1"      | Yes | No   | Maximum deviation from the offset point that can still be considered "OK"                                                       |
+| spread_warn | No        | Yes          | distance_quantity | 3"      | Yes | No   | Maximum deviation from the offset point that be considered a "WARN"                                                             |
+| limit       | No        | Yes          | distance_quantity | 96"     | Yes | No   | Reading limit of the lateral sensor. Any reading beyond this will be treated as "no_object"                                     |
+| side        | Yes       | Yes          | L, R              | None    | Yes | No   | Which side of the bay, looking out the garage door, the detector is mounted on.                                                 |
+| intercept   | Yes       | No           | distance_quantity | None    | Yes | No   | Absolute distance from the longitudinal detector where this detector crosses the bay.                                           |
 
 
 
