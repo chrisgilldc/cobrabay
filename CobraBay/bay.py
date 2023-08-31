@@ -7,13 +7,12 @@ from time import monotonic
 from math import floor
 # from .detectors import CB_VL53L1X
 import logging
-# from pprint import pformat, pprint
 from functools import wraps
-# import sys
-from .exceptions import SensorException
-import CobraBay
+from operator import attrgetter
+from collections import namedtuple
+from CobraBay.const import *
 
-# Scan the detectors if we're asked for a property that needs a fresh can and we haven't scanned recently enough.
+# Scan the detectors if we're asked for a property that needs a fresh and we haven't scanned recently enough.
 # def scan_if_stale(func):
 #     @wraps(func)
 #     def wrapper(self, *args, **kwargs):
@@ -38,6 +37,7 @@ import CobraBay
 def log_changes(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
+        print("Log changes wrapper received:\n\tArgs - {}\n\tKwargs - {}".format(args, kwargs))
         # Call the function.
         retval = func(self, *args, **kwargs)
         if self._logger.level <= 20:
@@ -61,13 +61,11 @@ class CBBay:
                  depth,
                  stop_point,
                  motion_timeout,
-                 output_unit,
-                 detectors,
-                 detector_settings,
-                 selected_range,
-                 intercepts,
+                 longitudinal,
+                 lateral,
+                 system_detectors,
                  cbcore,
-                 log_level="WARNING", **kwargs):
+                 log_level="WARNING"):
         """
         :param id: ID for the bay. Cannot have spaces.
         :type id: str
@@ -79,20 +77,12 @@ class CBBay:
         :type stop_point: Quantity(Distance)
         :param motion_timeout: During a movement, how long the bay must be still to be considered complete.
         :type motion_timeout: Quantity(Time)
-        :param output_unit: Unit to output measurements in. Should be a distance unit understood by Pint (ie: 'in', 'cm', etc)
-        :type output_unit: str
-        :param detectors: Dictionary of detector objects.
-        :type detectors: dict
-        :param detector_settings: Dictionary of detector configuration settings.
-        :type detector_settings: dict
-        :param selected_range: Of longitudinal sensors, which should be used as the default range sensor.
-        :type selected_range: str
+        :param system_detectors: Dictionary of detector objects available on the system.
+        :type system_detectors: dict
         :param longitudinal: Detectors which are arranged as longitudinal.
-        :type longitudinal: list
+        :type longitudinal: dict
         :param lateral: Detectors which are arranged as lateral.
-        :type lateral: list
-        :param intercepts: For lateral sensors, the raw distance from the end of the bay each lateral crosses the parking area.
-        :type intercepts: list
+        :type lateral: dict
         :param cbcore: Object reference to the CobraBay core.
         :type cbcore: object
         :param log_level: Log level for the bay, must be a Logging level.
@@ -103,25 +93,24 @@ class CBBay:
         self.id = id
 
         self._logger = logging.getLogger("CobraBay").getChild(self.id)
-        self._logger.setLevel(log_level)
+        self._logger.setLevel(log_level.upper())
         self._logger.info("Initializing bay: {}".format(id))
-        self._logger.debug("Bay received detectors: {}".format(detectors))
-
+        self._logger.debug("Bay received system detectors: {}".format(system_detectors))
 
         # Save the remaining parameters.
         self._name = name
         self._depth = depth
         self._stop_point = stop_point
         self.motion_timeout = motion_timeout
-        self._output_unit = output_unit
-        self._detectors = detectors
-        self._detector_settings = detector_settings
-        self._selected_range = selected_range
-        self._intercepts = intercepts
-        self.lateral_sorted = self._sort_lateral(intercepts)
+        self._detectors = None
         self._cbcore = cbcore
-        # Create a logger.
 
+        # Select a longitudinal detector to be the main range detector.
+        # Only one supported currently.
+        self._selected_range = self._select_range(longitudinal)
+        self._logger.debug("Longitudinal detector '{}' selected for ranging".format(self._selected_range))
+        # Sort the lateral detectors by intercept.
+        self.lateral_sorted = self._sort_lateral(lateral['detectors'])
 
         # Initialize variables.
         self._position = {}
@@ -130,19 +119,18 @@ class CBBay:
         self._previous_scan_ts = 0
         self._state = None
         self._occupancy = None
-        self._previous = {
+        self._previous = {}
 
-        }
         # Calculate the adjusted depth.
         self._adjusted_depth = self._depth - self._stop_point
 
         # Create a unit registry.
         self._ureg = UnitRegistry
 
-        # Store the detector objects
-        self._detectors = detectors
         # Apply our configurations to the detectors.
-        self._setup_detectors()
+        self._detectors = self._setup_detectors(longitudinal=longitudinal, lateral=lateral, system_detectors=system_detectors)
+
+        # Report configured detectors
         self._logger.info("Detectors configured:")
         for detector in self._detectors.keys():
             try:
@@ -152,9 +140,9 @@ class CBBay:
             self._logger.info("\t\t{} - {}".format(detector,addr))
 
         # Activate detectors.
-        self._logger.debug("Activating detectors...")
-        self._detector_state('ranging')
-        self._logger.debug("Detectors activated.")
+        self._logger.info("Activating detectors...")
+        self._detector_state(SENSTATE_RANGING)
+        self._logger.info("Detectors activated.")
 
         # Motion timer for the current motion.
         self._current_motion = {
@@ -221,14 +209,6 @@ class CBBay:
         return return_dict
 
     @property
-    def display_reg_info(self):
-        return_dict = {
-            'id': self.id,
-            'lateral_order': self.lateral_sorted
-        }
-        return return_dict
-
-    @property
     def id(self):
         return self._id
 
@@ -273,7 +253,6 @@ class CBBay:
 
     # Bay properties
     @property
-    @log_changes
     def occupied(self):
         """
         Occupancy state of the bay, determined based on what the sensors can hit.
@@ -285,7 +264,7 @@ class CBBay:
         self._logger.debug("Checking for occupancy.")
         occ = 'unknown'
         # Range detector is required to determine occupancy. If it's not ranging, return immediately.
-        if self._detectors[self._selected_range].state != 'ranging':
+        if self._detectors[self._selected_range].state != SENSTATE_RANGING:
             occ = 'unknown'
         # Only hit the range quality once.
         range_quality = self._detectors[self._selected_range].quality
@@ -293,15 +272,17 @@ class CBBay:
             # If the detector can hit the garage door, or the door is open, then clearly nothing is in the way, so
             # the bay is vacant.
             self._logger.debug("Longitudinal quality is {}, not occupied.".format(range_quality))
-            return "false"
-        elif range_quality in ('emergency', 'back_up', 'park', 'final', 'base'):
+            occ = "false"
+        elif range_quality in (DETECTOR_QUALITY_EMERG, DETECTOR_QUALITY_BACKUP, DETECTOR_QUALITY_PARK,
+                               DETECTOR_QUALITY_FINAL, DETECTOR_QUALITY_BASE):
             self._logger.debug("Matched range quality: {}".format(range_quality))
             # If the detector is giving us any of the 'close enough' qualities, there's something being found that
             # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
             # the sensors or whatnot
             lat_score = 0
-            for detector in self.lateral_sorted:
-                if self._detectors[detector].quality in ('ok', 'warning', 'critical'):
+            for intercept in self.lateral_sorted:
+                if self._detectors[intercept.lateral].quality in (DETECTOR_QUALITY_OK, DETECTOR_QUALITY_WARN,
+                                                                  DETECTOR_QUALITY_CRIT):
                     # No matter how badly parked the vehicle is, it's still *there*
                     lat_score += 1
             self._logger.debug("Achieved lateral score {} of {}".format(lat_score, self._occupancy_score))
@@ -312,7 +293,9 @@ class CBBay:
                 occ = 'false'
         else:
             occ = 'error'
-        self._logger.debug("Occupancy determined to be '{}'".format(occ))
+        if occ != self._occupancy:
+            self._logger.info("Occupancy has changed from '{}' to '{}'".format(self._occupancy, occ))
+        self._occupancy = occ
         return occ
 
     @property
@@ -382,7 +365,6 @@ class CBBay:
         self._logger.critical("Shutdown complete. Exiting.")
 
     @property
-    @log_changes
     def state(self):
         """
         Operating state of the bay.
@@ -408,13 +390,13 @@ class CBBay:
         if m_input == self._state:
             self._logger.debug("Requested state {} is also current state. No action.".format(m_input))
             return
-        if m_input in ('docking', 'undocking') and self._state not in ('docking', 'undocking'):
+        if m_input in SYSSTATE_MOTION and self._state not in SYSSTATE_MOTION:
             self._logger.info("Entering state: {}".format(m_input))
             self._logger.info("Start time: {}".format(self._current_motion['mark']))
             self._logger.debug("Setting all detectors to ranging.")
-            self._detector_state('ranging')
+            self._detector_state(SENSTATE_RANGING)
             self._current_motion['mark'] = monotonic()
-        if m_input not in ('docking', 'undocking') and self._state in ('docking', 'undocking'):
+        if m_input not in SYSSTATE_MOTION and self._state in SYSSTATE_MOTION:
             self._logger.info("Entering state: {}".format(m_input))
             # Reset some variables.
             # Make the mark none to be sure there's not a stale value in here.
@@ -423,7 +405,6 @@ class CBBay:
         self._state = m_input
 
     @property
-    @log_changes
     def vector(self):
         return self._detectors[self._selected_range].vector
 
@@ -442,7 +423,7 @@ class CBBay:
 
             # If the detector is actively ranging, add the values.
             self._logger.debug("Detector has status: {}".format(self._detectors[detector].status))
-            if self._detectors[detector].status == 'ranging':
+            if self._detectors[detector].status == SENSTATE_RANGING:
                 detector_message['message']['adjusted_reading'] = self._detectors[detector].value
                 detector_message['message']['raw_reading'] = self._detectors[detector].value_raw
                 # While ranging, always send values to MQTT, even if they haven't changed.
@@ -452,72 +433,47 @@ class CBBay:
             return_list.append(detector_message)
         return return_list
 
-    # Tells the detectors to update.
-    # Note, this does NOT trigger timer operations.
-    def _scan_detectors(self, filter_lateral=True):
-        self._logger.debug("Starting detector scan.")
-        self._logger.debug("Have detectors: {}".format(self._detectors))
-        # Staging dicts. This makes sure we wipe any items that need to be wiped.
-        position = {}
-        quality = {}
-        # Check all the detectors.
-        for detector_name in self._detectors:
-            try:
-                position[detector_name] = self._detectors[detector_name].value
-            except SensorException:
-                # For now, pass. Need to add logic here to actually set the overall bay status.
-                pass
+    def _select_range(self, longitudinal):
+        """
+        Select a primary longitudinal sensor to use for range from among those presented.
 
-            quality[detector_name] = self._detectors[detector_name].quality
-            self._logger.debug("Read of detector {} returned value '{}' and quality '{}'".
-                               format(self._detectors[detector_name].name, position[detector_name],
-                                      quality[detector_name]))
-
-        if filter_lateral:
-            # Pull the raw range value once, use it to test all the intercepts.
-            raw_range = self._detectors[self._selected_range].value_raw
-            for lateral_name in self.lateral_sorted:
-                # If intercept range hasn't been met yet, we wipe out any value, it's meaningless.
-                # Have a bug where this is sometimes erroring out due to a None range value.
-                # Trapping and logging for now.
-                try:
-                    if raw_range > self._intercepts[lateral_name]:
-                        quality[lateral_name] = "Not Intercepted"
-                        self._logger.debug("Sensor {} with intercept {}. Range {}, not intercepted.".
-                                           format(lateral_name,
-                                                  self._intercepts[lateral_name].to('cm'),
-                                                  raw_range.to('cm')))
-                except ValueError:
-                    self._logger.debug("For lateral sensor {} cannot compare intercept {} to range {}".
-                                       format(lateral_name,
-                                              self._intercepts[lateral_name],
-                                              raw_range))
-        self._position = position
-        self._quality = quality
+        :param longitudinal:
+        :return: str
+        """
+        self._logger.debug("Detectors considered for selection: {}".format(longitudinal['detectors']))
+        if len(longitudinal['detectors']) == 0:
+            raise ValueError("No longitudinal detectors defined. Cannot select a range!")
+        elif len(longitudinal['detectors']) > 1:
+            raise ValueError("Cannot select a range! More than one longitudinal detector not currently supported.")
+        else:
+            return longitudinal['detectors'][0]['detector']
 
     # Calculate the ordering of the lateral sensors.
-    def _sort_lateral(self, intercepts):
-        self._logger.debug("Sorting intercepts: {}".format(intercepts))
+    def _sort_lateral(self, lateral_detectors):
+        """
+        Sort the lateral detectors by distance.
+
+        :param lateral_detectors: List of lateral detector definition dicts.
+        :type lateral_detectors: list
+        :return:
+        """
+        # Create the named tuple type to store both detector name and intercept distance.
+        Intercept = namedtuple('Intercept', ['lateral','intercept'])
+
+        self._logger.debug("Creating sorted intercepts from laterals: {}".format(lateral_detectors))
         lateral_sorted = []
-        for detector_name in intercepts:
-            detector_intercept = intercepts[detector_name]
-            if len(lateral_sorted) == 0:
-                lateral_sorted.append(detector_name)
-            else:
-                i=0
-                while i < len(lateral_sorted):
-                    if detector_intercept < intercepts[lateral_sorted[i]]:
-                        lateral_sorted.insert(i, detector_name)
-                        break
-                    i += 1
-                if i == len(lateral_sorted):
-                    lateral_sorted.append(detector_name)
+        # Create named tuples and put it in the list.
+        for item in lateral_detectors:
+            # Make a named tuple out of the detector's config.
+            this_detector = Intercept(item['detector'], item['intercept'])
+            lateral_sorted.append(this_detector)
+        lateral_sorted = sorted(lateral_sorted, key=attrgetter('intercept'))
         self._logger.debug("Lateral detectors sorted to order: {}".format(lateral_sorted))
         return lateral_sorted
 
     # Traverse the detectors dict, activate everything that needs activating.
     def _detector_state(self, target_status):
-        if target_status in ('disabled','enabled','ranging'):
+        if target_status in (SENSTATE_DISABLED, SENSTATE_ENABLED, SENSTATE_RANGING):
             self._logger.debug("Traversing detectors to set status to '{}'".format(target_status))
             # Traverse the dict looking for detectors that need activation.
             for detector in self._detectors:
@@ -526,18 +482,44 @@ class CBBay:
         else:
             raise ValueError("'{}' not a valid state for detectors.".format(target_status))
 
-    # Apply specific config options to the detectors.
-    def _setup_detectors(self):
-        # For each detector we use, apply its properties.
-        self._logger.debug("Detectors: {}".format(self._detectors.keys()))
-        for dc in self._detector_settings.keys():
-            self._logger.info("Configuring detector {}".format(dc))
-            self._logger.debug("Settings: {}".format(self._detector_settings[dc]))
-            # Apply all the bay-specific settings to the detector. Usually these are defined in the detector-settings.
-            for item in self._detector_settings[dc]:
-                self._logger.info(
-                    "Setting property {} to {}".format(item, self._detector_settings[dc][item]))
-                setattr(self._detectors[dc], item, self._detector_settings[dc][item])
-            # Bay depth is a bay global. For range sensors, this also needs to get applied.
-            if isinstance(self._detectors[dc], CobraBay.detectors.Range):
-                setattr(self._detectors[dc], "bay_depth", self._depth)
+    # Configure system detectors for this bay.
+    def _setup_detectors(self, longitudinal, lateral, system_detectors):
+        # Output dictionary.
+        configured_detectors = {}
+        # Some debug output
+        self._logger.debug("Available detectors on system: {}".format(system_detectors))
+        self._logger.debug("Bay Longitudinal settings: {}".format(longitudinal))
+        self._logger.debug("Bay Lateral settings: {}".format(lateral))
+
+        for direction in ( longitudinal, lateral ):
+            for detector_settings in direction['detectors']:
+                # Merge in the defaults.
+                for item in direction['defaults']:
+                    if item not in detector_settings:
+                        detector_settings[item] = direction['defaults'][item]
+                detector_id = detector_settings['detector']
+                del(detector_settings['detector'])
+                try:
+                    configured_detectors[detector_id] = system_detectors[detector_id]
+                except KeyError:
+                    self._logger.error("Bay references unconfigured detector '{}'".format(detector_id))
+                else:
+                    self._logger.info("Configuring detector '{}'".format(detector_id))
+                    self._logger.debug("Settings: {}".format(detector_settings))
+                    # Apply all the bay-specific settings to the detector. Usually these are defined in the
+                    # detector-settings.
+                    for item in detector_settings:
+                        self._logger.info(
+                            "Setting property {} to {}".format(item, detector_settings[item]))
+                        setattr(configured_detectors[detector_id], item, detector_settings[item])
+                    # Bay depth is a bay global. For range sensors, this also needs to get applied.
+                    if direction is longitudinal:
+                        self._logger.debug("Applying bay depth '{}' to longitudinal detector.".format(self._depth))
+                        setattr(configured_detectors[detector_id], "bay_depth", self._depth)
+                    elif direction is lateral:
+
+                        setattr(configured_detectors[detector_id], "attached_bay", self )
+                        self._logger.debug("Attaching bay object reference '{}' to lateral detector.".
+                                           format(configured_detectors[detector_id].attached_bay))
+        self._logger.debug("Configured detectors: {}".format(configured_detectors))
+        return configured_detectors

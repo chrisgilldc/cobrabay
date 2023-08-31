@@ -122,6 +122,7 @@ def aw9523_reset(aw9523_obj):
         pin_obj.switch_to_output()
         pin_obj.value = False
 
+
 def scan_i2c():
     """
     Scan the I2C Bus.

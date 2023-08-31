@@ -1,3 +1,8 @@
+#
+# TFMini Plus Python Library
+# Reworked from Bud Ryerson's TFMini-Plus_python library (https://github.com/budryerson/TFMini-Plus_python/)
+#
+
 import importlib
 import time
 import pint
@@ -130,8 +135,9 @@ class TFMP:
             status = "OK"
 
         # If we're using pint Quantities, wrap as quantities.
-        if self._use_pint and status == "OK":
-            dist = pint.Quantity(dist,"cm").to(self._unit_length)
+        if self._use_pint:
+            if status == "OK":
+                dist = pint.Quantity(dist,"cm").to(self._unit_length)
             temp = pint.Quantity(temp, "celsius").to(self._unit_temp)
         return_data = TFMP_data(status, dist, flux, temp)
         return return_data
@@ -178,7 +184,7 @@ class TFMP:
 
         # Get reply.
         try:
-            reply = self._read_frames(reply_length)
+            reply = self._read_frames_cmd(reply_length)
         except IOError:
             # Failed checksum raises IO error, pass it on.
             raise
@@ -237,7 +243,7 @@ class TFMP:
         #  Flush all but last frame of data from the serial buffer.
         while self._data_stream.inWaiting() > self.TFMP_FRAME_SIZE:
             self._data_stream.read()
-        # Reads data byte by byte from the serial buffer checking for the the two header bytes.
+        # Reads data byte by byte from the serial buffer checking for the two header bytes.
         frames = bytearray(length)  # 'frame' data buffer
         while (frames[0] != 0x59) or (frames[1] != 0x59):
             if self._data_stream.inWaiting():
@@ -256,9 +262,46 @@ class TFMP:
         else:
             return frames
 
+    def _read_frames_cmd(self, length, timeout = 1000):
+        '''
+        Method to read frames for a command response.
+
+        :param length:
+        :param timeout:
+        :return:
+        '''
+        serial_timeout = time.time() + timeout
+        #  Flush all but last frame of data from the serial buffer.
+        while self._data_stream.inWaiting() > self.TFMP_FRAME_SIZE:
+            self._data_stream.read()
+        # Reads data byte by byte from the serial buffer checking for the two header bytes.
+        frames = bytearray(length)  # 'frame' data buffer
+        # Command replies should be '0x5A <RESPONSE LENGTH>'
+        print("Reading stream for reply header: 0x51 {}".format(length))
+        while (frames[0] != 0x5A) or (frames[1] != length):
+            if self._data_stream.inWaiting():
+                #  Read 1 byte into the 'frame' plus one position.
+                frames.append(self._data_stream.read()[0])
+                #  Shift entire length of 'frame' one byte left.
+                frames = frames[1:]
+                frame_string = ", ".join(hex(b) for b in frames)
+                print("Have frames: {}".format(frame_string))
+            #  If no HEADER or serial data not available after timeout interval.
+            if time.time() > serial_timeout:
+                print("\n")
+                raise serial.SerialTimeoutException("Sensor did not return header or serial data within one second.")
+        print("\nComplete. Have byte array:\n{}\nChecksumming data.".format(frames))
+
+        # If we haven't raised an exception, checksum the data.
+        if not self._checksum(frames):
+            raise IOError("Sensor checksum error")
+        else:
+            return frames
+
     # Destructor.
     def __del__(self):
-        self._data_stream.close()
+        if self._data_stream is not None:
+            self._data_stream.close()
 
     # Utility method to calculate checksums.
     @staticmethod
