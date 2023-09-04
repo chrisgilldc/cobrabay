@@ -5,15 +5,18 @@
 import logging
 from logging.handlers import WatchedFileHandler
 import atexit
-from pprint import pformat, pprint
+from pprint import pformat
 import CobraBay
 import sys
 
 
 class CBCore:
-    def __init__(self, config_obj):
+    def __init__(self, config_obj, envoptions):
         self._network = None
+
+        # Set the system state to initializing.
         self.system_state = 'init'
+
         # Register the exit handler.
         atexit.register(self.system_exit)
 
@@ -30,17 +33,16 @@ class CBCore:
         # Create a "core" logger, for just this module.
         self._logger = logging.getLogger("CobraBay").getChild("Core")
 
-        # Initial startup message.
-        self._logger.info("CobraBay {} initializing...".format(CobraBay.__version__))
+        self._logger.setLevel(logging.DEBUG)
+        if envoptions.loglevel is not None:
+            self._logger.warning("Based on command line options, setting core logger to '{}'".format(envoptions.loglevel))
+            self._logger.setLevel(envoptions.loglevel)
 
         if not isinstance(config_obj, CobraBay.CBConfig):
             raise TypeError("CobraBay core must be passed a CobraBay Config object (CBConfig).")
         else:
             # Save the passed CBConfig object.
             self._active_config = config_obj
-
-        print("Active configuration:")
-        pprint(self._active_config.config)
 
         # Update the logging handlers.
         self._setup_logging_handlers(**self._active_config.log_handlers())
@@ -374,7 +376,7 @@ class CBCore:
         else:
             self._logger.info("Console logging enabled. Passing logging to console.")
 
-        # Remove the temporary console handler.
+        # Remove all existing console handlers so a new one can be created.
         for handler in self._master_logger.handlers:
             if isinstance(handler, logging.StreamHandler):
                 self._master_logger.removeHandler(handler)

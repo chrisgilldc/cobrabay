@@ -1,16 +1,16 @@
 ####
 # CobraBay Detector
 ####
-import pint.errors
 
+from collections import namedtuple
+from functools import wraps
+import logging
+from time import monotonic_ns
+from pint import UnitRegistry, Quantity, DimensionalityError
+import pint.errors
 from .sensors import CB_VL53L1X, TFMini, FileSensor, I2CSensor, SerialSensor
 from CobraBay.const import *
 import CobraBay.exceptions
-from pint import UnitRegistry, Quantity, DimensionalityError
-from time import monotonic_ns
-from functools import wraps
-import logging
-from collections import namedtuple
 
 
 # Decorator method to check if a method is ready.
@@ -85,7 +85,7 @@ def read_if_stale(func):
                 if time_delta > self._sensor_obj.timing_budget.to('ns').magnitude * 1.1:
                     read_sensor = True
             else:
-                read_sensor = True  ## Must read the sensor, there isn't any history. This should only happen on startup.
+                read_sensor = True  # Must read the sensor, there isn't any history. This should only happen on startup.
 
         # If flag is set, read the sensor and put its value into the history.
         if read_sensor:
@@ -180,6 +180,7 @@ class Detector:
     def _when_ready(self):
         pass
 
+
 # Single Detectors add wrappers around a single sensor. Sensor arrays are not currently supported, but may be in the
 # future.
 class SingleDetector(Detector):
@@ -239,15 +240,15 @@ class SingleDetector(Detector):
     @property
     def fault(self):
         """
-        Utility property for determining if the detector is in a fault state. The status and state should always match up,
-        so if they don't, something is wrong. More complex logic to figure out what the fault is and what action to take
-        should be implemented elsewhere.
+        Utility property for determining if the detector is in a fault state. The status and state should always match
+        up, so if they don't, something is wrong. More complex logic to figure out what the fault is and what action to
+        take should be implemented elsewhere.
 
         :return: bool
         """
         if self.status != self.state:
-            self._logger.warning("Detector is in a fault state. Operating status '{}' does not equal running state '{}'".
-                                 format(self.status, self.state))
+            self._logger.warning("Detector is in a fault state. Operating status '{}' does not equal running state '{}'"
+                                 .format(self.status, self.state))
             return True
         else:
             return False
@@ -296,7 +297,8 @@ class Longitudinal(SingleDetector):
         super().__init__(detector_id=detector_id, name=name, error_margin=error_margin, sensor_type=sensor_type,
                          sensor_settings=sensor_settings, log_level=log_level)
         # Required properties. These are checked by the check_ready decorator function to see if they're not None.
-        # Once all required properties are not None, the object is set to ready. Doesn't check for values being *correct*.
+        # Once all required properties are not None, the object is set to ready. Doesn't check for values being
+        # *correct*.
         self._required = ['bay_depth', 'spread_park', 'pct_warn', 'pct_crit']
         # Save parameters
         self._error_margin = error_margin
@@ -314,7 +316,8 @@ class Longitudinal(SingleDetector):
     @property
     @read_if_stale
     def value_raw(self):
-        # Note, the read_if_stale decorator will trap this if the sensor itself isn't ranging. Thus, we can assume it is.
+        # Note, the read_if_stale decorator will trap this if the sensor itself isn't ranging. Thus, we can assume it
+        # is.
         self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
         if isinstance(self._history[0][0], Quantity) or isinstance(self._history[0][0], BaseException):
             return self._history[0][0]
@@ -337,14 +340,18 @@ class Longitudinal(SingleDetector):
         self._logger.debug("Evaluating current raw value '{}' for quality".format(current_raw_value))
         if isinstance(self.value_raw, Quantity):
             # Make an adjusted value as well.
-            current_adj_value = current_raw_value - self.offset
+            try:
+                current_adj_value = current_raw_value - self.offset
+            except DimensionalityError:
+                return GEN_UNKNOWN
             # Actual reading, evaluate.
             if current_raw_value < Quantity("2 in"):
                 return DETECTOR_QUALITY_EMERG
-            elif (self.bay_depth * 0.90) <= current_raw_value:
+            elif current_raw_value >= (self.bay_depth * 0.90) and current_raw_value <= self.bay_depth:
                 # Check the actual distance. If more than 90% of the bay distance is clear, probably nothing there.
                 self._logger.debug(
-                    "Reading is more than 90% of bay depth ({})".format(self.bay_depth * .9))
+                    "Reading is in last 10% of bay depth ({} to {}). Probably vacant."
+                    .format(self.bay_depth * .9, self.bay_depth))
                 return DETECTOR_QUALITY_NOOBJ
             # Now consider the adjusted values.
             elif current_adj_value < 0 and abs(current_adj_value) > self.spread_park:
@@ -418,7 +425,7 @@ class Longitudinal(SingleDetector):
         movement = self._movement
 
         # Can't determine a vector if sensor is NOT RANGING or return UNKNOWN.
-        if movement in (SENSTATE_NOTRANGING,GEN_UNKNOWN):
+        if movement in (SENSTATE_NOTRANGING, GEN_UNKNOWN):
             return {"speed": GEN_UNKNOWN, "direction": GEN_UNKNOWN}
         # Determine a direction.
         self._logger.debug("Have movement value: {}".format(movement))
@@ -459,8 +466,8 @@ class Longitudinal(SingleDetector):
 
     @spread_park.setter
     @check_ready
-    def spread_park(self, input):
-        self._spread_park = self._convert_value(input)
+    def spread_park(self, the_input):
+        self._spread_park = self._convert_value(the_input)
 
     # Properties for warning and critical percentages. We take these are "normal" percentages (ie: 15.10) and convert
     # to decimal so it can be readily used for multiplication.
@@ -522,7 +529,7 @@ class Longitudinal(SingleDetector):
 
 # Detector for lateral position
 class Lateral(SingleDetector):
-    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING" ):
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING"):
         super().__init__(detector_id=detector_id, name=name, sensor_type=sensor_type, sensor_settings=sensor_settings,
                          log_level=log_level)
         self._intercept = None

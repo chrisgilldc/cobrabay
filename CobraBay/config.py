@@ -2,7 +2,6 @@
 # Cobra Bay - Config Manager
 ####
 import logging
-import pprint
 import yaml
 from pathlib import Path
 import pint
@@ -10,6 +9,8 @@ import cerberus
 from collections import namedtuple
 from pprint import pformat
 import importlib.resources
+from CobraBay.const import ENVOPTIONS_EMPTY
+
 
 # Subclass Validator to add custom rules, maybe types.
 class CBValidator(cerberus.Validator):
@@ -24,6 +25,7 @@ class CBValidator(cerberus.Validator):
         if str(value.dimensionality) != constraint:
             self._error(field, "Not in proper dimension {}".format(constraint))
 
+
 class CBConfig:
     """
     Class to manage a single instance of a CobraBay configuration.
@@ -34,14 +36,14 @@ class CBConfig:
         'i2c_address': {'type': 'integer', 'required': True},
         'enable_board': {'type': 'integer', 'required': True},
         'enable_pin': {'type': 'integer', 'required': True},
-        'distance_mode': {'type': 'string', 'allowed': ['long','short'], 'default': 'long'},
+        'distance_mode': {'type': 'string', 'allowed': ['long', 'short'], 'default': 'long'},
         'timing': {'type': 'string', 'default': '200ms'}
     }
     SCHEMA_SENSOR_TFMINI = {
-        'port': { 'type': 'string', 'required': True },
-        'baud': { 'type': 'integer', 'default': 115200,
-                 'allowed': [9600, 14400, 19200, 56000, 115200, 460800, 921600] },
-        'clustering': { 'type': 'integer', 'default': 1, 'min': 1, 'max': 5 }
+        'port': {'type': 'string', 'required': True},
+        'baud': {'type': 'integer', 'default': 115200,
+                 'allowed': [9600, 14400, 19200, 56000, 115200, 460800, 921600]},
+        'clustering': {'type': 'integer', 'default': 1, 'min': 1, 'max': 5}
     }
     SCHEMA_MAIN = {
         'system': {
@@ -61,7 +63,7 @@ class CBConfig:
                         'ha_discover': {'type': 'boolean', 'default': True}
                     }
                 },
-                'interface': {'type': 'string'},  ## Define a method to determine default.
+                'interface': {'type': 'string'},  # Define a method to determine default.
                 'logging': {
                     'type': 'dict',
                     'required': True,
@@ -69,27 +71,40 @@ class CBConfig:
                         'console': {'type': 'boolean', 'required': True, 'default': False},
                         'file': {'type': 'boolean', 'required': True, 'default': True},
                         'file_path': {'type': 'string', 'default': str(Path.cwd() / 'cobrabay.log')},
-                        'log_format': {'type': 'string', 'default': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'},
+                        'log_format': {'type': 'string',
+                                       'default': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'},
                         'default_level': {'type': 'string',
-                                          'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
-                                          'required': True, 'default': 'warning'},
+                                          'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                                          'required': True, 'default': 'warning',
+                                          'coerce': str.upper},
                         'bays': {'type': 'string',
-                                 'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
+                                 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], 'coerce': str.upper,
                                  'default_setter': lambda doc: doc['default_level']},
-                        'config': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
-                                   'default_setter': lambda doc: doc['default_level']},
-                        'core': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
-                                 'default_setter': lambda doc: doc['default_level']},
-                        'detectors': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
-                                      'default_setter': lambda doc: doc['default_level']},
-                        'display': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
-                                    'default_setter': lambda doc: doc['default_level']},
-                        'mqtt': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical', 'DISABLE'],
-                                    'default': 'DISABLE'},
-                        'network': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
-                                    'default_setter': lambda doc: doc['default_level']},
-                        'triggers': {'type': 'string', 'allowed': ['debug', 'info', 'warning', 'error', 'critical'],
-                                    'default_setter': lambda doc: doc['default_level']}
+                        'config': {'type': 'string', 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                                   'coerce': str.upper, 'default_setter': lambda doc: doc['default_level']},
+                        'core': {'type': 'string', 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                                 'coerce': str.upper, 'default_setter': lambda doc: doc['default_level']},
+                        'detectors': {'type': 'string', 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                                      'coerce': str.upper, 'default_setter': lambda doc: doc['default_level']},
+                        'detector': {
+                            'type': 'dict',
+                            'keysrules': {
+                                'type': 'string',
+                                'regex': '[\w]+'
+                            },
+                            'valuesrules': {
+                                'type': 'string', 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+                            }
+                        },
+                        'display': {'type': 'string', 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                                    'coerce': str.upper, 'default_setter': lambda doc: doc['default_level']},
+                        'mqtt': {'type': 'string',
+                                 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'DISABLE'],
+                                 'coerce': str.upper, 'default': 'DISABLE'},
+                        'network': {'type': 'string', 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                                    'coerce': str.upper, 'default_setter': lambda doc: doc['default_level']},
+                        'triggers': {'type': 'string', 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                                     'coerce': str.upper, 'default_setter': lambda doc: doc['default_level']}
                     }  # Figure out how to handle specific sensors detectors and bays.
                 }
             }
@@ -104,12 +119,12 @@ class CBConfig:
             'valuesrules': {
                 'type': 'dict',
                 'schema': {
-                    'type': {'type': 'string', 'required': True, 'allowed': ['mqtt_state','syscmd','baycmd']},
+                    'type': {'type': 'string', 'required': True, 'allowed': ['mqtt_state', 'syscmd', 'baycmd']},
                     'bay': {'type': 'string', 'required': True, 'dependencies': {'type': 'mqtt_state'}},
                     'topic': {'type': 'string', 'required': True},
                     'to': {'type': 'string', 'dependencies': {'type': 'mqtt_state'}, 'excludes': 'from'},
                     'from': {'type': 'string', 'dependencies': {'type': 'mqtt_state'}, 'excludes': 'to'},
-                    'action': {'type': 'string', 'required': True, 'allowed': ['dock','undock','occupancy']}
+                    'action': {'type': 'string', 'required': True, 'allowed': ['dock', 'undock', 'occupancy']}
                 }
             }
         },
@@ -122,8 +137,9 @@ class CBConfig:
                 'gpio_slowdown': {'type': 'integer', 'required': True, 'default': 4},
                 'font': {'type': 'string',
                          'default_setter':
-                             lambda doc: str(importlib.resources.files('CobraBay.data').joinpath('OpenSans-Light.ttf')) },
-                'strobe_speed': { 'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity },
+                             lambda doc: str(
+                                 importlib.resources.files('CobraBay.data').joinpath('OpenSans-Light.ttf'))},
+                'strobe_speed': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
                 'mqtt_image': {'type': 'boolean', 'default': True},
                 'mqtt_update_interval': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity}
             }
@@ -145,7 +161,7 @@ class CBConfig:
                     'type': 'dict',
                     'schema': {
                         'name': {'type': 'string'},
-                        'error_margin': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
+                        'error_margin': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity},
                         'sensor_type': {'type': 'string', 'required': True, 'allowed': ['TFMini', 'VL53L1X']},
                         # 'timing': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
                         'sensor_settings': {
@@ -171,9 +187,9 @@ class CBConfig:
                 'type': 'dict',
                 'allow_unknown': True,
                 'schema': {
-                    'name': { 'type': 'string' },
-                    'motion_timeout': { 'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity },
-                    'depth': { 'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity },
+                    'name': {'type': 'string'},
+                    'motion_timeout': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
+                    'depth': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity},
                     'longitudinal': {
                         'type': 'dict',
                         'allow_unknown': True,
@@ -181,12 +197,12 @@ class CBConfig:
                             'defaults': {
                                 'type': 'dict',
                                 'schema': {
-                                    'spread_park': { 'type': 'quantity', 'dimensionality': '[length]',
-                                                     'coerce': pint.Quantity, 'default': '2 in' },
-                                    'offset': { 'type': 'quantity', 'dimensionality': '[length]',
-                                                'coerce': pint.Quantity, 'default': '0 in' },
-                                    'pct_warn': { 'type': 'number', 'min': 0, 'max': 100, 'default': 70 },
-                                    'pct_crit': { 'type': 'number', 'min': 0, 'max': 100, 'default': 90 }
+                                    'spread_park': {'type': 'quantity', 'dimensionality': '[length]',
+                                                    'coerce': pint.Quantity, 'default': '2 in'},
+                                    'offset': {'type': 'quantity', 'dimensionality': '[length]',
+                                               'coerce': pint.Quantity, 'default': '0 in'},
+                                    'pct_warn': {'type': 'number', 'min': 0, 'max': 100, 'default': 70},
+                                    'pct_crit': {'type': 'number', 'min': 0, 'max': 100, 'default': 90}
                                 }
                             },
                             'detectors': {
@@ -237,7 +253,8 @@ class CBConfig:
                                                         'coerce': pint.Quantity},
                                         'limit': {'type': 'quantity', 'dimensionality': '[length]',
                                                   'coerce': pint.Quantity},
-                                        'intercept': {'type': 'quantity', 'required': True, 'dimensionality': '[length]',
+                                        'intercept': {'type': 'quantity', 'required': True,
+                                                      'dimensionality': '[length]',
                                                       'coerce': pint.Quantity},
                                         'side': {'type': 'string', 'allowed': ['L', 'R']}
                                     }
@@ -250,9 +267,8 @@ class CBConfig:
         }
     }
 
-
-
-    def __init__(self, config_file=None, auto_load=True, log_level="WARNING"):
+    def __init__(self, config_file=None, auto_load=True, log_level="WARNING",
+                 environment=ENVOPTIONS_EMPTY):
         """
         Create a new config object.
 
@@ -262,10 +278,16 @@ class CBConfig:
         :type: bool
         :param log_level: Logging level for Configuration processing
         :type: str
+        :param environment: Environment options from upstream (ie: command line invoker). Defaults to all None.
+        :type: ENVOPTIONS named tuple.
         """
         self._config = None
+        self._environment = environment
         self._logger = logging.getLogger("CobraBay").getChild("Config")
-        self._logger.setLevel(log_level)
+        if environment.loglevel is not None:
+            self._logger.setLevel(environment.loglevel)
+        else:
+            self._logger.setLevel(log_level)
 
         # Initialize the internal config file variable
         self._config_path = config_file
@@ -278,12 +300,6 @@ class CBConfig:
             else:
                 if not valid:
                     raise ValueError("Configuration not valid, cannot continue!")
-
-        # If necessary, adjust our own log level.
-        new_loglevel = self.get_loglevel('config')
-        if new_loglevel != log_level:
-            self._logger.setLevel(new_loglevel)
-            self._logger.warning("Adjusted config module logging level to '{}'".format(new_loglevel))
 
     def load_config(self):
         """
@@ -324,12 +340,61 @@ class CBConfig:
         # If we haven't trapped yet, assign it.
         self._config_path = the_input
 
+    def _adjust_loglevel(self):
+        """
+        Adjust the logging level for the config object.
+
+        :return:
+        """
+        # The 'passed_loglevel' is a flag that comes in from higher up as an override to prevent stomping override
+        # loglevels set by the command line or environment. We never want to auto-override those!
+        if self._environment.loglevel is not None:
+            return False
+        else:
+            if self._config is None:
+                # Config hasn't been initialized yet, nothing to do.
+                return False
+            else:
+                if self._logger.level != self._config['system']['logging']['config']:
+                    self._logger.warning("Adjusting config module logging to that specified by config file, '{}'".
+                                         format(self._config['system']['logging']['config']))
+                    self._logger.setLevel(self._config['system']['logging']['config'])
+                    return True
+                else:
+                    self._logger.info("Config module already at '{}', nothing to adjust.".format(self._logger.level))
+                    return False
+
+    def get_loglevel(self, item_id, item_type=None):
+        # If a loglevel was set at the command line, that overrides everything else, return it.
+        if self._environment.loglevel is not None:
+            return self._environment.loglevel
+        if item_type == 'detector':
+            try:
+                return self._config['system']['logging']['detector'][item_id]
+            except KeyError:
+                # If no specific level, use the general detectors level.
+                return self._config['system']['logging']['detectors']
+        elif item_type == 'bay':
+            try:
+                return self._config['system']['logging']['bay'][item_id]
+            except KeyError:
+                # If no specific level, use the general bay level.
+                return self._config['system']['logging']['bays']
+        elif item_type == 'trigger':
+            try:
+                return self._config['system']['logging']['trigger'][item_id]
+            except KeyError:
+                # If no specific level, use the general detectors level.
+                return self._config['system']['logging']['triggers']
+        else:
+            return self._config['system']['logging'][item_id]
+
     @staticmethod
     def _read_yaml(file_path):
         """
         Open a YAML file and return its contents.
 
-        :param config_path:
+        :param file_path:
         :return:
         """
         with open(file_path, 'r') as file_handle:
@@ -337,7 +402,7 @@ class CBConfig:
         return config_yaml
 
     @staticmethod
-    def _write_yaml(self, file_path, contents):
+    def _write_yaml(file_path, contents):
         """
         Write out to a YAML file.
         """
@@ -398,8 +463,6 @@ class CBConfig:
             sv = CBValidator()
             for direction in ('longitudinal', 'lateral'):
                 for detector_id in returnval['detectors'][direction]:
-                    # print("Detector settings before subvalidation.")
-                    # pprint.pprint(returnval['detectors'][direction][detector_id]['sensor_settings'])
                     # Select the correct target schema based on the sensor type.
                     if returnval['detectors'][direction][detector_id]['sensor_type'] == 'VL53L1X':
                         target_schema = self.SCHEMA_SENSOR_VL53L1X
@@ -447,7 +510,7 @@ class CBConfig:
             'system_name': self._config['system']['system_name'],
             'interface': self._config['system']['interface'],
             **self._config['system']['mqtt'],
-            'log_level': self._config['system']['logging']['network'],
+            'log_level': self.get_loglevel(item_id='network'),
             'mqtt_log_level': self._config['system']['logging']['mqtt']}
         return the_return
 
@@ -495,7 +558,8 @@ class CBConfig:
         """
         return {'detector_id': detector_id,
                 **self._config['detectors'][detector_type][detector_id],
-                'log_level': self._config['system']['logging']['detectors']}
+                'log_level': self.get_loglevel(item_id=detector_id, item_type='detector')
+                }
 
     def bay(self, bay_id):
         """
@@ -503,16 +567,18 @@ class CBConfig:
         :param bay_id: ID of the requested bay
         :return: dict
         """
-        return { **self._config['bays'][bay_id], 'log_level': self._config['system']['logging']['bays']}
+        return {**self._config['bays'][bay_id],
+                'log_level': self.get_loglevel(item_id=bay_id, item_type='bay')
+                }
 
     def display(self):
         """
         Retrieve configuration for the display
         :return: dict
         """
-        return { **self._config['display'],
-                 'unit_system': self._config['system']['unit_system'],
-                 'log_level': self._config['system']['logging']['display']}
+        return {**self._config['display'],
+                'unit_system': self._config['system']['unit_system'],
+                'log_level': self.get_loglevel(item_id='display')}
 
     def trigger(self, trigger_id):
         """
@@ -520,11 +586,12 @@ class CBConfig:
         :param trigger_id:
         :return: list
         """
-        ### Can probably do this in Cerberus, but that's being fiddly, so this is a quick hack.
+        # Can probably do this in Cerberus, but that's being fiddly, so this is a quick hack.
         # Ensure both 'to' and 'from' are set, even if only to None.
         if 'to' not in self._config['triggers'][trigger_id] and 'to_value' not in self._config['triggers'][trigger_id]:
             self._config['triggers'][trigger_id]['to'] = None
-        if 'from' not in self._config['triggers'][trigger_id] and 'from_value' not in self._config['triggers'][trigger_id]:
+        if 'from' not in self._config['triggers'][trigger_id] and 'from_value' not in self._config['triggers'][
+            trigger_id]:
             self._config['triggers'][trigger_id]['from'] = None
 
         # Convert to _value.
@@ -535,74 +602,5 @@ class CBConfig:
 
         return {
             **self._config['triggers'][trigger_id],
-            'log_level': self._config['system']['logging']['triggers']
+            'log_level': self.get_loglevel(item_id=trigger_id, item_type='trigger')
         }
-
-    def get_loglevel(self, mod_id, mod_type=None):
-        requested_level = None
-        if 'logging' not in self._config['system']:
-            # If there's no logging section at all, return info.
-            self._logger.error("No logging section in config, using INFO as default.")
-            return "WARNING"
-        else:
-            # For bays and detectors, check for log settings of *specific instances* before checking for the overall module.
-            if mod_type == 'bay':
-                try:
-                    requested_level = self._config['system']['logging']['bays'][mod_id].lower()
-                except KeyError:
-                    mod_id = 'bays'
-                except TypeError:
-                    mod_id = 'bays'
-            elif mod_type == 'detector':
-                try:
-                    requested_level = self._config['system']['logging']['detectors'][mod_id].lower()
-                except KeyError:
-                    mod_id = 'detectors'
-                except TypeError:
-                    mod_id = 'detectors'
-            if requested_level is None:
-                # Check for module-level setting.
-                try:
-                    requested_level = self._config['system']['logging'][mod_id].lower()
-                except KeyError:
-                    try:
-                        # No module-level logging, use the system default level.
-                        requested_level = self._config['system']['logging']['default_level'].lower()
-                    except KeyError:
-                        # Not defined either, default to Warning.
-                        requested_level = "WARNING"
-
-            # Ensure the requested log level if valid.
-            if requested_level == "debug":
-                return "DEBUG"
-            elif requested_level == "info":
-                return "INFO"
-            elif requested_level == "warning":
-                return "WARNING"
-            elif requested_level == "error":
-                return "ERROR"
-            elif requested_level == "critical":
-                return "CRITICAL"
-            else:
-                self._logger.error(
-                    "Module {} had unknown level {}. Using WARNING.".format(mod_id, requested_level))
-                return "WARNING"
-
-### Old Things
-#
-# def _check_path(self, config_file):
-#     # Default search paths.
-#     search_paths = [
-#         Path('/etc/cobrabay/config.yaml'),
-#         Path.cwd().joinpath('config.yaml')
-#     ]
-#     if isinstance(config_file, Path):
-#         search_paths.insert(0, Path(config_file))
-#
-#     for path in search_paths:
-#         try:
-#             self.config_file = path
-#         except:
-#             pass
-#     if self._config_file is None:
-#         raise ValueError("Cannot find valid config file! Attempted: {}".format([str(i) for i in search_paths]))

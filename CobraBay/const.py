@@ -1,4 +1,5 @@
 # Various constants
+from collections import namedtuple
 
 ## General constants. Multiple types of objects need these.
 GEN_UNKNOWN = 'unknown'
@@ -49,5 +50,20 @@ DETECTOR_NOINTERCEPT = 'not_intercepted'
 DIR_FWD = 'forward'
 DIR_REV = 'reverse'
 DIR_STILL = 'still'
+
+# Define the environment options named tuple.
+ENVOPTIONS = namedtuple('EnvOptions',
+                        ['base',
+                        'rundir',
+                        'configdir',
+                        'configfile',
+                        'logdir',
+                        'logfile',
+                        'loglevel'])
+# Empty environment options named tuple.
+ENVOPTIONS_EMPTY = ENVOPTIONS(
+    None,None,None,None,None,None,None
+)
+
 
 
