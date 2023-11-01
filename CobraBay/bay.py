@@ -9,8 +9,8 @@ from math import floor
 import logging
 from functools import wraps
 from operator import attrgetter
-from collections import namedtuple
 from CobraBay.const import *
+from CobraBay.datatypes import Intercept
 
 def log_changes(func):
     @wraps(func)
@@ -297,38 +297,6 @@ class CBBay:
         else:
             return 0
 
-    # How good is the parking job?
-    # @property
-    # @scan_if_stale
-    # def quality(self):
-    #     return self._quality
-    #
-    # @property
-    # @scan_if_stale
-    # def position(self):
-    #     return self._position
-
-    # # Get number of lateral detectors. This is used to pass to the display and set up layers correctly.
-    # @property
-    # def lateral_count(self):
-    #     self._logger.debug("Lateral count requested. Lateral detectors: {}".format(self._lateral_sorted))
-    #     return len(self._lateral_sorted)
-
-
-    # Method to check the range sensor for motion.
-    # @scan_if_stale
-    # def monitor(self):
-    #     vector = self._detectors[self._selected_range].vector
-    #     # If there's motion, change state.
-    #     if vector['direction'] == 'forward':
-    #         self.state = 'Docking'
-    #     elif vector['direction'] == 'reverse':
-    #         self.state = 'Undocking'
-    #     elif self._detectors[self._selected_range].value == 'Weak':
-    #         self.state = 'Docking'
-
-
-
     # Method to be called when CobraBay it shutting down.
     def shutdown(self):
         self._logger.critical("Beginning shutdown...")
@@ -340,7 +308,7 @@ class CBBay:
     def state(self):
         """
         Operating state of the bay.
-        Can be one of 'docking', 'undocking', 'ready', 'unavailable'.
+        Can be one of 'docking', 'undocking', 'verify', 'ready', or 'unavailable'.
 
         :returns Bay state
         :rtype: String
@@ -378,6 +346,12 @@ class CBBay:
 
     @property
     def vector(self):
+        """
+        The vector from the bay's selected range detector.
+
+        :return:
+        :rtype: namedtuple
+        """
         return self._detectors[self._selected_range].vector
 
     def _detector_status(self):
@@ -429,8 +403,6 @@ class CBBay:
         :type lateral_detectors: list
         :return:
         """
-        # Create the named tuple type to store both detector name and intercept distance.
-        Intercept = namedtuple('Intercept', ['lateral','intercept'])
 
         self._logger.debug("Creating sorted intercepts from laterals: {}".format(lateral_detectors))
         lateral_sorted = []

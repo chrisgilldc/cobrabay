@@ -666,12 +666,15 @@ class CB_VL53L1X(I2CSensor):
             self._logger.debug("Enable pin is off.")
             return CobraBay.const.SENSTATE_DISABLED
         else:
+            self._logger.error("Raising Sensor Exception. Fault state '{}', Enable pin '{}'".
+                               format(self._fault, self.enable_pin.value))
             raise CobraBay.exceptions.SensorException
 
 
 class TFMini(SerialSensor):
     def __init__(self, port, baud, parent_logger=None, clustering=1, log_level="WARNING"):
         """
+        Sensor for TFMini
 
         :param port: Serial port
         :type port: str OR Path

@@ -6,11 +6,10 @@ import yaml
 from pathlib import Path
 import pint
 import cerberus
-from collections import namedtuple
 from pprint import pformat
 import importlib.resources
-from CobraBay.const import ENVOPTIONS_EMPTY
-
+from datetime import datetime
+from CobraBay.datatypes import CBValidation, ENVOPTIONS_EMPTY
 
 # Subclass Validator to add custom rules, maybe types.
 class CBValidator(cerberus.Validator):
@@ -31,6 +30,7 @@ class CBConfig:
     Class to manage a single instance of a CobraBay configuration.
     Create an instance for each config version managed.
     """
+    # Sub-schema for the VL53L1X Sensor.
     SCHEMA_SENSOR_VL53L1X = {
         'i2c_bus': {'type': 'integer', 'default': 1},
         'i2c_address': {'type': 'integer', 'required': True},
@@ -39,12 +39,40 @@ class CBConfig:
         'distance_mode': {'type': 'string', 'allowed': ['long', 'short'], 'default': 'long'},
         'timing': {'type': 'string', 'default': '200ms'}
     }
+    # Sub-schema for the TFMini Sensor
     SCHEMA_SENSOR_TFMINI = {
         'port': {'type': 'string', 'required': True},
         'baud': {'type': 'integer', 'default': 115200,
                  'allowed': [9600, 14400, 19200, 56000, 115200, 460800, 921600]},
         'clustering': {'type': 'integer', 'default': 1, 'min': 1, 'max': 5}
     }
+    # Sub-schema for Detector configuration.
+    SCHEMA_DETECTOR = {
+        'type': 'dict',
+        'keysrules': {
+            'type': 'string',
+            'regex': '[\w]+'
+        },
+        'valuesrules': {
+            'type': 'dict',
+            'schema': {
+                'name': {'type': 'string'},
+                'error_margin': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity},
+                'sensor_type': {'type': 'string', 'required': True, 'allowed': ['TFMini', 'VL53L1X']},
+                # 'timing': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
+                'sensor_settings': {
+                    'type': 'dict',
+                    'required': True,
+                    'oneof': [
+                        {'dependencies': {'sensor_type': 'TFMini'}, 'schema': SCHEMA_SENSOR_TFMINI},
+                        {'dependencies': {'sensor_type': 'VL53L1X'}, 'schema': SCHEMA_SENSOR_VL53L1X}
+                    ]
+                }
+            }
+        },
+        'default': {}
+    }
+
     SCHEMA_MAIN = {
         'system': {
             'type': 'dict',
@@ -125,7 +153,8 @@ class CBConfig:
                     'to': {'type': 'string', 'dependencies': {'type': 'mqtt_state'}, 'excludes': 'from'},
                     'from': {'type': 'string', 'dependencies': {'type': 'mqtt_state'}, 'excludes': 'to'},
                     'action': {'type': 'string', 'required': True, 'allowed': ['dock', 'undock', 'occupancy']}
-                }
+                },
+            'empty': True
             }
         },
         'display': {
@@ -147,33 +176,9 @@ class CBConfig:
         'detectors': {
             'type': 'dict',
             'required': True,
-            'keysrules': {
-                'type': 'string',
-                'allowed': ['longitudinal', 'lateral']
-            },
-            'valuesrules': {
-                'type': 'dict',
-                'keysrules': {
-                    'type': 'string',
-                    'regex': '[\w]+'
-                },
-                'valuesrules': {
-                    'type': 'dict',
-                    'schema': {
-                        'name': {'type': 'string'},
-                        'error_margin': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity},
-                        'sensor_type': {'type': 'string', 'required': True, 'allowed': ['TFMini', 'VL53L1X']},
-                        # 'timing': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
-                        'sensor_settings': {
-                            'type': 'dict',
-                            # 'required': True,
-                            'oneof': [
-                                {'dependencies': {'sensor_type': 'TFMini'}, 'schema': SCHEMA_SENSOR_TFMINI},
-                                {'dependencies': {'sensor_type': 'VL53L1X'}, 'schema': SCHEMA_SENSOR_VL53L1X}
-                            ]
-                        }
-                    }
-                }
+            'schema': {
+                'longitudinal': SCHEMA_DETECTOR,
+                'lateral': SCHEMA_DETECTOR
             }
         },
         'bays': {
@@ -185,7 +190,7 @@ class CBConfig:
             },
             'valuesrules': {
                 'type': 'dict',
-                'allow_unknown': True,
+                # 'allow_unknown': True,
                 'schema': {
                     'name': {'type': 'string'},
                     'motion_timeout': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
@@ -223,7 +228,7 @@ class CBConfig:
                     },
                     'lateral': {
                         'type': 'dict',
-                        'allow_unknown': True,
+                        # 'allow_unknown': True,
                         'schema': {
                             'defaults': {
                                 'type': 'dict',
@@ -257,10 +262,12 @@ class CBConfig:
                                                       'dimensionality': '[length]',
                                                       'coerce': pint.Quantity},
                                         'side': {'type': 'string', 'allowed': ['L', 'R']}
-                                    }
+                                    },
+                                    'default': {}
                                 }
                             }
-                        }
+                        },
+                        'default': { 'defaults': {}, 'detectors': [] }
                     }
                 }
             }
@@ -292,7 +299,7 @@ class CBConfig:
         # Initialize the internal config file variable
         self._config_path = config_file
         if auto_load:
-            # Load the config file. This does validation as well!
+            # Load and validate the config file.
             try:
                 valid = self.load_config()
             except BaseException as e:
@@ -321,6 +328,17 @@ class CBConfig:
                 self._logger.error("Loaded configuration is not valid. Has the following errors:")
                 self._logger.error(pformat(validator_result.result))
                 return False
+
+    def save_config(self):
+        """
+
+        :return:
+        """
+        save_path = self._config_path.stem + datetime.now().strftime("%Y%M%D%h%m%s") + ".yaml"
+        if save_path.exists():
+            self._logger.error("Will not save file, already exists! Target path was: {}".format(save_path))
+            return
+        self._logger.warning("Saving current config to: {}".format(save_path))
 
     @property
     def config_path(self):
@@ -427,8 +445,7 @@ class CBConfig:
         :param validation_target:
         :return:
         """
-        # Create a named tuple for return to prevent type changing. Will return
-        CBValidation = namedtuple("CBValidation", ['valid', 'result'])
+
         # Create the main validator
         mv = CBValidator(self.SCHEMA_MAIN)
 
@@ -442,6 +459,9 @@ class CBConfig:
         if returnval is None:
             return CBValidation(False, mv.errors)
         else:
+
+            self._logger.debug("Base validated config:")
+            self._logger.debug(pformat(returnval))
 
             # Inject the system command handler.
             returnval['triggers']['syscmd'] = {

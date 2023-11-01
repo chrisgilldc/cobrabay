@@ -244,7 +244,6 @@ class CBNetwork:
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
-    # def poll(self, outbound_messages=None):
     def poll(self):
         # Set up the return data.
         return_data = {
@@ -294,6 +293,7 @@ class CBNetwork:
                     force_repeat = False
             else:
                 force_repeat = False
+            # Publish messages.
             for message in self._mqtt_messages(force_repeat=force_repeat):
                 # self._logger_mqtt.debug("Publishing MQTT message: {}".format(message))
                 self._pub_message(**message)
@@ -440,26 +440,26 @@ class CBNetwork:
         topic_base = 'CobraBay/' + self._client_id + '/' + input_obj.id + '/'
         # Bay state
         outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
-        # Bay vector
-        outbound_messages.append({'topic': topic_base + 'vector', 'payload': input_obj.vector, 'repeat': False})
-        # Bay motion timer
-        outbound_messages.append(
-            {'topic': topic_base + 'motion_timer', 'payload': input_obj.motion_timer, 'repeat': False})
 
-        # Bay occupancy. This value can get wonky as detectors are shutting down, so don't update during shutdown.
-        if self._cbcore.system_state != 'shutdown':
+        # Only create sensor-based messages if the sensors are active, which happens when the bay is running.
+        if input_obj.state in (BAYSTATE_DOCKING, BAYSTATE_UNDOCKING, BAYSTATE_VERIFY):
+            # Bay vector
+            outbound_messages.append({'topic': topic_base + 'vector', 'payload': input_obj.vector._asdict(), 'repeat': False})
+            # Bay motion timer
             outbound_messages.append(
-                {'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
+                {'topic': topic_base + 'motion_timer', 'payload': input_obj.motion_timer, 'repeat': False})
+            # Bay occupancy. This value can get wonky as detectors are shutting down, so don't update during shutdown.
+            if self._cbcore.system_state != 'shutdown':
+                outbound_messages.append(
+                    {'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
 
-        detector_messages = []
-        for detector in input_obj.detectors:
-            detector_messages.extend(
-                self._mqtt_messages_detector(input_obj.detectors[detector], topic_base + 'detectors/'))
-        # self._logger.debug("Built detector messages:")
-        # self._logger.debug(pformat(detector_messages))
-        outbound_messages.extend(detector_messages)
-        # self._logger.debug("Complete Bay Message Set:")
-        # self._logger.debug(pformat(outbound_messages))
+            # Enumerate the detectors and create outbound messages for them.
+            detector_messages = []
+            for detector in input_obj.detectors:
+                detector_messages.extend(
+                    self._mqtt_messages_detector(input_obj.detectors[detector], topic_base + 'detectors/'))
+            outbound_messages.extend(detector_messages)
+
         return outbound_messages
 
     def _mqtt_messages_detector(self, input_obj, topic_base=None):

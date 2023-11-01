@@ -2,7 +2,6 @@
 # CobraBay Detector
 ####
 
-from collections import namedtuple
 from functools import wraps
 import logging
 from time import monotonic_ns
@@ -11,6 +10,7 @@ import pint.errors
 from .sensors import CB_VL53L1X, TFMini, FileSensor, I2CSensor, SerialSensor
 from CobraBay.const import *
 import CobraBay.exceptions
+from CobraBay.datatypes import iface_info, Vector
 
 
 # Decorator method to check if a method is ready.
@@ -260,7 +260,6 @@ class SingleDetector(Detector):
 
     @property
     def sensor_interface(self):
-        iface_info = namedtuple("iface_info", ['type', 'addr'])
         if isinstance(self._sensor_obj, SerialSensor):
             iface = iface_info("serial", self._sensor_obj.serial_port)
         elif isinstance(self._sensor_obj, I2CSensor):
@@ -337,7 +336,7 @@ class Longitudinal(SingleDetector):
     def quality(self):
         # Pull the current value for evaluation.
         current_raw_value = self.value_raw
-        self._logger.debug("Evaluating current raw value '{}' for quality".format(current_raw_value))
+        self._logger.debug("Evaluating longitudinal raw value '{}' for quality".format(current_raw_value))
         if isinstance(self.value_raw, Quantity):
             # Make an adjusted value as well.
             try:
@@ -346,24 +345,37 @@ class Longitudinal(SingleDetector):
                 return GEN_UNKNOWN
             # Actual reading, evaluate.
             if current_raw_value < Quantity("2 in"):
+                self._logger.warning("Vehicle within two inches of longitudinal sensor!")
                 return DETECTOR_QUALITY_EMERG
-            elif current_raw_value >= (self.bay_depth * 0.90) and current_raw_value <= self.bay_depth:
+            elif (self.bay_depth * 0.90) <= current_raw_value <= self.bay_depth:
                 # Check the actual distance. If more than 90% of the bay distance is clear, probably nothing there.
                 self._logger.debug(
                     "Reading is in last 10% of bay depth ({} to {}). Probably vacant."
                     .format(self.bay_depth * .9, self.bay_depth))
                 return DETECTOR_QUALITY_NOOBJ
+            elif current_raw_value >= self._bay_depth:
+                self._logger.debug("Raw value '{}' beyond bay depth of '{}'. Quality is '{}'".
+                                   format(current_raw_value, self.bay_depth, DETECTOR_QUALITY_BEYOND))
+                return DETECTOR_QUALITY_BEYOND
             # Now consider the adjusted values.
             elif current_adj_value < 0 and abs(current_adj_value) > self.spread_park:
                 # Overshot stop point and too far to be considered an okay park, backup.
+                self._logger.debug("{} has past parking spread {}, need to back up.".
+                                   format(current_adj_value, self._spread_park))
                 return DETECTOR_QUALITY_BACKUP
             elif abs(current_adj_value) < self.spread_park:
+                self._logger.debug("Adjusted value '{}' positive and less than sparking spread. Quality is '{}'.".
+                                   format(current_adj_value,DETECTOR_QUALITY_PARK))
                 # Just short of stop point, but within allowed range, parked.
                 return DETECTOR_QUALITY_PARK
             elif current_adj_value <= self._dist_crit:
+                self._logger.debug("Adjusted value '{}' less than critical distance '{}'. Quality is '{}'.".
+                                   format(current_adj_value, self._dist_crit, DETECTOR_QUALITY_FINAL))
                 # Within critical range, this is "final"
                 return DETECTOR_QUALITY_FINAL
             elif current_adj_value <= self._dist_warn:
+                self._logger.debug("Adjusted value '{}' less than base distance '{}'. Quality is '{}'.".
+                                   format(current_adj_value, self._dist_warn, DETECTOR_QUALITY_FINAL))
                 # within warning range, this is "base"
                 return DETECTOR_QUALITY_BASE
             else:
@@ -371,6 +383,8 @@ class Longitudinal(SingleDetector):
                 return DETECTOR_QUALITY_OK
         # Handle non-Quantity values from the reading.
         elif current_raw_value == SENSOR_VALUE_WEAK:
+            self._logger.warning("Detector reading weak, inferring door is open. Quality is '{}'".
+                                 format(DETECTOR_QUALITY_DOOROPEN))
             return DETECTOR_QUALITY_DOOROPEN
         elif current_raw_value in (SENSOR_VALUE_FLOOD, SENSOR_VALUE_STRONG):
             return DETECTOR_NOREADING
@@ -420,23 +434,27 @@ class Longitudinal(SingleDetector):
 
     @property
     def vector(self):
-
+        """
+        Speed and direction of motion found by this detector.
+        """
         # Grab the movement value.
         movement = self._movement
 
         # Can't determine a vector if sensor is NOT RANGING or return UNKNOWN.
         if movement in (SENSTATE_NOTRANGING, GEN_UNKNOWN):
-            return {"speed": GEN_UNKNOWN, "direction": GEN_UNKNOWN}
+            return Vector(GEN_UNKNOWN, GEN_UNKNOWN)
         # Determine a direction.
         self._logger.debug("Have movement value: {}".format(movement))
 
         # Okay, not none, so has value!
         if movement['net_dist'] > Quantity(self._error_margin):
-            return {'speed': abs(movement['speed']), 'direction': DIR_REV}
+            return Vector(abs(movement['speed']), DIR_REV)
+#            {'speed': abs(movement['speed']), 'direction': DIR_REV}
         elif movement['net_dist'] < (Quantity(self._error_margin) * -1):
-            return {'speed': abs(movement['speed']), 'direction': DIR_FWD}
+            return Vector(abs(movement['speed']), DIR_FWD)
+            # return {'speed': abs(movement['speed']), 'direction': DIR_FWD}
         else:
-            return {'speed': Quantity("0 kph"), 'direction': DIR_STILL}
+            return Vector(Quantity("0 kph"), DIR_STILL)
 
     # Gets called when the rangefinder has all settings and is being made ready for use.
     def _when_ready(self):

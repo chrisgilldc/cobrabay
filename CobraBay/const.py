@@ -1,5 +1,4 @@
 # Various constants
-from collections import namedtuple
 
 ## General constants. Multiple types of objects need these.
 GEN_UNKNOWN = 'unknown'
@@ -8,6 +7,7 @@ GEN_UNAVAILABLE = 'unavailable'
 ## Bay states
 BAYSTATE_DOCKING = 'docking'
 BAYSTATE_UNDOCKING = 'undocking'
+BAYSTATE_VERIFY = 'verify'
 BAYSTATE_READY = 'ready'
 BAYSTATE_NOTREADY = 'not_ready'
 
@@ -50,20 +50,6 @@ DETECTOR_NOINTERCEPT = 'not_intercepted'
 DIR_FWD = 'forward'
 DIR_REV = 'reverse'
 DIR_STILL = 'still'
-
-# Define the environment options named tuple.
-ENVOPTIONS = namedtuple('EnvOptions',
-                        ['base',
-                        'rundir',
-                        'configdir',
-                        'configfile',
-                        'logdir',
-                        'logfile',
-                        'loglevel'])
-# Empty environment options named tuple.
-ENVOPTIONS_EMPTY = ENVOPTIONS(
-    None,None,None,None,None,None,None
-)
 
 
 

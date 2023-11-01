@@ -122,7 +122,7 @@ class SysCommand(MQTTTrigger):
 
         # Commands need to get routed to the right module.
         # Core commands
-        if message_text in ('restart', 'rescan'):
+        if message_text in ('restart', 'rescan', 'save_config'):
             self._logger.info("Received command {}. Adding to core command stack.".format(message_text))
             self._cmd_stack_core.append(message_text)
         elif message_text in ('rediscover'):

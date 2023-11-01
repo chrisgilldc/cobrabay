@@ -123,7 +123,7 @@ class CBDisplay:
             {'status': DETECTOR_QUALITY_OK, 'border': (0,128,0,255), 'fill': (0,128,0,255)},
             {'status': DETECTOR_QUALITY_WARN, 'border': (255,255,0,255), 'fill': (255,255,0,255)},
             {'status': DETECTOR_QUALITY_CRIT,'border': (255,0,0,255), 'fill': (255,0,0,255)},
-            {'status': DETECTOR_NOINTERCEPT, 'border': (255,255,255,255), 'fill': (0,0,0,0)}
+            {'status': DETECTOR_QUALITY_NOOBJ, 'border': (255,255,255,255), 'fill': (0,0,0,0)}
         )
 
         i = 0
@@ -137,11 +137,11 @@ class CBDisplay:
             for side in ('L','R'):
                 self._layers[bay_obj.id][lateral][side] = {}
                 if side == 'L':
-                    # line_w = 5
                     line_w = 0
+                    nointercept_x = 1
                 elif side == 'R':
-                    # line_w = w - 2  # -2, one because of the border, one because it's 0 indexed.
                     line_w = w - 3
+                    nointercept_x = w-2
                 else:
                     raise ValueError("Not a valid side option, this should never happen!")
 
@@ -156,6 +156,15 @@ class CBDisplay:
                     seccolor='yellow'
                 )
                 self._layers[bay_obj.id][lateral][side]['fault'] = img
+                del(img)
+
+                # Make an image for no_object
+                img = Image.new('RGBA', (w, h), (0,0,0,0))
+                # Draw white lines up the section.
+                draw = ImageDraw.Draw(img)
+                draw.line([nointercept_x,1 + accumulated_height,nointercept_x,1 + accumulated_height + pixel_lengths[i]],
+                          fill='white', width=1)
+                self._layers[bay_obj.id][lateral][side][DETECTOR_NOINTERCEPT] = img
                 del(img)
 
                 for item in status_lookup:
@@ -184,7 +193,23 @@ class CBDisplay:
         self._logger.debug("Created laterals for {}: {}".format(bay_obj.id, self._layers[bay_obj.id]))
 
     # General purpose message displayer
-    def show(self, system_status, mode, message=None, color="white", icons=True):
+    def show(self, mode, system_status=None,  message=None, color="white", icons=True):
+        """
+        Show a general-purpose message on the display.
+
+        :param system_status: Dict with the current network and mqtt connection status
+        :type system_status: dict(network, mqtt)
+        :param mode: One of 'clock' to show clock or 'message' to show the string.
+        :type mode: str
+        :param message: For 'message' mode, the string to display.
+        :type message: str
+        :param color: For 'message' mode, the color the text should be. Defaults to white.
+        :type color: str
+        :param icons: Should the status icons (ie: network connection) be displayed. Defaults true.
+        :type icons: bool
+        :return:
+        """
+
         if mode == 'clock':
             string = datetime.now().strftime("%-I:%M %p")
             # Clock is always in green.
@@ -194,19 +219,22 @@ class CBDisplay:
                 raise ValueError("Show requires a message when used in Message mode.")
             string = message
         else:
-            raise ValueError("Show did not get a valid mode.")
+            raise ValueError("Show mode '{}' is not valid. Must be 'clock' or 'message'.".format(mode))
 
         # Make a base layer.
         img = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0,0,0,255))
         # If enabled, put status icons at the bottom of the display.
-        if icons:
+        if icons and (system_status is not None):
             # Network status icon, shows overall network and MQTT status.
             network_icon = self._icon_network(system_status['network'],system_status['mqtt'])
             img = Image.alpha_composite(img, network_icon)
             # Adjust available placard height so we don't stomp over the icons.
             placard_h=6
+        elif icons and (system_status is None):
+            self._logger.warning("Icons requested but system status not provided. Skipping.")
+            placard_h = 0
         else:
-            placard_h=0
+            placard_h = 0
 
         # Placard with the text.
         placard = self._placard(string, color, w_adjust=0, h_adjust=placard_h)
@@ -254,30 +282,40 @@ class CBDisplay:
 
         for intercept in bay_obj.lateral_sorted:
             detector = bay_obj.detectors[intercept.lateral]
-            if detector.quality == DETECTOR_NOINTERCEPT:
+            # Hit the detector quality once. There's a slim chance this could change during the course of evaluation and
+            # lead to wonky results.
+            dq = detector.quality
+            dv = detector.value
+            if dq in (DETECTOR_NOINTERCEPT, DETECTOR_QUALITY_NOOBJ):
                 # No intercept shows on both sides.
                 combined_layers = Image.alpha_composite(
-                    self._layers[bay_obj.id][detector.id]['L'][detector.quality],
-                    self._layers[bay_obj.id][detector.id]['R'][detector.quality]
+                    self._layers[bay_obj.id][detector.id]['L'][dq],
+                    self._layers[bay_obj.id][detector.id]['R'][dq]
                 )
                 final_image = Image.alpha_composite(final_image, combined_layers)
-            elif detector.quality in (DETECTOR_QUALITY_OK, DETECTOR_QUALITY_WARN, DETECTOR_QUALITY_CRIT):
+            elif dq in (DETECTOR_QUALITY_OK, DETECTOR_QUALITY_WARN, DETECTOR_QUALITY_CRIT):
                 # Pick which side the vehicle is offset towards.
                 if detector.value == 0:
                     skew = ('L','R')  # In the rare case the value is exactly zero, show both sides.
-                elif detector.side == 'R' and detector.value > 0:
+                elif detector.side == 'R' and dv > 0:
                     skew = ('R')
-                elif detector.side == 'R' and detector.value < 0:
+                elif detector.side == 'R' and dv < 0:
                     skew = ('L')
-                elif detector.side == 'L' and detector.value > 0:
+                elif detector.side == 'L' and dv > 0:
                     skew = ('L')
-                elif detector.side == 'L' and detector.value < 0:
+                elif detector.side == 'L' and dv < 0:
                     skew = ('R')
 
-                self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(detector.name, skew, detector.quality))
+                self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(detector.name, skew, dq))
                 for item in skew:
-                    selected_layer = self._layers[bay_obj.id][detector.id][item][detector.quality]
+                    selected_layer = self._layers[bay_obj.id][detector.id][item][dq]
                     final_image = Image.alpha_composite(final_image, selected_layer)
+            else:
+                combined_layers = Image.alpha_composite(
+                    self._layers[bay_obj.id][detector.id]['L']['fault'],
+                    self._layers[bay_obj.id][detector.id]['R']['fault']
+                )
+                final_image = Image.alpha_composite(final_image, combined_layers)
         self._output_image(final_image)
 
     def _strobe(self, range_quality, range_pct):
@@ -403,27 +441,27 @@ class CBDisplay:
     # Make a placard to show range.
     def _placard_range(self, input_range, range_quality, bay_state):
         self._logger.debug("Creating range placard with range {} and quality {}".format(input_range, range_quality))
+        # Define a default range string. This should never show up.
         range_string = "NOVAL"
+        text_color = 'white'
 
-
-        # Convert to the proper target unit.
-        try:
-            range_converted = input_range.to(self._target_unit)
-        except AttributeError:
-            # If the range isn't a Quantity, we get an attribute error.
-            if range_quality == DETECTOR_QUALITY_BACKUP:
-                range_string = "BACK UP"
-            elif range_quality == DETECTOR_QUALITY_DOOROPEN:
-                if bay_state == BAYSTATE_DOCKING:
-                    range_string = "APPROACH"
-                elif bay_state == BAYSTATE_UNDOCKING:
-                    range_string = "CLEAR!"
-            elif input_range == DETECTOR_QUALITY_BEYOND:
+        # Override string states. If the range quality has these values, we go ahead and show the string rather than the
+        # measurement.
+        if range_quality == DETECTOR_QUALITY_BACKUP:
+            range_string = "BACK UP!"
+        elif range_quality in (DETECTOR_QUALITY_DOOROPEN, DETECTOR_QUALITY_BEYOND):
+            # DOOROPEN is when the detector cannot get a reflection, ie: the door is open.
+            # BEYOND is when a reading is found but it's beyond the defined length of the bay.
+            # Either way, this indicates either no vehicle is present yet, or a vehicle is present but past the garage
+            # door
+            if bay_state == BAYSTATE_DOCKING:
                 range_string = "APPROACH"
-            else:
-                range_string = "NOVAL"
+                text_color = 'blue'
+            elif bay_state == BAYSTATE_UNDOCKING:
+                range_string = "CLEAR!"
+                text_color = 'white'
         else:
-            # If we correctly converted,
+            range_converted = input_range.to(self._target_unit)
             if self._unit_system.lower() == 'imperial':
                 if range_converted.magnitude < 12:
                     range_string = "{}\"".format(round(range_converted.magnitude,1))

@@ -8,17 +8,9 @@ import sys
 import CobraBay
 import logging
 from logging.handlers import WatchedFileHandler
-from collections import namedtuple
+# from collections import namedtuple
 from pid import PidFile
-
-envoptions = namedtuple('EnvOptions', 
-                        ['base',
-                        'rundir',
-                        'configdir',
-                        'configfile',
-                        'logdir',
-                        'logfile',
-                        'loglevel'])
+from CobraBay.datatypes import ENVOPTIONS
 
 def main():
     print("CobraBay Parking System - {}".format(CobraBay.__version__))
@@ -177,7 +169,7 @@ def _validate_environment(input_base,
     else:
         loglevel = None
 
-    valid_environment = CobraBay.const.ENVOPTIONS(
+    valid_environment = ENVOPTIONS(
         basedir,
         rundir,
         configdir,

@@ -9,7 +9,6 @@ from time import sleep
 from datetime import timedelta
 import CobraBay.exceptions
 
-
 # General purpose converter.
 class Convertomatic:
     def __init__(self, unit_system):

@@ -149,12 +149,15 @@ class CBCore:
         # We pass the caller name explicitly. There's inspect-fu that could be done, but that
         # may have portability issues.
         for trigger_id in self._triggers.keys():
+            self._logger.debug("Processing trigger id: {}".format(trigger_id))
             trigger_obj = self._triggers[trigger_id]
             # A trigger_obj.triggered returns true if it has any commands available for processing.
             if trigger_obj.triggered:
+                self._logger.debug("Trigger is active.")
                 while trigger_obj.cmd_stack:
                     # Pop the command from the object.
                     cmd = trigger_obj.cmd_stack.pop(0)
+                    self._logger.debug("Next command on stack. '{}'".format(cmd))
                     # Route it appropriately.
                     # System commands go directly to the core command processor.
                     if isinstance(trigger_obj, CobraBay.triggers.SysCommand):
@@ -183,11 +186,9 @@ class CBCore:
                 system_status = {
                     'network': network_data['online'],
                     'mqtt': network_data['mqtt_status']}
-
                 # Check triggers and execute actions if needed.
                 self._trigger_check()
-
-                self._display.show(system_status, "clock")
+                self._display.show("clock", system_status=system_status)
         except BaseException as e:
             self._logger.critical("Unexpected exception encountered!")
             self._logger.exception(e)
@@ -208,6 +209,15 @@ class CBCore:
         # Set the bay to the proper state.
         self._bays[bay_id].state = direction
 
+        # Holding loop for undocking. While motion isn't detected, show the ready message. For docking, we go straight
+        # to motion.
+        if cmd == 'undock':
+            self._logger.debug("{} ({})".format(self._bays[bay_id].vector, type(self._bays[bay_id].vector)))
+            while self._bays[bay_id].vector.direction in (CobraBay.const.DIR_STILL, CobraBay.const.GEN_UNKNOWN):
+                self._display.show(mode='message',message="UNDOCK", color="orange", icons=False)
+                self._network_handler()
+                self._trigger_check()
+
         # As long as the bay is in the desired state, keep running.
         while self._bays[bay_id].state == direction:
             self._logger.debug("{} motion - Displaying".format(cmd))
@@ -221,11 +231,6 @@ class CBCore:
             # Check the triggers. This lets an abort be called or an underlying system command be called.
             self._trigger_check()
         self._logger.info("Bay state changed to {}. Returning to idle.".format(self._bays[bay_id].state))
-        # Collect and send a final set of MQTT messages.
-        # self._logger.debug("Collecting MQTT messages from bay.")
-        # bay_messages = self._bays[bay_id].mqtt_messages()
-        # self._logger.debug("Collected MQTT messages: {}".format(bay_messages))
-        # self._outbound_messages = self._outbound_messages + bay_messages
 
     def undock(self):
         self._logger.info('CobraBay: Undock not yet implemented.')

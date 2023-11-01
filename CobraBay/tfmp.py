@@ -7,7 +7,7 @@ import importlib
 import time
 import pint
 import serial
-from collections import namedtuple
+from CobraBay.datatypes import TFMP_data
 
 class TFMP:
     ####
@@ -115,7 +115,6 @@ class TFMP:
 
     # Core data fetcher.
     def data(self):
-        TFMP_data = namedtuple("TFMP_Data", ["status", "distance", "flux", "temperature"])
         frames = self._read_frames(self.TFMP_FRAME_SIZE)
 
         # Convert up the values from the raw bytes.
