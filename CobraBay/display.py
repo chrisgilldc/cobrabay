@@ -460,17 +460,25 @@ class CBDisplay:
             elif bay_state == BAYSTATE_UNDOCKING:
                 range_string = "CLEAR!"
                 text_color = 'white'
+        elif input_range == 'unknown':
+            range_string = "Unknown"
         else:
-            range_converted = input_range.to(self._target_unit)
-            if self._unit_system.lower() == 'imperial':
-                if range_converted.magnitude < 12:
-                    range_string = "{}\"".format(round(range_converted.magnitude,1))
-                else:
-                    feet = int(range_converted.to(ureg.inch).magnitude // 12)
-                    inches = round(range_converted.to(ureg.inch).magnitude % 12)
-                    range_string = "{}'{}\"".format(feet,inches)
+            try:
+                range_converted = input_range.to(self._target_unit)
+            except AttributeError:
+                self._logger.warning("Placard input range was '{}' ({}), cannot convert. Using raw input".
+                                     format(input_range, type(input_range)))
+                range_string = input_range
             else:
-                range_string = "{} m".format(round(range_converted.magnitude,2))
+                if self._unit_system.lower() == 'imperial':
+                    if range_converted.magnitude < 12:
+                        range_string = "{}\"".format(round(range_converted.magnitude,1))
+                    else:
+                        feet = int(range_converted.to(ureg.inch).magnitude // 12)
+                        inches = round(range_converted.to(ureg.inch).magnitude % 12)
+                        range_string = "{}'{}\"".format(feet,inches)
+                else:
+                    range_string = "{} m".format(round(range_converted.magnitude,2))
 
         # Determine a color based on quality
         if range_quality in ('critical','back_up'):

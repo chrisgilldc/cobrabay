@@ -100,30 +100,7 @@ class CBCore:
 
         # Create triggers.
         self._logger.info("Creating triggers...")
-        self._triggers = self._setup_triggers()
-        self._logger.debug("Have triggers: {}".format(self._triggers))
-
-        # Parcel trigger objects out to the right place.
-        #  - MQTT triggers go to the network module,
-        #  - Range triggers go to the appropriate bay.
-        self._logger.debug("Linking triggers to modules.")
-        for trigger_id in self._triggers:
-            trigger_obj = self._triggers[trigger_id]
-            # Network needs to be told about triggers that talk to MQTT.
-            if isinstance(trigger_obj, CobraBay.triggers.MQTTTrigger):
-                self._logger.debug("Registering Trigger {} with Network module.".format(trigger_id))
-                self._network.register_trigger(trigger_obj)
-
-            # Some unused code for Range triggers. Not fully implemented yet.
-            # elif self._triggers[trigger_id].type == 'range':
-            #     # Make sure the desired bay exists!
-            #     try:
-            #         target_bay = self._bays[self._triggers[trigger_id].bay_id]
-            #     except KeyError:
-            #         self._logger.error("Trigger {} references non-existent bay {}. Cannot link.".
-            #                            format(trigger_id, self._bays[self._triggers[trigger_id].bay_id] ))
-            #         break
-            #     target_bay.register_trigger(self._triggers[trigger_id])
+        self._setup_triggers()
 
         # Connect to the network.
         self._logger.info('Connecting to network...')
@@ -144,36 +121,21 @@ class CBCore:
     def _core_command(self, cmd):
         self._logger.info("Core command received: {}".format(cmd))
 
-    # Method for checking the triggers and acting appropriately.
+    # Check the system command trigger
     def _trigger_check(self):
         # We pass the caller name explicitly. There's inspect-fu that could be done, but that
         # may have portability issues.
-        for trigger_id in self._triggers.keys():
-            self._logger.debug("Processing trigger id: {}".format(trigger_id))
-            trigger_obj = self._triggers[trigger_id]
-            # A trigger_obj.triggered returns true if it has any commands available for processing.
-            if trigger_obj.triggered:
-                self._logger.debug("Trigger is active.")
-                while trigger_obj.cmd_stack:
-                    # Pop the command from the object.
-                    cmd = trigger_obj.cmd_stack.pop(0)
-                    self._logger.debug("Next command on stack. '{}'".format(cmd))
-                    # Route it appropriately.
-                    # System commands go directly to the core command processor.
-                    if isinstance(trigger_obj, CobraBay.triggers.SysCommand):
-                        self._core_command(cmd)
-                    # Bay commands will trigger a motion or an abort.
-                    elif isinstance(trigger_obj, CobraBay.triggers.BayCommand):
-                        if cmd in ('dock', 'undock'):
-                            # On a dock or undock, call the motion method.
-                            self._motion(trigger_obj.bay_id, cmd)
-                            # The call returns here
-                            self._logger.debug("Returned from motion method to trigger method.")
-                            break
-                        elif cmd == 'abort':
-                            # On an abort, call the bay's abort. This will set it ready and clean up.
-                            # If we're in the _motion method, this will go back to run, if not, nothing happens.
-                            self._bays[trigger_obj.bay_id].abort()
+        self._logger.debug("Checking System Command trigger.")
+        if self._syscmd_trigger.triggered:
+            self._logger.debug("System command handler is triggered.")
+            while self._syscmd_trigger.cmd_stack:
+                cmd = self._syscmd_trigger.cmd_stack.pop(0)
+                self._logger.debug("Sending command '{}' to core processor.".format(cmd))
+                self._core_command(cmd)
+        # Tell the bays to check their triggers.
+        for bay_id in self._bays:
+            self._logger.debug("Commanding trigger scan for bay '{}'".format(bay_id))
+            self._bays[bay_id].scan_triggers()
 
     # Main operating loop.
     def run(self):
@@ -188,6 +150,14 @@ class CBCore:
                     'mqtt': network_data['mqtt_status']}
                 # Check triggers and execute actions if needed.
                 self._trigger_check()
+                # See if any of the bays checked to a motion state.
+                for bay_id in self._bays:
+                    if self._bays[bay_id].state in CobraBay.const.BAYSTATE_MOTION:
+                        # Set the overall system state.
+                        self.system_state = self._bays[bay_id].state
+                        # Go into the motion loop.
+                        self._motion(bay_id)
+                        break
                 self._display.show("clock", system_status=system_status)
         except BaseException as e:
             self._logger.critical("Unexpected exception encountered!")
@@ -195,23 +165,23 @@ class CBCore:
             sys.exit(1)
 
     # Start sensors and display to guide parking.
-    def _motion(self, bay_id, cmd):
+    def _motion(self, bay_id):
         # Convert command to a state. Should have planned this better, but didn't.
-        if cmd == 'dock':
-            direction = "docking"
-        elif cmd == 'undock':
-            direction = "undocking"
-        else:
-            raise ValueError("Motion command '{}' not valid.".format(cmd))
+        # if cmd == 'dock':
+        #     direction = "docking"
+        # elif cmd == 'undock':
+        #     direction = "undocking"
+        # else:
+        #     raise ValueError("Motion command '{}' not valid.".format(cmd))
+        #
+        self._logger.info('Beginning {} on bay {}.'.format(CobraBay.const.BAYSTATE_MOTION, bay_id))
 
-        self._logger.info('Beginning {} on bay {}.'.format(direction, bay_id))
-
-        # Set the bay to the proper state.
-        self._bays[bay_id].state = direction
-
+        # # Set the bay to the proper state.
+        # self._bays[bay_id].state = direction
+        #
         # Holding loop for undocking. While motion isn't detected, show the ready message. For docking, we go straight
         # to motion.
-        if cmd == 'undock':
+        if self._bays[bay_id].state == CobraBay.const.BAYSTATE_UNDOCKING:
             self._logger.debug("{} ({})".format(self._bays[bay_id].vector, type(self._bays[bay_id].vector)))
             while self._bays[bay_id].vector.direction in (CobraBay.const.DIR_STILL, CobraBay.const.GEN_UNKNOWN):
                 self._display.show(mode='message',message="UNDOCK", color="orange", icons=False)
@@ -219,12 +189,12 @@ class CBCore:
                 self._trigger_check()
 
         # As long as the bay is in the desired state, keep running.
-        while self._bays[bay_id].state == direction:
-            self._logger.debug("{} motion - Displaying".format(cmd))
+        while self._bays[bay_id].state in CobraBay.const.BAYSTATE_MOTION:
+            self._logger.debug("{} motion - Displaying".format(CobraBay.const.BAYSTATE_MOTION))
             # Send the bay object reference to the display method.
-            self._display.show_motion(direction, self._bays[bay_id])
+            self._display.show_motion(CobraBay.const.BAYSTATE_MOTION, self._bays[bay_id])
             # Poll the network.
-            self._logger.debug("{} motion - Polling network.".format(cmd))
+            self._logger.debug("{} motion - Polling network.".format(CobraBay.const.BAYSTATE_MOTION))
             self._network_handler()
             # Check for completion
             self._bays[bay_id].check_timer()
@@ -311,26 +281,26 @@ class CBCore:
 
     def _setup_triggers(self):
         # Set the logging level for the trigger group.
-        trigger_logger = logging.getLogger("CobraBay").getChild("Triggers")
+        trigger_logger = logging.getLogger("CobraBay").getChild("Trigger")
         trigger_logger.setLevel("DEBUG")
 
         self._logger.debug("Creating triggers...")
-        return_dict = {}
         self._logger.info("Trigger list: {}".format(self._active_config.triggers))
         for trigger_id in self._active_config.triggers:
             self._logger.debug("Trigger ID: {}".format(trigger_id))
             trigger_config = self._active_config.trigger(trigger_id)
             self._logger.debug("Has config: {}".format(trigger_config))
             # Create trigger object based on type.
-            # All triggers except the system command handler will need a reference to the bay object.
             if trigger_config['type'] == "syscmd":
-                return_dict[trigger_id] = CobraBay.triggers.SysCommand(
+                # Create the system command trigger. We should only do this once!
+                self._syscmd_trigger = CobraBay.triggers.SysCommand(
                     id="syscmd",
                     topic=trigger_config['topic'],
                     log_level=trigger_config['log_level'])
+                self._network.register_trigger(self._syscmd_trigger)
             else:
                 if trigger_config['type'] == 'mqtt_state':
-                    return_dict[trigger_id] = CobraBay.triggers.MQTTSensor(
+                    trigger_obj = CobraBay.triggers.MQTTSensor(
                         id=trigger_id,
                         topic=trigger_config['topic'],
                         topic_mode='full',
@@ -341,23 +311,35 @@ class CBCore:
                         action=trigger_config['action'],
                         log_level=trigger_config['log_level']
                     )
+                    # Register it with the bay based on Bay ID, and with the network
+                    try:
+                        self._bays[trigger_obj.bay_id].register_trigger(trigger_obj)
+                    except KeyError:
+                        self._logger.error("Cannot register Trigger ID '{}' with non-existent Bay ID '{}'".
+                                           format(trigger_obj.id, trigger_obj.bay_id))
+                    else:
+                        # Register with the newtork.
+                        self._network.register_trigger(trigger_obj)
+
                 elif trigger_config['type'] == 'baycmd':
-                    # Get the bay object reference.
-                    return_dict[trigger_id] = CobraBay.triggers.BayCommand(
+                    trigger_obj = CobraBay.triggers.BayCommand(
                         id=trigger_id,
                         topic=trigger_config['topic'],
                         bay_obj=self._bays[trigger_config['bay_id']],
                         log_level=trigger_config['log_level'])
-                # elif trigger_config['type'] == 'range':
-                #     # Range triggers also need the detector object.
-                #     return_dict[trigger_id] = CobraBay.triggers.Range(trigger_config, bay_obj,
-                #                                              self._detectors[trigger_config['detector']])
+                    try:
+                        self._bays[trigger_obj.bay_id].register_trigger(trigger_obj)
+                    except KeyError:
+                        self._logger.error("Cannot register Bay Command trigger for non-existent Bay ID '{}'".format(trigger_obj.bay_id))
+                    else:
+                        # Register with the network.
+                        self._network.register_trigger(trigger_obj)
+
                 else:
                     # This case should be trapped by the config processor, but just in case, if trigger type
                     # is unknown, trap and ignore.
                     self._logger.error("Trigger {} has unknown type {}, cannot create.".
                                        format(trigger_id, trigger_config['type']))
-        return return_dict
 
     # Method to set up Logging handlers.
     def _setup_logging_handlers(self, file=False, console=False, file_path=None, log_format=None, syslog=False):

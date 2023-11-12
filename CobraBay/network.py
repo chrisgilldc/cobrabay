@@ -120,15 +120,19 @@ class CBNetwork:
 
     # Method to register a bay.
     def register_bay(self, bay_obj):
+        self._logger.debug("Registered Bay ID '{}'".format(bay_obj.id))
         self._bay_registry[bay_obj.id] = bay_obj
         self._discovery_log[bay_obj.id] = False
 
-    def unregister_bay(self, bay_id):
+    def deregister_bay(self, bay_id):
+        self._logger.debug("Deregistering Bay ID '{}'".format(bay_id))
         try:
             del self._bay_registry[bay_id]
             del self._discovery_log[bay_id]
         except KeyError:
-            self._logger.error("Asked to Unregister bay ID '{}' but bay by that ID does not exist.".format(bay_id))
+            self._logger.error("Asked to deregister Bay ID '{}' but bay with that ID does not exist.".format(bay_id))
+        else:
+            self._logger.debug("Bay ID '{}' deregistered.".format(bay_id))
 
     def register_trigger(self, trigger_obj):
         self._logger.debug("Received trigger registration for {}".format(trigger_obj.id))
@@ -140,10 +144,24 @@ class CBNetwork:
         # Since it's possible we're already connected to MQTT, we call subscribe here separately.
         self._trigger_subscribe(trigger_obj.id)
 
+    def deregister_trigger(self, trigger_id):
+        self._logger.debug("Deregistering Trigger ID '{}'".format(trigger_id))
+        try:
+            # Remove the callback
+            self._mqtt_client.message_callback_remove(self._trigger_registry[trigger_id].callback)
+            # Unsubscribe from the MQTT topic.
+            self._mqtt_client.unsubscribe(self._trigger_registry[trigger_id].topic)
+            # Remove the trigger from the registry.
+            del self._trigger_registry[trigger_id]
+        except KeyError:
+            self._logger.error("Asked to deregister Trigger ID '{}' but trigger with that ID does not exist.".format(trigger_id))
+        else:
+            self._logger.debug("Trigger ID '{}' deregistered.".format(trigger_id))
+
     def _trigger_subscribe(self, trigger_id):
         trigger_obj = self._trigger_registry[trigger_id]
         self._logger.debug("Connecting trigger {}".format(trigger_id))
-        self._logger.debug("Subscribing...")
+        self._logger.debug("Subscribing to '{}'".format(trigger_obj.topic))
         self._mqtt_client.subscribe(trigger_obj.topic)
         self._logger.debug("Connecting callback...")
         self._mqtt_client.message_callback_add(trigger_obj.topic, trigger_obj.callback)
@@ -652,7 +670,7 @@ class CBNetwork:
             topic="CobraBay/" + self._client_id + "/mem_info",
             entity_type='sensor',
             entity="{}_mem_info".format(self._system_name.lower()),
-            value_template='{{ value_json.mem_pct }}',
+            value_template='{{ value_json.mem_free_pct }}',
             unit_of_measurement='%',
             icon="mdi:memory"
         )

@@ -42,6 +42,7 @@ class CBBay:
                  lateral,
                  system_detectors,
                  cbcore,
+                 triggers={},
                  log_level="WARNING"):
         """
         :param id: ID for the bay. Cannot have spaces.
@@ -60,6 +61,8 @@ class CBBay:
         :type lateral: dict
         :param cbcore: Object reference to the CobraBay core.
         :type cbcore: object
+        :param triggers: Dictionary of Triggers for this bay. Can be modified later with register_trigger.
+        :type triggers: dict
         :param log_level: Log level for the bay, must be a Logging level.
         :type log_level: str
         """
@@ -77,6 +80,8 @@ class CBBay:
         self._depth = depth
         self.motion_timeout = motion_timeout
         self._detectors = None
+        self._triggers = triggers
+        # Save the reference to the Core.
         self._cbcore = cbcore
 
         # Select a longitudinal detector to be the main range detector.
@@ -239,7 +244,7 @@ class CBBay:
             occ = 'unknown'
         # Only hit the range quality once.
         range_quality = self._detectors[self._selected_range].quality
-        if range_quality in ('no_object', 'door_open'):
+        if range_quality in (DETECTOR_QUALITY_NOOBJ, DETECTOR_QUALITY_DOOROPEN):
             # If the detector can hit the garage door, or the door is open, then clearly nothing is in the way, so
             # the bay is vacant.
             self._logger.debug("Longitudinal quality is {}, not occupied.".format(range_quality))
@@ -252,6 +257,7 @@ class CBBay:
             # the sensors or whatnot
             lat_score = 0
             for intercept in self.lateral_sorted:
+                self._logger.debug("Checking quality for lateral detector '{}'.".format(intercept))
                 if self._detectors[intercept.lateral].quality in (DETECTOR_QUALITY_OK, DETECTOR_QUALITY_WARN,
                                                                   DETECTOR_QUALITY_CRIT):
                     # No matter how badly parked the vehicle is, it's still *there*
@@ -324,7 +330,7 @@ class CBBay:
         """
         self._logger.debug("State change requested to {} from {}".format(m_input, self._state))
         # Trap invalid bay states.
-        if m_input not in ('ready', 'docking', 'undocking', 'unavailable'):
+        if m_input not in (BAYSTATE_READY, BAYSTATE_DOCKING, BAYSTATE_UNDOCKING, BAYSTATE_NOTREADY, GEN_UNAVAILABLE):
             raise ValueError("{} is not a valid bay state.".format(m_input))
         self._logger.debug("Old state: {}, new state: {}".format(self._state, m_input))
         if m_input == self._state:
@@ -467,3 +473,40 @@ class CBBay:
                                            format(configured_detectors[detector_id].attached_bay))
         self._logger.debug("Configured detectors: {}".format(configured_detectors))
         return configured_detectors
+
+    # Trigger handling
+    def register_trigger(self, trigger_obj):
+        self._logger.debug("Registering trigger ID '{}'".format(trigger_obj.id))
+        self._triggers[trigger_obj.id] = trigger_obj
+
+    def deregister_trigger(self, trigger_id):
+        self._logger.debug("Deregistering Trigger ID '{}'".format(trigger_id))
+        del self._triggers[trigger_id]
+
+    def scan_triggers(self):
+        self._logger.debug("Scanning triggers.")
+        for trigger_id in self._triggers:
+            self._logger.debug("Checking Trigger ID '{}'".format(trigger_id))
+            if self._triggers[trigger_id].triggered:
+                self._logger.debug("Trigger '{}' is active.".format(trigger_id))
+                self._logger.debug("Trigger has command stack - {}".format(self._triggers[trigger_id].cmd_stack))
+                while self._triggers[trigger_id].cmd_stack:
+                    # Pop the command from the object.
+                    cmd = self._triggers[trigger_id].cmd_stack.pop(0)
+                    self._logger.debug("Next command on stack. '{}'".format(cmd))
+                    # Bay commands will trigger a motion or an abort.
+                    # For nomenclature reasons, change the imperative form to the descriptive
+                    if cmd.upper() == 'DOCK':
+                        self._logger.debug("Setting bay state to 'DOCKING'")
+                        self.state = 'docking'
+                        break
+                    elif cmd.upper() == 'UNDOCK':
+                        self._logger.debug("Setting bay state to 'UNDOCKING'")
+                        self.state = 'undocking'
+                        break
+                    elif cmd.upper() == 'ABORT':
+                        self._logger.debug("Aborting bay motions.")
+                        self.abort()
+                    else:
+                        self._logger.debug("'{}' is not a valid bay command.".format(cmd))
+
