@@ -206,8 +206,8 @@ class CBConfig:
                                                     'coerce': pint.Quantity, 'default': '2 in'},
                                     'offset': {'type': 'quantity', 'dimensionality': '[length]',
                                                'coerce': pint.Quantity, 'default': '0 in'},
-                                    'pct_warn': {'type': 'number', 'min': 0, 'max': 100, 'default': 70},
-                                    'pct_crit': {'type': 'number', 'min': 0, 'max': 100, 'default': 90}
+                                    'pct_warn': {'type': 'number', 'min': 0, 'max': 100, 'default': 30},
+                                    'pct_crit': {'type': 'number', 'min': 0, 'max': 100, 'default': 10}
                                 }
                             },
                             'detectors': {

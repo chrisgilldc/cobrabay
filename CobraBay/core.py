@@ -107,6 +107,13 @@ class CBCore:
         self._network.connect()
         # Do an initial poll.
         self._network.poll()
+
+        # Send initial values to MQTT, as we won't otherwise do so until we're in a running state.
+        self._logger.info('Sending initial detector values...')
+        for bay_id in self._bays:
+            self._network.publish_bay_detectors(bay_id, publish=True)
+
+        # We're done!
         self._logger.info('System Initialization complete.')
         self.system_state = 'running'
 

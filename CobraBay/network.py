@@ -15,6 +15,7 @@ from .util import Convertomatic
 from .version import __version__
 from CobraBay.const import *
 
+
 class CBNetwork:
     def __init__(self,
                  unit_system,
@@ -154,7 +155,8 @@ class CBNetwork:
             # Remove the trigger from the registry.
             del self._trigger_registry[trigger_id]
         except KeyError:
-            self._logger.error("Asked to deregister Trigger ID '{}' but trigger with that ID does not exist.".format(trigger_id))
+            self._logger.error(
+                "Asked to deregister Trigger ID '{}' but trigger with that ID does not exist.".format(trigger_id))
         else:
             self._logger.debug("Trigger ID '{}' deregistered.".format(trigger_id))
 
@@ -462,7 +464,8 @@ class CBNetwork:
         # Only create sensor-based messages if the sensors are active, which happens when the bay is running.
         if input_obj.state in (BAYSTATE_DOCKING, BAYSTATE_UNDOCKING, BAYSTATE_VERIFY):
             # Bay vector
-            outbound_messages.append({'topic': topic_base + 'vector', 'payload': input_obj.vector._asdict(), 'repeat': False})
+            outbound_messages.append(
+                {'topic': topic_base + 'vector', 'payload': input_obj.vector._asdict(), 'repeat': False})
             # Bay motion timer
             outbound_messages.append(
                 {'topic': topic_base + 'motion_timer', 'payload': input_obj.motion_timer, 'repeat': False})
@@ -472,13 +475,33 @@ class CBNetwork:
                     {'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
 
             # Enumerate the detectors and create outbound messages for them.
-            detector_messages = []
-            for detector in input_obj.detectors:
-                detector_messages.extend(
-                    self._mqtt_messages_detector(input_obj.detectors[detector], topic_base + 'detectors/'))
-            outbound_messages.extend(detector_messages)
+            # detector_messages = []
+            # for detector in input_obj.detectors:
+            #     detector_messages.extend(
+            #         self._mqtt_messages_detector(input_obj.detectors[detector], topic_base + 'detectors/'))
+            # outbound_messages.extend(detector_messages)
+            outbound_messages.extend(self.publish_bay_detectors(input_obj.id))
 
         return outbound_messages
+
+    def publish_bay_detectors(self, bay_id, publish=False):
+        try:
+            bay_obj = self._bay_registry[bay_id]
+        except KeyError:
+            self._logger.error("Asked to publish detectors for non-existent Bay ID '{}'. Cannot do!".format(bay_id))
+            return
+
+        detector_messages = []
+        topic_base = 'CobraBay/' + self._client_id + '/' + bay_obj.id + '/'
+        for detector in bay_obj.detectors:
+            detector_messages.extend(
+                self._mqtt_messages_detector(bay_obj.detectors[detector], topic_base + 'detectors/'))
+
+        if publish:
+            for message in detector_messages:
+                self._pub_message(**message)
+        else:
+            return detector_messages
 
     def _mqtt_messages_detector(self, input_obj, topic_base=None):
         self._logger_mqtt.debug("Building MQTT messages for detector: {}".format(input_obj.id))
@@ -523,7 +546,8 @@ class CBNetwork:
         self._ha_timestamp = time.monotonic()
 
     # Create HA discovery message.
-    def _ha_discover(self, name, topic, entity_type, entity, device_info=True, system_avail=True, avail=None, avail_mode=None,
+    def _ha_discover(self, name, topic, entity_type, entity, device_info=True, system_avail=True, avail=None,
+                     avail_mode=None,
                      **kwargs):
         allowed_types = ('camera', 'binary_sensor', 'sensor', 'select')
         # Trap unknown types.
