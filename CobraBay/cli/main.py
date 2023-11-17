@@ -5,6 +5,9 @@
 import argparse
 import pathlib
 import sys
+
+import pid.base
+
 import CobraBay
 import logging
 from logging.handlers import WatchedFileHandler
@@ -46,31 +49,34 @@ def main():
         sys.exit(1)
 
     # Start the main operating loop.
-    with PidFile('CobraBay', piddir=environment.rundir) as p:
-        # Create the Master logger.
-        master_logger = logging.getLogger("CobraBay")
-        master_logger.setLevel(logging.DEBUG)
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.DEBUG)
-        master_logger.addHandler(console_handler)
+    try:
+        with PidFile('CobraBay', piddir=environment.rundir) as p:
+            # Create the Master logger.
+            master_logger = logging.getLogger("CobraBay")
+            master_logger.setLevel(logging.DEBUG)
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.DEBUG)
+            master_logger.addHandler(console_handler)
 
-        master_logger.info("Running as PID {}".format(p.pid))
+            master_logger.info("Running as PID {}".format(p.pid))
 
-        # Create a CobraBay config object.
-        try:
-            cbconfig = CobraBay.CBConfig(config_file=environment.configfile, environment=environment)
-        except ValueError as e:
-            master_logger.error("Could not load config. Received error '{} - {}'".
-                                format(e.__class__.__name__, str(e)))
-            sys.exit(1)
+            # Create a CobraBay config object.
+            try:
+                cbconfig = CobraBay.CBConfig(config_file=environment.configfile, environment=environment)
+            except ValueError as e:
+                master_logger.error("Could not load config. Received error '{} - {}'".
+                                    format(e.__class__.__name__, str(e)))
+                sys.exit(1)
 
-        # Initialize the system
-        master_logger.info("Initializing...")
-        cb = CobraBay.CBCore(config_obj=cbconfig,envoptions=environment)
+            # Initialize the system
+            master_logger.info("Initializing...")
+            cb = CobraBay.CBCore(config_obj=cbconfig,envoptions=environment)
 
-        # Start.
-        master_logger.info("Initialization complete. Operation start.")
-        cb.run()
+            # Start.
+            master_logger.info("Initialization complete. Operation start.")
+            cb.run()
+    except pid.base.PidFileAlreadyLockedError:
+        print("Cannot start, already running!")
 
 
 def _validate_environment(input_base, 

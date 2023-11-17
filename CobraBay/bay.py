@@ -250,7 +250,7 @@ class CBBay:
             self._logger.debug("Longitudinal quality is {}, not occupied.".format(range_quality))
             occ = "false"
         elif range_quality in (DETECTOR_QUALITY_EMERG, DETECTOR_QUALITY_BACKUP, DETECTOR_QUALITY_PARK,
-                               DETECTOR_QUALITY_FINAL, DETECTOR_QUALITY_BASE):
+                               DETECTOR_QUALITY_FINAL, DETECTOR_QUALITY_BASE, DETECTOR_QUALITY_OK):
             self._logger.debug("Matched range quality: {}".format(range_quality))
             # If the detector is giving us any of the 'close enough' qualities, there's something being found that
             # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
@@ -339,7 +339,7 @@ class CBBay:
         if m_input in SYSSTATE_MOTION and self._state not in SYSSTATE_MOTION:
             self._logger.info("Entering state: {}".format(m_input))
             self._logger.info("Start time: {}".format(self._current_motion['mark']))
-            self._logger.debug("Setting all detectors to ranging.")
+            self._logger.info("Setting all detectors to ranging.")
             self._detector_state(SENSTATE_RANGING)
             self._current_motion['mark'] = monotonic()
         if m_input not in SYSSTATE_MOTION and self._state in SYSSTATE_MOTION:

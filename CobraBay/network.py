@@ -461,6 +461,10 @@ class CBNetwork:
         # Bay state
         outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
 
+        # If we're in post-discovery, then
+        if self._ha_repeat_override:
+            outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
+
         # Only create sensor-based messages if the sensors are active, which happens when the bay is running.
         if input_obj.state in (BAYSTATE_DOCKING, BAYSTATE_UNDOCKING, BAYSTATE_VERIFY):
             # Bay vector
@@ -542,6 +546,8 @@ class CBNetwork:
                     self._logger.info("Sending home assistant discovery for bay ID: {}".format(item))
                     self._ha_discovery_bay(item)
                 self._discovery_log['system'] = True
+        # Enable the repeat override. This ensures that messages are repeated for long enough after discovery so
+        # # they aren't missed.
         self._ha_repeat_override = True
         self._ha_timestamp = time.monotonic()
 
@@ -694,7 +700,7 @@ class CBNetwork:
             topic="CobraBay/" + self._client_id + "/mem_info",
             entity_type='sensor',
             entity="{}_mem_info".format(self._system_name.lower()),
-            value_template='{{ value_json.mem_free_pct }}',
+            value_template='{{ value_json.mem_avail_pct }}',
             unit_of_measurement='%',
             icon="mdi:memory"
         )
