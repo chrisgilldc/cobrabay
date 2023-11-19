@@ -37,11 +37,11 @@ class CBBay:
     def __init__(self, id,
                  name,
                  depth,
-                 motion_timeout,
                  longitudinal,
                  lateral,
                  system_detectors,
                  cbcore,
+                 timeouts,
                  triggers={},
                  log_level="WARNING"):
         """
@@ -51,8 +51,6 @@ class CBBay:
         :type name: str
         :param depth: Absolute distance of the bay, from the range sensor to the end. Must be a linear Quantity.
         :type depth: Quantity(Distance)
-        :param motion_timeout: During a movement, how long the bay must be still to be considered complete.
-        :type motion_timeout: Quantity(Time)
         :param system_detectors: Dictionary of detector objects available on the system.
         :type system_detectors: dict
         :param longitudinal: Detectors which are arranged as longitudinal.
@@ -61,6 +59,8 @@ class CBBay:
         :type lateral: dict
         :param cbcore: Object reference to the CobraBay core.
         :type cbcore: object
+        :param timeouts: Dict with timeouts for 'dock','undock' and 'postroll' times.
+        :type time_dock: dict
         :param triggers: Dictionary of Triggers for this bay. Can be modified later with register_trigger.
         :type triggers: dict
         :param log_level: Log level for the bay, must be a Logging level.
@@ -78,7 +78,7 @@ class CBBay:
         # Save the remaining parameters.
         self._name = name
         self._depth = depth
-        self.motion_timeout = motion_timeout
+        self._timeouts = timeouts
         self._detectors = None
         self._triggers = triggers
         # Save the reference to the Core.
@@ -150,6 +150,7 @@ class CBBay:
 
     def check_timer(self):
         self._logger.debug("Evaluating for timer expiration.")
+
         # Update the dock timer.
         if self._detectors[self._selected_range].motion:
             # If motion is detected, update the time mark to the current time.
@@ -159,7 +160,7 @@ class CBBay:
             # Report the timer every 15s, to the info log level.
             time_elapsed = Quantity(time.monotonic() - self._current_motion['mark'], 's')
             if floor(time_elapsed.magnitude) % 15 == 0:
-                self._logger.info("Motion timer at {} vs allowed {}".format(time_elapsed, self.motion_timeout))
+                self._logger.info("Motion timer at {} vs allowed {}".format(floor(time_elapsed), self.motion_timeout))
             # No motion, check for completion
             if time_elapsed >= self.motion_timeout:
                 self._logger.info("Dock timer has expired, returning to ready")
@@ -193,30 +194,25 @@ class CBBay:
         self._id = input.replace(" ","_").lower()
 
     @property
-    def motion_timeout(self):
-        return self._motion_timeout
-
-    @motion_timeout.setter
-    def motion_timeout(self, mto_input):
-        if isinstance(mto_input, Quantity):
-            if not mto_input.check('[time]'):
-                raise ValueError("Motion timeout must have time dimensionality.")
-            else:
-                self._motion_timeout = mto_input
+    def _active_timeout(self):
+        ''' Utility method to determine which timeout to use.'''
+        if self.state == BAYSTATE_DOCKING:
+            return self._timeouts['dock']
+        elif self.state == BAYSTATE_UNDOCKING:
+            return self._timeouts['undock']
+        elif self._state == BAYSTATE_POSTROLL:
+            return self._timeouts['post-roll']
         else:
-            raise TypeError("Motion timeout must be a Quantity.")
+            return None
 
     @property
     def motion_timer(self):
         '''
-        Reports time left on the current motion in M:S format. If no active motion, returns 'idle'.
+        Reports time left on the current motion in M:S format. If no active motion, returns 'Inactive'.
 
-        :return:
+        :return: str
         '''
-        if self.state not in ('docking', 'undocking'):
-            return 'idle'
-        else:
-            return self.motion_timeout - Quantity(time.monotonic() - self._current_motion['mark'], 's')
+        return self._active_timeout - Quantity(time.monotonic() - self._current_motion['mark'], 's')
 
     @property
     def _occupancy_score(self):

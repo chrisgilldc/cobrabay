@@ -145,16 +145,25 @@ Two types of sensor are currently supported - the serial TFMini-S and the I2C VL
 | timing | Yes | str | None | Timing for the sensor. Can be one of:<br>15 (short mode only), 20, 33, 50, 100, 200, 500 |
 
 ## Bay Options
-Define the bay the vehicle stops in. Currently all should be defined under a single key, which is the bay id. In the
+Define the bay the vehicle stops in. Currently, all should be defined under a single key, which is the bay id. In the
 future multiple bays may be possible.
 
-| Options | Required? | Valid Options          | Default | Description                                                                                          |
-| --- | --- |------------------------|---------|------------------------------------------------------------------------------------------------------|
-| name | No        | str                    | Bay ID  | Friendly name of the bay, used for Home Assistant discovery. If not defined, defaults to the bay ID. | 
-| motion_timeout | Yes | time quantity          | None    | After this amount of time, consider a dock or undock complete. Prevents premature termination.       |
-| depth | Yes | distance quantity | None    | Total distance from the longitudinal sensor point to the garage door.                                |
-| longitudinal | Yes | dict | None | Longitudinal detectors for this bay. |
-| lateral | Yes | dict | None | Lateral detectors for this bay. |
+| Options | Required? | Valid Options | Default | Description |
+| --- | --- |-------------------| --- |---|
+| name | No | str               | None | Bay ID | Friendly name of the bay, used for Home Assistant discovery. If not defined, defaults to the bay ID. | 
+| timeouts | Yes | dict              | None    | Various timeouts, see below.                                         |
+| depth | Yes | distance quantity | None    | Total distance from the longitudinal sensor point to the garage door. |
+| longitudinal | Yes | dict              | None | Longitudinal detectors for this bay.                                 |
+| lateral | Yes | dict              | None | Lateral detectors for this bay.                                      |
+
+### Bay Timeouts
+No bay timeouts are required, all must be convertable to Pint time-dimension quantities.
+
+| Options | Required? | Valid Options | Default | Description |
+| --- | --- | --- | --- | --- |
+| dock | No | time quantity | 2m | During a dock, vehicle must be still for this amount of time to be considered complete. |
+| undock | No | time quantity | 5m | During an undock, will wait for this amount of time for motion to start. |
+| post-roll | No | time quantity | 10s | After motion is complete, how long to keep the last message on the display. |
 
 ### Longitudinal and Lateral assignments
 Assign detectors to either longitudinal or lateral roles and specify their configuration around the bay.

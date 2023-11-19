@@ -47,7 +47,7 @@ class Convertomatic:
                 output = input_value
             # Anything else is out of left field, raise an error.
             else:
-                raise ValueError("Dimensionality of {} and/or units of {} is not supported by Convertomatic.".format(input_value.dimensionality, input_value.units))
+                raise ValueError("'{}' has unsupported dimensionality '{}' and/or units of '{}'.".format(input_value, input_value.dimensionality, input_value.units))
             # If still a Quantity (ie: Not a string), take the magnitude, round and output as float.
             if isinstance(output, Quantity):
                 output = round(output.magnitude, 2)

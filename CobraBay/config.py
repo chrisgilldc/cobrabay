@@ -24,6 +24,12 @@ class CBValidator(cerberus.Validator):
         if str(value.dimensionality) != constraint:
             self._error(field, "Not in proper dimension {}".format(constraint))
 
+    # Coercers. Apparently you can't pass parameters, so each unit needs it sown.
+    def _normalize_coerce_pint_seconds(self, value):
+        return pint.Quantity(value).to('seconds')
+
+    def _normalize_coerce_pint_cm(self, value):
+        return pint.Quantity(value).to('cm')
 
 class CBConfig:
     """
@@ -57,7 +63,7 @@ class CBConfig:
             'type': 'dict',
             'schema': {
                 'name': {'type': 'string'},
-                'error_margin': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity},
+                'error_margin': {'type': 'quantity', 'coerce': 'pint_cm'},
                 'sensor_type': {'type': 'string', 'required': True, 'allowed': ['TFMini', 'VL53L1X']},
                 # 'timing': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
                 'sensor_settings': {
@@ -168,9 +174,9 @@ class CBConfig:
                          'default_setter':
                              lambda doc: str(
                                  importlib.resources.files('CobraBay.data').joinpath('OpenSans-Light.ttf'))},
-                'strobe_speed': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
+                'strobe_speed': {'type': 'quantity', 'coerce': 'pint_seconds'},
                 'mqtt_image': {'type': 'boolean', 'default': True},
-                'mqtt_update_interval': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity}
+                'mqtt_update_interval': {'type': 'quantity', 'coerce': 'pint_seconds', 'default': '5s'}
             }
         },
         'detectors': {
@@ -193,8 +199,20 @@ class CBConfig:
                 # 'allow_unknown': True,
                 'schema': {
                     'name': {'type': 'string'},
-                    'motion_timeout': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
-                    'depth': {'type': 'quantity', 'dimensionality': '[length]', 'coerce': pint.Quantity},
+                    'timeouts': {
+                        'type': 'dict',
+                        'schema': {
+                            'dock': {'type': 'quantity', 'coerce': 'pint_seconds', 'default': '2 minutes'},
+                            'undock': {'type': 'quantity', 'coerce': 'pint_seconds', 'default': '5 minutes'},
+                            'post-roll': {'type': 'quantity', 'coerce': 'pint_seconds', 'default': '10 seconds'}
+                        },
+                        'default': {
+                            'dock': '2 minutes',
+                            'undock': '5 minutes',
+                            'post-roll': '10 seconds'
+                        }
+                    },
+                    'depth': {'type': 'quantity', 'coerce': 'pint_cm'},
                     'longitudinal': {
                         'type': 'dict',
                         'allow_unknown': True,
@@ -202,10 +220,8 @@ class CBConfig:
                             'defaults': {
                                 'type': 'dict',
                                 'schema': {
-                                    'spread_park': {'type': 'quantity', 'dimensionality': '[length]',
-                                                    'coerce': pint.Quantity, 'default': '2 in'},
-                                    'offset': {'type': 'quantity', 'dimensionality': '[length]',
-                                               'coerce': pint.Quantity, 'default': '0 in'},
+                                    'spread_park': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '2 in'},
+                                    'offset': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '0 in'},
                                     'pct_warn': {'type': 'number', 'min': 0, 'max': 100, 'default': 30},
                                     'pct_crit': {'type': 'number', 'min': 0, 'max': 100, 'default': 10}
                                 }
@@ -215,10 +231,8 @@ class CBConfig:
                                 'schema': {
                                     'type': 'dict',
                                     'schema': {
-                                        'spread_park': {'type': 'quantity', 'dimensionality': '[length]',
-                                                        'coerce': pint.Quantity},
-                                        'offset': {'type': 'quantity', 'dimensionality': '[length]',
-                                                   'coerce': pint.Quantity},
+                                        'spread_park': {'type': 'quantity', 'coerce': 'pint_cm'},
+                                        'offset': {'type': 'quantity', 'coerce': 'pint_cm'},
                                         'pct_warn': {'type': 'number', 'min': 0, 'max': 100},
                                         'pct_crit': {'type': 'number', 'min': 0, 'max': 100}
                                     }
@@ -233,14 +247,10 @@ class CBConfig:
                             'defaults': {
                                 'type': 'dict',
                                 'schema': {
-                                    'offset': {'type': 'quantity', 'dimensionality': '[length]',
-                                               'coerce': pint.Quantity, 'default': '0 in'},
-                                    'spread_ok': {'type': 'quantity', 'dimensionality': '[length]',
-                                                  'coerce': pint.Quantity, 'default': '1 in'},
-                                    'spread_warn': {'type': 'quantity', 'dimensionality': '[length]',
-                                                    'coerce': pint.Quantity, 'default': '3 in'},
-                                    'limit': {'type': 'quantity', 'dimensionality': '[length]',
-                                              'coerce': pint.Quantity, 'default': '96 in'},
+                                    'offset': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '0 in'},
+                                    'spread_ok': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '1 in'},
+                                    'spread_warn': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '3 in'},
+                                    'limit': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '96 in'},
                                     'side': {'type': 'string', 'allowed': ['L', 'R']}
                                 }
                             },
@@ -250,17 +260,11 @@ class CBConfig:
                                     'type': 'dict',
                                     'schema': {
                                         'detector': {'type': 'string', 'required': True},
-                                        'offset': {'type': 'quantity', 'dimensionality': '[length]',
-                                                   'coerce': pint.Quantity},
-                                        'spread_ok': {'type': 'quantity', 'dimensionality': '[length]',
-                                                      'coerce': pint.Quantity},
-                                        'spread_warn': {'type': 'quantity', 'dimensionality': '[length]',
-                                                        'coerce': pint.Quantity},
-                                        'limit': {'type': 'quantity', 'dimensionality': '[length]',
-                                                  'coerce': pint.Quantity},
-                                        'intercept': {'type': 'quantity', 'required': True,
-                                                      'dimensionality': '[length]',
-                                                      'coerce': pint.Quantity},
+                                        'offset': {'type': 'quantity', 'coerce': 'pint_cm'},
+                                        'spread_ok': {'type': 'quantity', 'coerce': 'pint_cm'},
+                                        'spread_warn': {'type': 'quantity', 'coerce': 'pint_cm'},
+                                        'limit': {'type': 'quantity', 'coerce': 'pint_cm'},
+                                        'intercept': {'type': 'quantity', 'required': True, 'coerce': 'pint_cm'},
                                         'side': {'type': 'string', 'allowed': ['L', 'R']}
                                     },
                                     'default': {}

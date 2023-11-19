@@ -82,7 +82,7 @@ class CBCore:
             bay_config = self._active_config.bay(bay_id)
             self._logger.debug("Bay config:")
             self._logger.debug(pformat(bay_config))
-            self._bays[bay_id] = CobraBay.CBBay(id=bay_id, **bay_config, system_detectors=self._detectors, cbcore=self)
+            self._bays[bay_id] = CobraBay.CBBay(id=bay_id, system_detectors=self._detectors, cbcore=self, **bay_config)
 
         self._logger.info('Creating display...')
         display_config = self._active_config.display()
