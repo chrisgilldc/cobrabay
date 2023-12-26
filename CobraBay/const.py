@@ -4,7 +4,7 @@
 GEN_UNKNOWN = 'unknown'
 GEN_UNAVAILABLE = 'unavailable'
 
-## Bay states
+## Bay States
 BAYSTATE_DOCKING = 'docking'
 BAYSTATE_UNDOCKING = 'undocking'
 BAYSTATE_VERIFY = 'verify'
@@ -12,6 +12,11 @@ BAYSTATE_READY = 'ready'
 BAYSTATE_NOTREADY = 'not_ready'
 BAYSTATE_POSTROLL = 'postroll'
 BAYSTATE_MOTION = (BAYSTATE_DOCKING, BAYSTATE_UNDOCKING)
+
+## Bay Commands
+BAYCMD_DOCK = 'dock'
+BAYCMD_UNDOCK = 'undock'
+BAYCMD_ABORT = 'abort'
 
 ## System States
 SYSSTATE_READY = 'ready'

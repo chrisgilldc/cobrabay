@@ -15,6 +15,8 @@ from .util import Convertomatic
 from .version import __version__
 from CobraBay.const import *
 
+# TODO: Reorganize class to standard.
+# FixMe: Maybe MQTT server reconnect issue.
 
 class CBNetwork:
     def __init__(self,
@@ -174,13 +176,7 @@ class CBNetwork:
 
     def _on_connect(self, userdata, flags, rc, properties=None):
         self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
-        # # Connect to the static callback topics.
-        # for type in self._topics:
-        #     for item in self._topics[type]:
-        #         if 'callback' in self._topics[type][item]:
-        #             self._logger.debug("Network: Creating callback for {}".format(item))
-        #             self._mqtt_client.message_callback_add(self._topics[type][item]['topic'],
-        #                                                    self._topics[type][item]['callback'])
+        self._mqtt_connected = True
         # Connect to all trigger topic callbacks.
         for trigger_id in self._trigger_registry.keys():
             self._trigger_subscribe(trigger_id)
@@ -188,7 +184,6 @@ class CBNetwork:
         self._mqtt_client.on_message = self._on_message
         # Run Home Assistant Discovery
         self._ha_discovery()
-        self._mqtt_connected = True
 
     def _on_disconnect(self, client, userdata, rc):
         if rc != 0:
@@ -301,8 +296,8 @@ class CBNetwork:
         # Network/MQTT is up, proceed.
         if self._mqtt_connected:
             # Send all the messages outbound.
-            # For the first 100 polls after HA discovery, send everything. This makes sure
-            # that values actually show up in HA.
+            # For the first 15s after HA discovery, send everything. This makes sure data arrives after HA has
+            # established entities.
             if self._ha_repeat_override:
                 if time.monotonic() - self._ha_timestamp <= 15:
                     self._logger.info("HA discovery {}s ago, sending all".format(time.monotonic() - self._ha_timestamp))
@@ -341,8 +336,7 @@ class CBNetwork:
         try:
             self._mqtt_client.connect(host=self._mqtt_broker, port=self._mqtt_port)
         except Exception as e:
-            self._logger.warning('Network: Could not connect to MQTT broker.')
-            self._logger.warning('Network: ' + str(e))
+            self._logger.warning("Could not connect to MQTT broker. Received exception '{}'".format(e))
             return False
 
         # Send a discovery message and an online notification.
@@ -366,13 +360,13 @@ class CBNetwork:
     def disconnect(self, message=None):
         self._logger.info('Planned disconnect with message "' + str(message) + '"')
         # If we have a disconnect message, send it to the device topic.
-        if message is not None:
-            self._mqtt_client.publish(self._topics['system']['device_state']['topic'], message)
+        # if message is not None:
+        #     self._mqtt_client.publish(self._topics['system']['device_state']['topic'], message)
         # When disconnecting, mark the device and the bay as unavailable.
         self._send_offline()
         # Disconnect from broker
         self._mqtt_client.disconnect()
-        # SEt the internal tracker to disconnected.
+        # Set the internal tracker to disconnected.
         self._mqtt_connected = False
 
     @property
@@ -767,7 +761,6 @@ class CBNetwork:
                 entity="{}_{}_cmd".format(self._system_name.lower(), bay_obj.id),
                 options=["-", "Dock", "Undock", "Abort"]
             )
-
         # Bay Vector
         self._ha_discover(
             name="{} Speed".format(bay_obj.name),
@@ -776,9 +769,8 @@ class CBNetwork:
             entity="{}_{}_speed".format(self._system_name.lower(), bay_obj.id),
             value_template="{{ value_json.speed }}",
             unit_of_measurement=self._uom('speed')
-
-            # Bay Direction
         )
+        # Bay Direction
         self._ha_discover(
             name="{} Direction".format(bay_obj.name),
             topic=topic_base + "vector",

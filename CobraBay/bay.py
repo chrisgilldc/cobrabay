@@ -12,6 +12,9 @@ from operator import attrgetter
 from CobraBay.const import *
 from CobraBay.datatypes import Intercept
 
+# FIXME: Finish timer updates.
+# FIXME: Test undock behavior, fix wonkiness.
+
 def log_changes(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -116,9 +119,9 @@ class CBBay:
             self._logger.info("\t\t{} - {}".format(detector,addr))
 
         # Activate detectors.
-        self._logger.info("Activating detectors...")
-        self._detector_state(SENSTATE_RANGING)
-        self._logger.info("Detectors activated.")
+        # self._logger.info("Activating detectors...")
+        # self._detector_state(SENSTATE_RANGING)
+        # self._logger.info("Detectors activated.")
 
         # Motion timer for the current motion.
         self._current_motion = {
@@ -132,25 +135,14 @@ class CBBay:
 
         self.state = "ready"
 
+    ## Public Methods
+
     # Abort gets called when we want to cancel a docking.
     def abort(self):
         self.state = "ready"
 
-    @property
-    def name(self):
-        return self._name
-
-    @name.setter
-    def name(self, name):
-        self._name = name
-
-    @property
-    def detectors(self):
-        return self._detectors
-
     def check_timer(self):
         self._logger.debug("Evaluating for timer expiration.")
-
         # Update the dock timer.
         if self._detectors[self._selected_range].motion:
             # If motion is detected, update the time mark to the current time.
@@ -160,14 +152,16 @@ class CBBay:
             # Report the timer every 15s, to the info log level.
             time_elapsed = Quantity(time.monotonic() - self._current_motion['mark'], 's')
             if floor(time_elapsed.magnitude) % 15 == 0:
-                self._logger.info("Motion timer at {} vs allowed {}".format(floor(time_elapsed), self.motion_timeout))
+                self._logger.info("Motion timer at {} seconds vs allowed {}s".
+                                  format(floor(time_elapsed.magnitude), self._active_timeout))
             # No motion, check for completion
-            if time_elapsed >= self.motion_timeout:
+            if time_elapsed >= self._active_timeout:
                 self._logger.info("Dock timer has expired, returning to ready")
                 # Set self back to ready.
                 self.state = 'ready'
 
-    # Method to get info to pass to the Network module and register.
+        # Method to get info to pass to the Network module and register.
+
     @property
     def discovery_reg_info(self):
         # For discovery, the detector hierarchy doesn't matter, so we can flatten it.
@@ -185,45 +179,42 @@ class CBBay:
             return_dict['detectors'].append(detector)
         return return_dict
 
-    @property
-    def id(self):
-        return self._id
+    def scan_triggers(self):
+        self._logger.debug("Scanning triggers.")
+        for trigger_id in self._triggers:
+            self._logger.debug("Checking Trigger ID '{}'".format(trigger_id))
+            if self._triggers[trigger_id].triggered:
+                self._logger.debug("Trigger '{}' is active.".format(trigger_id))
+                self._logger.debug("Trigger has command stack - {}".format(self._triggers[trigger_id].cmd_stack))
+                while self._triggers[trigger_id].cmd_stack:
+                    # Pop the command from the object.
+                    cmd = self._triggers[trigger_id].cmd_stack.pop(0)
+                    self._logger.debug("Next command on stack. '{}'".format(cmd))
+                    # Bay commands will trigger a motion or an abort.
+                    # For nomenclature reasons, change the imperative form to the descriptive
+                    if cmd.upper() == BAYCMD_DOCK:
+                        self._logger.debug("Setting bay state to 'DOCKING'")
+                        self.state = BAYSTATE_DOCKING
+                        break
+                    elif cmd.upper() == BAYCMD_UNDOCK:
+                        self._logger.debug("Setting bay state to 'UNDOCKING'")
+                        self.state = BAYSTATE_UNDOCKING
+                        break
+                    elif cmd.upper() == BAYCMD_ABORT:
+                        self._logger.debug("Aborting bay motions.")
+                        self.abort()
+                    else:
+                        self._logger.debug("'{}' is not a valid bay command.".format(cmd))
 
-    @id.setter
-    def id(self, input):
-        self._id = input.replace(" ","_").lower()
+    # Method to be called when CobraBay it shutting down.
+    def shutdown(self):
+        self._logger.critical("Beginning shutdown...")
+        self._logger.critical("Shutting off detectors...")
+        self._detector_state('disabled')
+        self._logger.critical("Shutdown complete. Exiting.")
 
-    @property
-    def _active_timeout(self):
-        ''' Utility method to determine which timeout to use.'''
-        if self.state == BAYSTATE_DOCKING:
-            return self._timeouts['dock']
-        elif self.state == BAYSTATE_UNDOCKING:
-            return self._timeouts['undock']
-        elif self._state == BAYSTATE_POSTROLL:
-            return self._timeouts['post-roll']
-        else:
-            return None
+    ## Public Properties
 
-    @property
-    def motion_timer(self):
-        '''
-        Reports time left on the current motion in M:S format. If no active motion, returns 'Inactive'.
-
-        :return: str
-        '''
-        return self._active_timeout - Quantity(time.monotonic() - self._current_motion['mark'], 's')
-
-    @property
-    def _occupancy_score(self):
-        max_score = len(self.lateral_sorted)
-        score = floor(max_score * (2/3))
-        # Never let score be less than one detector, because that makes no sense.
-        if score < 1:
-            score = 1
-        return score
-
-    # Bay properties
     @property
     def occupied(self):
         """
@@ -280,6 +271,7 @@ class CBBay:
         '''
         return self._detectors[self._selected_range]
 
+
     @property
     def range_pct(self):
         '''
@@ -299,12 +291,36 @@ class CBBay:
         else:
             return 0
 
-    # Method to be called when CobraBay it shutting down.
-    def shutdown(self):
-        self._logger.critical("Beginning shutdown...")
-        self._logger.critical("Shutting off detectors...")
-        self._detector_state('disabled')
-        self._logger.critical("Shutdown complete. Exiting.")
+
+
+    @property
+    def motion_timer(self):
+        '''
+        Reports time left on the current motion in M:S format. If no active motion, returns 'Inactive'.
+
+        :return: str
+        '''
+        return self._active_timeout - Quantity(time.monotonic() - self._current_motion['mark'], 's')
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def id(self):
+        return self._id
+
+    @id.setter
+    def id(self, input):
+        self._id = input.replace(" ","_").lower()
+
+    @name.setter
+    def name(self, name):
+        self._name = name
+
+    @property
+    def detectors(self):
+        return self._detectors
 
     @property
     def state(self):
@@ -356,6 +372,23 @@ class CBBay:
         """
         return self._detectors[self._selected_range].vector
 
+
+    ## Private Methods
+
+    # Traverse the detectors dict, activate everything that needs activating.
+    def _detector_state(self, target_status):
+        print("{} - Starting detector state set.".format(time.monotonic()))
+        if target_status in (SENSTATE_DISABLED, SENSTATE_ENABLED, SENSTATE_RANGING):
+            # self._logger.debug("Traversing detectors to set status to '{}'".format(target_status))
+            # Traverse the dict looking for detectors that need activation.
+            for detector in self._detectors:
+                print("{} - Setting detector {}".format(time.monotonic(), detector))
+                # self._logger.debug("Changing detector {}".format(detector))
+                self._detectors[detector].status = target_status
+                print("{} - Set complete.".format(time.monotonic()))
+        else:
+            raise ValueError("'{}' not a valid state for detectors.".format(target_status))
+
     def _detector_status(self):
         return_list = []
         # Positions for all the detectors.
@@ -396,40 +429,8 @@ class CBBay:
         else:
             return longitudinal['detectors'][0]['detector']
 
-    # Calculate the ordering of the lateral sensors.
-    def _sort_lateral(self, lateral_detectors):
-        """
-        Sort the lateral detectors by distance.
-
-        :param lateral_detectors: List of lateral detector definition dicts.
-        :type lateral_detectors: list
-        :return:
-        """
-
-        self._logger.debug("Creating sorted intercepts from laterals: {}".format(lateral_detectors))
-        lateral_sorted = []
-        # Create named tuples and put it in the list.
-        for item in lateral_detectors:
-            # Make a named tuple out of the detector's config.
-            this_detector = Intercept(item['detector'], item['intercept'])
-            lateral_sorted.append(this_detector)
-        lateral_sorted = sorted(lateral_sorted, key=attrgetter('intercept'))
-        self._logger.debug("Lateral detectors sorted to order: {}".format(lateral_sorted))
-        return lateral_sorted
-
-    # Traverse the detectors dict, activate everything that needs activating.
-    def _detector_state(self, target_status):
-        if target_status in (SENSTATE_DISABLED, SENSTATE_ENABLED, SENSTATE_RANGING):
-            self._logger.debug("Traversing detectors to set status to '{}'".format(target_status))
-            # Traverse the dict looking for detectors that need activation.
-            for detector in self._detectors:
-                self._logger.debug("Changing detector {}".format(detector))
-                self._detectors[detector].status = target_status
-        else:
-            raise ValueError("'{}' not a valid state for detectors.".format(target_status))
-
-    # Configure system detectors for this bay.
     def _setup_detectors(self, longitudinal, lateral, system_detectors):
+        ''' Configure detectors for this bay.'''
         # Output dictionary.
         configured_detectors = {}
         # Some debug output
@@ -470,6 +471,50 @@ class CBBay:
         self._logger.debug("Configured detectors: {}".format(configured_detectors))
         return configured_detectors
 
+    def _sort_lateral(self, lateral_detectors):
+        """
+        Sort the lateral detectors by distance.
+
+        :param lateral_detectors: List of lateral detector definition dicts.
+        :type lateral_detectors: list
+        :return:
+        """
+
+        self._logger.debug("Creating sorted intercepts from laterals: {}".format(lateral_detectors))
+        lateral_sorted = []
+        # Create named tuples and put it in the list.
+        for item in lateral_detectors:
+            # Make a named tuple out of the detector's config.
+            this_detector = Intercept(item['detector'], item['intercept'])
+            lateral_sorted.append(this_detector)
+        lateral_sorted = sorted(lateral_sorted, key=attrgetter('intercept'))
+        self._logger.debug("Lateral detectors sorted to order: {}".format(lateral_sorted))
+        return lateral_sorted
+
+    ## Private Properties
+    @property
+    def _active_timeout(self):
+        ''' Utility method to determine which timeout to use.'''
+        if self.state == BAYSTATE_DOCKING:
+            return self._timeouts['dock']
+        elif self.state == BAYSTATE_UNDOCKING:
+            return self._timeouts['undock']
+        elif self._state == BAYSTATE_POSTROLL:
+            return self._timeouts['post-roll']
+        else:
+            return None
+
+    @property
+    def _occupancy_score(self):
+        max_score = len(self.lateral_sorted)
+        score = floor(max_score * (2/3))
+        # Never let score be less than one detector, because that makes no sense.
+        if score < 1:
+            score = 1
+        return score
+
+    ## Old stuff....
+
     # Trigger handling
     def register_trigger(self, trigger_obj):
         self._logger.debug("Registering trigger ID '{}'".format(trigger_obj.id))
@@ -479,30 +524,5 @@ class CBBay:
         self._logger.debug("Deregistering Trigger ID '{}'".format(trigger_id))
         del self._triggers[trigger_id]
 
-    def scan_triggers(self):
-        self._logger.debug("Scanning triggers.")
-        for trigger_id in self._triggers:
-            self._logger.debug("Checking Trigger ID '{}'".format(trigger_id))
-            if self._triggers[trigger_id].triggered:
-                self._logger.debug("Trigger '{}' is active.".format(trigger_id))
-                self._logger.debug("Trigger has command stack - {}".format(self._triggers[trigger_id].cmd_stack))
-                while self._triggers[trigger_id].cmd_stack:
-                    # Pop the command from the object.
-                    cmd = self._triggers[trigger_id].cmd_stack.pop(0)
-                    self._logger.debug("Next command on stack. '{}'".format(cmd))
-                    # Bay commands will trigger a motion or an abort.
-                    # For nomenclature reasons, change the imperative form to the descriptive
-                    if cmd.upper() == 'DOCK':
-                        self._logger.debug("Setting bay state to 'DOCKING'")
-                        self.state = 'docking'
-                        break
-                    elif cmd.upper() == 'UNDOCK':
-                        self._logger.debug("Setting bay state to 'UNDOCKING'")
-                        self.state = 'undocking'
-                        break
-                    elif cmd.upper() == 'ABORT':
-                        self._logger.debug("Aborting bay motions.")
-                        self.abort()
-                    else:
-                        self._logger.debug("'{}' is not a valid bay command.".format(cmd))
+
 

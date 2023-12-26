@@ -181,7 +181,7 @@ class CBCore:
         # else:
         #     raise ValueError("Motion command '{}' not valid.".format(cmd))
         #
-        self._logger.info('Beginning {} on bay {}.'.format(CobraBay.const.BAYSTATE_MOTION, bay_id))
+        self._logger.info('Beginning {} on bay {}.'.format(self._bays[bay_id].state, bay_id))
 
         # # Set the bay to the proper state.
         # self._bays[bay_id].state = direction
@@ -190,9 +190,16 @@ class CBCore:
         # to motion.
         if self._bays[bay_id].state == CobraBay.const.BAYSTATE_UNDOCKING:
             self._logger.debug("{} ({})".format(self._bays[bay_id].vector, type(self._bays[bay_id].vector)))
-            while self._bays[bay_id].vector.direction in (CobraBay.const.DIR_STILL, CobraBay.const.GEN_UNKNOWN):
+            while (self._bays[bay_id].vector.direction in (CobraBay.const.DIR_STILL, CobraBay.const.GEN_UNKNOWN) and
+                   self._bays[bay_id].state == CobraBay.const.BAYSTATE_UNDOCKING):
                 self._display.show(mode='message',message="UNDOCK", color="orange", icons=False)
+                # Timeout and go back to ready if the vehicle hasn't moved by the timeout.
+                # Kids are probably running around.
+                self._bays[bay_id].check_timer()
+                # If the bay state has returned to ready, break.
+                # Check the network
                 self._network_handler()
+                # Check triggers for changes.
                 self._trigger_check()
 
         # As long as the bay is in the desired state, keep running.

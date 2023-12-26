@@ -16,6 +16,8 @@ import math
 from CobraBay.const import *
 
 ureg = UnitRegistry()
+# TODO: Reorganize class to standard.
+# FIXME: Pre-Bake font scaling.
 
 class CBDisplay:
     def __init__(self,
