@@ -318,12 +318,18 @@ class CBConfig:
         :return:
         """
         self._logger.info("Loading file '{}'".format(self._config_path))
+
+        # Pulls in the YAML
         staging_yaml = self._read_yaml(self._config_path)
+
+        # Run the validator on the config. This will raise an exception if the validator cannot run.
         try:
             validator_result = self._validator(staging_yaml)
-        except KeyError as e:
+        except BaseException as e:
+            self._logger.error("Could not validate config. Received error '{}'".format(e))
             raise e
         else:
+            # Possible for the config to be validate*able*, but not validate.
             if validator_result.valid:
                 self._logger.info("Configuration is valid! Saving.")
                 self._config = validator_result.result
@@ -411,15 +417,21 @@ class CBConfig:
         else:
             return self._config['system']['logging'][item_id]
 
-    @staticmethod
-    def _read_yaml(file_path):
+
+    def _read_yaml(self, file_path):
         """
         Open a YAML file and return its contents.
 
         :param file_path:
         :return:
         """
-        with open(file_path, 'r') as file_handle:
+        try:
+            file_handle = open(file_path, 'r')
+        except TypeError as oe:
+            self._logger.critical("Cannot open config file '{}'! Received error '{}'.".
+                               format(file_path, oe))
+            raise oe
+        else:
             config_yaml = yaml.safe_load(file_handle)
         return config_yaml
 
@@ -455,15 +467,13 @@ class CBConfig:
 
         try:
             returnval = mv.validated(validation_target)
-        except BaseException as e:
-            self._logger.error("Could not validate. '{}'".format(e))
-            return CBValidation(False, mv.errors)
+        except cerberus.validator.DocumentError as e:
+            raise e
 
         # Trap return failures and kick back false and the errors.
         if returnval is None:
             return CBValidation(False, mv.errors)
         else:
-
             self._logger.debug("Base validated config:")
             self._logger.debug(pformat(returnval))
 

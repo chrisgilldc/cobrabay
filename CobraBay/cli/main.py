@@ -63,9 +63,9 @@ def main():
             # Create a CobraBay config object.
             try:
                 cbconfig = CobraBay.CBConfig(config_file=environment.configfile, environment=environment)
-            except ValueError as e:
-                master_logger.error("Could not load config. Received error '{} - {}'".
-                                    format(e.__class__.__name__, str(e)))
+            except BaseException as e:
+                # Relying on the config module to log details on *what* the error is.
+                print("Configuration had errors. Cannot continue!")
                 sys.exit(1)
 
             # Initialize the system
@@ -109,7 +109,7 @@ def _validate_environment(input_base,
         if not rundir.is_absolute():
             rundir = basedir / rundir
         if not rundir.is_dir():
-            raise ValueError("Run directory '{}' not a directory.".format(rundir))
+            raise ValueError("Run directory '{}' not a directory. Cannot continue!".format(rundir))
         print("Run directory: {}".format(rundir))
 
     # Config directory, to allow versioned configs.
@@ -122,7 +122,7 @@ def _validate_environment(input_base,
         if not configdir.is_absolute():
             configdir = basedir / configdir
         if not configdir.is_dir():
-            raise ValueError("Config directory '{}' not a directory.".format(configdir))
+            raise ValueError("Config directory '{}' not a directory. Cannot continue!".format(configdir))
         if configdir != basedir:
             print("Config directory: {}".format(configdir))
 
@@ -135,8 +135,10 @@ def _validate_environment(input_base,
         # If config isn't absolute, make it relative to the base.
         if not configfile.is_absolute():
             configfile = configdir / configfile
+        if not configfile.exists():
+            raise ValueError("Config file '{}' does not exist. Cannot continue!".format(configfile))
         if not configfile.is_file():
-            raise ValueError("Config file '{}' is not a file.".format(configfile))
+            raise ValueError("Config file '{}' is not a file. Cannot continue!".format(configfile))
         print("Config file: {}".format(configfile))
 
     # Logging directory.
