@@ -39,7 +39,12 @@ class CBNetwork:
         self._mqtt_port = port
         self._mqtt_username = username
         self._mqtt_password = password
-        self._perform_ha_discover = ha_discover
+        # Dict for all the Home Assistant info.
+        self._ha_info = {
+            'discover': ha_discover,
+            'override': False,
+            'start': time.monotonic()
+        }
         self._unit_system = unit_system
         self._system_name = system_name
         self._interface = interface
@@ -68,8 +73,7 @@ class CBNetwork:
         self._mqtt_connected = False
         self._discovery_log = {'system': False}
         self._pistatus_timestamp = 0
-        self._ha_repeat_override = False
-        self._ha_timestamp = 0
+
         # Current device state. Will get updated every time we're polled.
         self._device_state = 'unknown'
         # List for commands received and to be passed upward.
@@ -298,13 +302,13 @@ class CBNetwork:
             # Send all the messages outbound.
             # For the first 15s after HA discovery, send everything. This makes sure data arrives after HA has
             # established entities.
-            if self._ha_repeat_override:
-                if time.monotonic() - self._ha_timestamp <= 15:
-                    self._logger.info("HA discovery {}s ago, sending all".format(time.monotonic() - self._ha_timestamp))
+            if self._ha_info['override']:
+                if time.monotonic() - self._ha_info['start'] <= 15:
+                    self._logger.debug("HA discovery {}s ago, sending all".format(time.monotonic() - self._ha_info['start']))
                     force_repeat = True
                 else:
                     self._logger.info("Have sent all messages for 15s after HA discovery. Disabling.")
-                    self._ha_repeat_override = False
+                    self._ha_info['override'] = False
                     force_repeat = False
             else:
                 force_repeat = False
@@ -340,7 +344,7 @@ class CBNetwork:
             return False
 
         # Send a discovery message and an online notification.
-        if self._perform_ha_discover:
+        if self._ha_info['discover']:
             self._ha_discovery()
             # Reset the topic history so any newly discovered entities get sent to.
             self._topic_history = {}
@@ -456,7 +460,7 @@ class CBNetwork:
         outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
 
         # If we're in post-discovery, then
-        if self._ha_repeat_override:
+        if self._ha_info['override']:
             outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
 
         # Only create sensor-based messages if the sensors are active, which happens when the bay is running.
@@ -541,9 +545,10 @@ class CBNetwork:
                     self._ha_discovery_bay(item)
                 self._discovery_log['system'] = True
         # Enable the repeat override. This ensures that messages are repeated for long enough after discovery so
-        # # they aren't missed.
-        self._ha_repeat_override = True
-        self._ha_timestamp = time.monotonic()
+        # they aren't missed.
+        self._ha_info['override'] = True
+        self._logger.info("HA discovery performed. Will send all topics for the next 15s.")
+        self._ha_info['start'] = time.monotonic()
 
     # Create HA discovery message.
     def _ha_discover(self, name, topic, entity_type, entity, device_info=True, system_avail=True, avail=None,
