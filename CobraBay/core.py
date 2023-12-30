@@ -142,7 +142,7 @@ class CBCore:
         # Tell the bays to check their triggers.
         for bay_id in self._bays:
             self._logger.debug("Commanding trigger scan for bay '{}'".format(bay_id))
-            self._bays[bay_id].scan_triggers()
+            self._bays[bay_id].check_triggers()
 
     # Main operating loop.
     def run(self):

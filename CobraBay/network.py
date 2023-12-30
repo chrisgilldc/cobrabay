@@ -171,7 +171,7 @@ class CBNetwork:
         self._logger.debug("Connecting trigger {}".format(trigger_id))
         self._logger.debug("Subscribing to '{}'".format(trigger_obj.topic))
         self._mqtt_client.subscribe(trigger_obj.topic)
-        self._logger.debug("Connecting callback...")
+        self._logger.debug("Connecting callback...'{}'".format(trigger_obj.callback))
         self._mqtt_client.message_callback_add(trigger_obj.topic, trigger_obj.callback)
 
     # Store a provided pistatus object. We can only need one, so this is easy.
@@ -459,12 +459,13 @@ class CBNetwork:
         # Bay state
         outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
 
-        # If we're in post-discovery, then
-        if self._ha_info['override']:
-            outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
+#        if self._ha_info['override']:
+#            outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
 
         # Only create sensor-based messages if the sensors are active, which happens when the bay is running.
-        if input_obj.state in (BAYSTATE_DOCKING, BAYSTATE_UNDOCKING, BAYSTATE_VERIFY):
+        if input_obj.state in (BAYSTATE_DOCKING, BAYSTATE_UNDOCKING, BAYSTATE_VERIFY) or self._ha_info['override']:
+            # Bay Occupancy
+            outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
             # Bay vector
             outbound_messages.append(
                 {'topic': topic_base + 'vector', 'payload': input_obj.vector._asdict(), 'repeat': False})
@@ -475,15 +476,11 @@ class CBNetwork:
             if self._cbcore.system_state != 'shutdown':
                 outbound_messages.append(
                     {'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
-
-            # Enumerate the detectors and create outbound messages for them.
-            # detector_messages = []
-            # for detector in input_obj.detectors:
-            #     detector_messages.extend(
-            #         self._mqtt_messages_detector(input_obj.detectors[detector], topic_base + 'detectors/'))
-            # outbound_messages.extend(detector_messages)
             outbound_messages.extend(self.publish_bay_detectors(input_obj.id))
 
+        # If performing a VERIFY on the bay, we now have all the messages, set bay back to ready.
+        if input_obj.state == BAYSTATE_VERIFY:
+            input_obj.state = BAYSTATE_READY
         return outbound_messages
 
     def publish_bay_detectors(self, bay_id, publish=False):
@@ -764,7 +761,7 @@ class CBNetwork:
                 topic=baycmd_trigger.topic,
                 entity_type='select',
                 entity="{}_{}_cmd".format(self._system_name.lower(), bay_obj.id),
-                options=["-", "Dock", "Undock", "Abort"]
+                options=["-", "Dock", "Undock", "Verify", "Abort"]
             )
         # Bay Vector
         self._ha_discover(
@@ -789,7 +786,7 @@ class CBNetwork:
             name="{} Motion Timer".format(bay_obj.name),
             topic=topic_base + "motion_timer",
             entity_type="sensor",
-            entity="{}_{}_motiontimer".format(self._system_name.lower(), bay_obj.id),
+            entity="{}_{}_motion_timer".format(self._system_name.lower(), bay_obj.id),
         )
 
         # # Bay Occupancy

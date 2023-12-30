@@ -5,11 +5,11 @@
 import argparse
 import pathlib
 import sys
-
 import pid.base
-
 import CobraBay
 import logging
+import pwd
+import os
 from logging.handlers import WatchedFileHandler
 # from collections import namedtuple
 from pid import PidFile
@@ -17,7 +17,7 @@ from CobraBay.datatypes import ENVOPTIONS
 
 def main():
     print("CobraBay Parking System - {}".format(CobraBay.__version__))
-
+    print("Running as '{}'".format(pwd.getpwuid(os.getuid()).pw_name))
     # Parse command line options.
     parser = argparse.ArgumentParser(
         description="CobraBay Parking System"
