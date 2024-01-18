@@ -64,6 +64,7 @@ class MQTTTrigger(Trigger):
         """
         super().__init__(id, log_level.upper())
 
+        self._outbound_messages = []
         self._topic = topic
         self._topic_mode = topic_mode
         self._topic_prefix = topic_prefix
@@ -84,6 +85,10 @@ class MQTTTrigger(Trigger):
     def topic_prefix(self, prefix):
         self._topic_prefix = prefix
         self._logger.info("Trigger '{}' prefix updated, MQTT topic is now '{}'".format(self.id, self.topic))
+
+    @property
+    def outbound_messages(self):
+        return self._outbound_messages
 
     @property
     def topic_mode(self):

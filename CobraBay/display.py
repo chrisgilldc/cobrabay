@@ -121,6 +121,7 @@ class CBDisplay:
         self._logger.debug("Split {} pixels for {} lateral zones into: {}".
                            format(avail_height,len(bay_obj.lateral_sorted),pixel_lengths))
 
+        # Eventually replace this with the _status_color method.
         status_lookup = (
             {'status': DETECTOR_QUALITY_OK, 'border': (0,128,0,255), 'fill': (0,128,0,255)},
             {'status': DETECTOR_QUALITY_WARN, 'border': (255,255,0,255), 'fill': (255,255,0,255)},
@@ -258,7 +259,9 @@ class CBDisplay:
         h = self._matrix_height
         # Make a base image, black background.
         final_image = Image.new("RGBA", (w, h), (0,0,0,255))
+
         ## Center area, the range number.
+        self._logger.debug("Compositing range placard...")
         range_layer = self._placard_range(
             bay_obj.range.value,
             bay_obj.range.quality,
@@ -266,7 +269,9 @@ class CBDisplay:
         )
         final_image = Image.alpha_composite(final_image, range_layer)
 
+
         # ## Bottom strobe box.
+        self._logger.debug("Compositing strobe...")
         try:
             if self._bottom_box.lower() == 'strobe':
 
@@ -282,6 +287,7 @@ class CBDisplay:
             self._logger.debug("Bottom box disabled.")
             pass
 
+        self._logger.debug("Compositing laterals.")
         for intercept in bay_obj.lateral_sorted:
             detector = bay_obj.detectors[intercept.lateral]
             # Hit the detector quality once. There's a slim chance this could change during the course of evaluation and
@@ -318,6 +324,7 @@ class CBDisplay:
                     self._layers[bay_obj.id][detector.id]['R']['fault']
                 )
                 final_image = Image.alpha_composite(final_image, combined_layers)
+        self._logger.debug("Returning final image.")
         self._output_image(final_image)
 
     def _strobe(self, range_quality, range_pct):
@@ -439,6 +446,46 @@ class CBDisplay:
         # Network stem
         draw.line([x_input+2,y_input+3,x_input+2,y_input+4], fill=net_color)
         return img
+
+    def _icon_vehicle(self, x_input=None, y_input=None):
+        # Defaults because you can't reference object variables in parameters.
+        # Default to lower_left.
+        if x_input is None:
+            x_input = 0
+        if y_input is None:
+            y_input = self._matrix_height
+
+        w = self._matrix_width
+        h = self._matrix_height
+        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        # Draw the vehicle box.
+
+        draw.rectangle([x_input+2,y_input,x_input+4,y_input-5], outline='green', fill='green')
+        # Lateral sensor. Presuming one!
+        draw.line([x_input+3,y_input-7,x_input+3,y_input-7],fill=self._status_color(DETECTOR_QUALITY_WARN)['fill'])
+        # Lateral sensors.
+        return img
+
+    def _status_color(self, status):
+        """
+        Convert a status into a color
+        :param status:
+        :return:
+        """
+        # Pre-defined quality-color mappings.
+        color_table = {
+            DETECTOR_QUALITY_OK: {'border': (0,128,0,255), 'fill': (0,128,0,255)},
+            DETECTOR_QUALITY_WARN: {'border': (255,255,0,255), 'fill': (255,255,0,255)},
+            DETECTOR_QUALITY_CRIT: {'border': (255,0,0,255), 'fill': (255,0,0,255)},
+            DETECTOR_QUALITY_NOOBJ: {'border': (255,255,255,255), 'fill': (0,0,0,0)}
+        }
+        try:
+            return color_table[status]
+        except KeyError:
+            # Since red is used for 'critical', blue is the 'error' color.
+            return {'border': (0, 255, 255, 0 ), 'fill': (0,255,255,0)}
+
 
     # Make a placard to show range.
     def _placard_range(self, input_range, range_quality, bay_state):
