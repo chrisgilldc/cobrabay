@@ -57,6 +57,3 @@ DETECTOR_NOINTERCEPT = 'not_intercepted'
 DIR_FWD = 'forward'
 DIR_REV = 'reverse'
 DIR_STILL = 'still'
-
-
-

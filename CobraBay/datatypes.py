@@ -16,10 +16,11 @@ class CBValidation(namedtuple_typed):
 
 # Define the environment options named tuple.
 ENVOPTIONS = namedtuple_untyped('EnvOptions',
-                                ['base', 'rundir', 'configdir', 'configfile', 'logdir', 'logfile', 'loglevel'])
+                                ['base', 'rundir', 'configdir', 'configfile', 'logdir', 'logfile', 'loglevel',
+                                 'profile'])
 # Empty environment options named tuple.
 ENVOPTIONS_EMPTY = ENVOPTIONS(
-    None, None, None, None, None, None, None
+    None, None, None, None, None, None, None, None
 )
 
 # Sensor interface information

@@ -8,10 +8,23 @@ import atexit
 from pprint import pformat
 import CobraBay
 import sys
-
+import yappi
 
 class CBCore:
     def __init__(self, config_obj, envoptions):
+        """
+        Cobra Bay Core Class Initializer.
+
+        :param config_obj: Configuration object
+        :type config_obj: CBConfig object
+        :param envoptions: Environment Options to pass command line options/environment variable settings, if any.
+        :type envoptions: namedtuple
+        """
+        # First, start the profiler if enabled.
+        if envoptions.profile:
+            print("Profiler enabled, starting...")
+            yappi.start()
+
         self._network = None
 
         # Set the system state to initializing.
