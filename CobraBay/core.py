@@ -9,6 +9,8 @@ from pprint import pformat
 import CobraBay
 import sys
 import yappi
+from datetime import datetime
+import pathlib
 
 class CBCore:
     def __init__(self, config_obj, envoptions):
@@ -21,9 +23,19 @@ class CBCore:
         :type envoptions: namedtuple
         """
         # First, start the profiler if enabled.
+        self._profile_logger = logging.getLogger("CBProfile")
         if envoptions.profile:
-            print("Profiler enabled, starting...")
+            # Attach a handler to send to the console.
+            profile_handler = logging.StreamHandler(sys.stdout)
+            profile_handler.setLevel(logging.DEBUG)
+            profile_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(message)s'))
+            self._profile_logger.addHandler(profile_handler)
+            self._profile_logger.info("Starting profiler.")
             yappi.start()
+        else:
+            # Otherwise, send it to the
+            profile_handler = logging.NullHandler()
+            self._profile_logger.addHandler(profile_handler)
 
         self._network = None
 
@@ -130,6 +142,12 @@ class CBCore:
         self._logger.info('System Initialization complete.')
         self.system_state = 'running'
 
+        # Write the profile for startup.
+        if envoptions.profile:
+            startup_stats = yappi.get_func_stats()
+            startup_stats.save(envoptions.rundir / 'cobrabay_startup.pstat', type="pstat")
+            yappi.clear_stats()
+
     # Common network handler, pushes data to the network and makes sure the MQTT client can poll.
     def _network_handler(self):
         # Send the outbound message queue to the network module to handle. After, we empty the message queue.
@@ -158,7 +176,9 @@ class CBCore:
             self._bays[bay_id].check_triggers()
 
     # Main operating loop.
-    def run(self):
+    def run(self, profile=False, rundir=None, first_cycle=True):
+        if profile and first_cycle:
+            yappi.clear_stats()
         try:
             # This loop runs while the system is idle. Process commands, increment various timers.
             while True:
@@ -176,16 +196,22 @@ class CBCore:
                         # Set the overall system state.
                         self.system_state = self._bays[bay_id].state
                         # Go into the motion loop.
-                        self._motion(bay_id)
+                        self._motion(bay_id, profile=profile, rundir=rundir)
                         break
                 self._display.show("clock", system_status=system_status)
+                if profile and first_cycle:
+                    run_stats = yappi.get_func_stats()
+                    run_stats.save(rundir / 'cobrabay_run_loop.pstat', type='pstat')
+                    first_cycle = True
         except BaseException as e:
             self._logger.critical("Unexpected exception encountered!")
             self._logger.exception(e)
             sys.exit(1)
 
     # Start sensors and display to guide parking.
-    def _motion(self, bay_id):
+    def _motion(self, bay_id, profile=False, rundir=None):
+        if profile:
+            yappi.clear_stats()
         # Convert command to a state. Should have planned this better, but didn't.
         # if cmd == 'dock':
         #     direction = "docking"
@@ -228,6 +254,11 @@ class CBCore:
             # Check the triggers. This lets an abort be called or an underlying system command be called.
             self._trigger_check()
         self._logger.info("Bay state changed to {}. Returning to idle.".format(self._bays[bay_id].state))
+        if profile:
+            motion_stats = yappi.get_func_stats()
+            motion_stats.save(rundir /
+                              pathlib.Path('cobrabay_motion_' + datetime.now().strftime('%Y%m%d%H%M%S') + '.pstat',
+                                           type='pstat'))
 
     def undock(self):
         self._logger.info('CobraBay: Undock not yet implemented.')

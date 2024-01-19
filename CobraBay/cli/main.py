@@ -76,7 +76,7 @@ def main():
 
             # Start.
             master_logger.info("Initialization complete. Operation start.")
-            cb.run()
+            cb.run(profile=environment.profile, rundir=environment.rundir)
     except pid.base.PidFileAlreadyLockedError:
         print("Cannot start, already running!")
 
