@@ -238,23 +238,31 @@ class TFMP:
 
     # Method to read frames from the serial port. Used by both the data method and the command method.
     def _read_frames(self, length, timeout = 1000):
+        #print("Reading TFMP frames...")
         serial_timeout = time.time() + timeout
         #  Flush all but last frame of data from the serial buffer.
+        #print("Resetting serial input buffer...")
+        ts = time.monotonic_ns()
         while self._data_stream.inWaiting() > self.TFMP_FRAME_SIZE:
-            self._data_stream.read()
+            self._data_stream.reset_input_buffer()
+        end = time.monotonic_ns() - ts
+        #print("Serial input buffer reset in {}ms...".format(end/1000000))
         # Reads data byte by byte from the serial buffer checking for the two header bytes.
         frames = bytearray(length)  # 'frame' data buffer
         while (frames[0] != 0x59) or (frames[1] != 0x59):
             if self._data_stream.inWaiting():
                 #  Read 1 byte into the 'frame' plus one position.
-                frames.append(self._data_stream.read()[0])
+                next_byte = self._data_stream.read()[0]
+                #print("{}".format(hex(next_byte)), end=" ")
+                # frames.append(self._data_stream.read()[0])
+                frames.append(next_byte)
                 #  Shift entire length of 'frame' one byte left.
                 frames = frames[1:]
             #  If no HEADER or serial data not available
             #  after more than one second...
             if time.time() > serial_timeout:
                 raise serial.SerialTimeoutException("Sensor did not return header or serial data within one second.")
-
+        #print("")
         # If we haven't raised an exception, checksum the data.
         if not self._checksum(frames):
             raise IOError("Sensor checksum error")

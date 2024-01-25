@@ -1,6 +1,7 @@
 ####
 # Cobra Bay - The Bay!
 ####
+
 import time
 from pint import UnitRegistry, Quantity
 from time import monotonic
@@ -79,7 +80,7 @@ class CBBay:
 
         # Save the remaining parameters.
         self._name = name
-        self._depth = depth
+        self.depth_abs = depth
         self._timeouts = timeouts
         self._detectors = None
         self._triggers = triggers
@@ -165,6 +166,29 @@ class CBBay:
                 self.state = 'ready'
 
         # Method to get info to pass to the Network module and register.
+
+    @property
+    def depth_abs(self):
+        """
+        Absolute distance from the range sensor to the end of the bay.
+
+        :return: float
+        """
+        return self._depth_abs
+
+    @depth_abs.setter
+    def depth_abs(self, the_input):
+        """
+        Set the absolute depth.
+
+        :param the_input:
+        :return:
+        """
+        self._depth_abs = Quantity(the_input).to('cm')
+
+    @property
+    def depth(self):
+        return self.depth_abs - self._detectors[self._selected_range].offset
 
     @property
     def discovery_reg_info(self):
@@ -292,7 +316,6 @@ class CBBay:
         '''
         return self._detectors[self._selected_range]
 
-
     @property
     def range_pct(self):
         '''
@@ -302,16 +325,14 @@ class CBBay:
         # If it's not a Quantity, just return zero.
         self._logger.debug("Calculating range percentage")
         self._logger.debug("Range value: {} ({})".format(self.range.value,type(self.range.value)))
-        adjusted_depth = self._depth - self._detectors[self._selected_range].offset
-        self._logger.debug("Adjusted depth: {}".format(adjusted_depth))
+        self._logger.debug("Adjusted depth: {}".format(self.depth))
         if isinstance(self.range.value, Quantity):
-            range_pct = self.range.value.to('cm') / adjusted_depth.to('cm')
+            range_pct = self.range.value.to('cm') / self.depth.to('cm')
             # Singe this is dimensionless, just take the value and make it a Python scalar.
             range_pct = range_pct.magnitude
             return range_pct
         else:
             return 0
-
 
 
     @property
@@ -502,8 +523,8 @@ class CBBay:
                         setattr(configured_detectors[detector_id], item, detector_settings[item])
                     # Bay depth is a bay global. For range sensors, this also needs to get applied.
                     if direction is longitudinal:
-                        self._logger.debug("Applying bay depth '{}' to longitudinal detector.".format(self._depth))
-                        setattr(configured_detectors[detector_id], "bay_depth", self._depth)
+                        self._logger.debug("Applying bay depth '{}' to longitudinal detector.".format(self.depth_abs))
+                        setattr(configured_detectors[detector_id], "bay_depth", self.depth_abs)
                     elif direction is lateral:
 
                         setattr(configured_detectors[detector_id], "attached_bay", self )

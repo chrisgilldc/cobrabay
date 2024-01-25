@@ -1,7 +1,7 @@
 ####
 # Cobra Bay - Display
-# 
-# Displays current Bay status on a 64x32 RGB Matrix
+#
+# Displays statuses on an RGB Matrix
 ####
 
 import logging
@@ -15,86 +15,101 @@ from io import BytesIO
 import math
 from CobraBay.const import *
 
-ureg = UnitRegistry()
-# TODO: Reorganize class to standard.
-# FIXME: Pre-Bake font scaling.
 
+# Class definition
 class CBDisplay:
     def __init__(self,
                  width,
                  height,
                  gpio_slowdown,
-                 font,
                  cbcore,
+                 font,
+                 font_size_clock=None,
+                 font_size_range=None,
                  bottom_box=None,
-                 unit_system="metric",
-                 mqtt_image=True,
-                 mqtt_update_interval=None,
                  strobe_speed=None,
+                 unit_system="metric",
                  log_level="WARNING"):
         """
-
-        :param unit_system: Unit system. "imperial" or "metric", defaults to "metric"
-        :type unit_system: str
-        :param width: Width of the LED matrix, in pixels
+        :param width: Pixel width of the display.
         :type width: int
-        :param height: Height of the LED matrix, in pixels
+        :param height: Pixel height of the display.
         :type height: int
-        :param gpio_slowdown: GPIO pacing to prevent flicker
+        :param gpio_slowdown: GPIO pacing to prevent flicker.
         :type gpio_slowdown: int
-        :param bottom_box: Which bottom box to be. Can be "strobe", "progress" or "none"
-        :type bottom_box: str
-        :param strobe_speed: How fast the strober bugs should move.
-        :type strobe_speed: Quantity(ms)
-        :param font: Path to the font to use. Must be a TTF.
+        :param font: Path to the font to use for text. Must be a TTF.
         :type font: Path
-        :param cbcore: Reference to the Core object
+        :param font_size_clock: Font size to use for the clock. If not provided will be auto-scaled, which takes time.
+        :type font_size_clock: int
+        :param font_size_range: Font size to use for range display. If not provided will be auto-scaled, which takes time.
+        :type font_size_clock: int
+        :param cbcore: Reference to the Core object.
+        :param bottom_box: For motions, bottom box to use. May be 'off', 'strobe', or 'progress'
+        :type bottom_box: str
+        :param strobe_speed: If strobe bottom box is used, how fast should it move?
+        :type strobe_speed: Quantity(ms)
+        :param unit_system: Unit system to display in. May be 'imperial' or 'metric'
+        :type unit_system: str
+        :param log_level: Logging level for the display sub-logger. Defaults to 'Warning'
+        :type log_level: str
         """
-        # Get a logger!
+
+        # Set up our logger.
         self._logger = logging.getLogger("CobraBay").getChild("Display")
         self._logger.setLevel(log_level.upper())
         self._logger.info("Display initializing...")
         self._logger.info("Display unit system: {}".format(unit_system))
-        
+
         # Save parameters
         self._matrix_width = width
         self._matrix_height = height
+        self.unit_system = unit_system  # Set the unit system.
+        self._cbcore = cbcore  # Save the core reference.
+        self._font = font  # Save the font.
+
+        # Default the bottom box appropriately.
+        if bottom_box is None:
+            bottom_box = 'strobe'
+            self._logger.info("No bottom box specified. Defaulting to strobe.")
         self._bottom_box = bottom_box
-        self._strobe_speed = strobe_speed
-        self._unit_system = unit_system
-        # Based on unit system, set the target unit.
-        if self._unit_system.lower() == 'imperial':
-            self._target_unit = 'in'
+        # Default the strobe speed if necessary.
+        if self._bottom_box == 'strobe' and strobe_speed is None:
+            self._logger.info("Using strobe and no speed specified. Defaulting to 200ms")
+            self._strobe_speed = Quantity('200ms')
         else:
-            self._target_unit = 'm'
-        self._cbcore = cbcore
+            self._strobe_speed = strobe_speed
 
-        self._core_font = font
+        # Find font sizes if necessary.
+        if font_size_clock is None:
+            self._logger.warning("No clock font size provided. Auto-calculating, this may take a while...")
+            self._font_size_clock = self._find_font_size_clock(width=(self._matrix_width - 6),
+                                                               height=(self._matrix_height - 6))
+            self._logger.warning("Determined clock font size to be '{}'. Recommend putting this in the config!".
+                                 format(self._font_size_clock))
+        else:
+            self._font_size_clock = font_size_clock
+        # Can't calculate the font size for the range now, so just save the flag.
+        self._font_size_range = font_size_range
 
+        # Initialize instance variables.
+        self._current_image = None
         # Operating settings. These get reset on every start.
         self._running = {'strobe_offset': 0, 'strobe_timer': monotonic_ns()}
-        self._current_image = None
-
         # Layers dict.
-        self._layers = {
-            'lateral': {}
-        }
+        self._layers = {'lateral': {}}
 
-        # Create static layers
+        # Report the matrix size.
+        self._logger.info("Matrix is {}x{}".format(self._matrix_width, self._matrix_height))
+
+        # Create prepared layers.
         self._setup_layers()
 
         # Set up the matrix object itself.
-        self._create_matrix(self._matrix_width, self._matrix_height, gpio_slowdown)
+        self._logger.info("Initializing matrix...")
+        self._matrix = self._create_matrix(self._matrix_width, self._matrix_height, gpio_slowdown)
+        self._logger.info("Display initialization complete.")
 
-    # Method to set up image layers for use. This takes a command when the bay is ready so lateral zones can be prepped.
-    def _setup_layers(self):
-        # Initialize the layers.
-        self._layers['frame_approach'] = self._frame_approach()
-        self._layers['frame_lateral'] = self._frame_lateral()
-        self._layers['approach'] = self._placard('APPROACH','blue')
-        self._layers['error'] = self._placard('ERROR','red')
-
-    # Have a bay register. This creates layers for the bay in advance so they can be composited faster.
+    ## Public Methods
     def register_bay(self, bay_obj):
         '''
         Register a bay with the display. This pre-creates all the needed images for display.
@@ -107,26 +122,31 @@ class CBDisplay:
         self._logger.debug("Setting up for laterals: {}".format(bay_obj.lateral_sorted))
         # Initialize a dict for this bay.
         self._layers[bay_obj.id] = {}
+
+        # Determine the proper range font size for this bay.
+        if self._font_size_range is None:
+            self._logger.warning("Range font size not pre-set. Auto-scaling, this may take some time")
+            self._font_size_range = self._find_font_size_range(bay_obj.depth, bay_obj.depth - bay_obj.depth_abs)
+            self._logger.warning("Found range font size: {}".format(self._font_size_range))
+        else:
+            self._logger.info("Using range font size '{}'".format(self._font_size_range))
+
         # If no lateral detectors are defined, do nothing else.
         if len(bay_obj.lateral_sorted) == 0:
             return
 
-        # For convenient reference later.
-        w = self._matrix_width
-        h = self._matrix_height
-
-        # Calculate the available pixels for each zones.
+        # Calculate the available pixels for each zone.
         avail_height = self._matrix_height - 6  #
         pixel_lengths = self._parts(avail_height, len(bay_obj.lateral_sorted))
         self._logger.debug("Split {} pixels for {} lateral zones into: {}".
-                           format(avail_height,len(bay_obj.lateral_sorted),pixel_lengths))
+                           format(avail_height, len(bay_obj.lateral_sorted), pixel_lengths))
 
         # Eventually replace this with the _status_color method.
         status_lookup = (
-            {'status': DETECTOR_QUALITY_OK, 'border': (0,128,0,255), 'fill': (0,128,0,255)},
-            {'status': DETECTOR_QUALITY_WARN, 'border': (255,255,0,255), 'fill': (255,255,0,255)},
-            {'status': DETECTOR_QUALITY_CRIT,'border': (255,0,0,255), 'fill': (255,0,0,255)},
-            {'status': DETECTOR_QUALITY_NOOBJ, 'border': (255,255,255,255), 'fill': (0,0,0,0)}
+            {'status': DETECTOR_QUALITY_OK, 'border': (0, 128, 0, 255), 'fill': (0, 128, 0, 255)},
+            {'status': DETECTOR_QUALITY_WARN, 'border': (255, 255, 0, 255), 'fill': (255, 255, 0, 255)},
+            {'status': DETECTOR_QUALITY_CRIT, 'border': (255, 0, 0, 255), 'fill': (255, 0, 0, 255)},
+            {'status': DETECTOR_QUALITY_NOOBJ, 'border': (255, 255, 255, 255), 'fill': (0, 0, 0, 0)}
         )
 
         i = 0
@@ -137,19 +157,19 @@ class CBDisplay:
             lateral = intercept.lateral
             self._logger.debug("Processing lateral zone: {}".format(lateral))
             self._layers[bay_obj.id][lateral] = {}
-            for side in ('L','R'):
+            for side in ('L', 'R'):
                 self._layers[bay_obj.id][lateral][side] = {}
                 if side == 'L':
                     line_w = 0
                     nointercept_x = 1
                 elif side == 'R':
                     line_w = w - 3
-                    nointercept_x = w-2
+                    nointercept_x = w - 2
                 else:
                     raise ValueError("Not a valid side option, this should never happen!")
 
                 # Make an image for the 'fault' status.
-                img = Image.new('RGBA', (w, h), (0,0,0,0))
+                img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
                 # Make a striped box for fault.
                 img = self._rectangle_striped(
                     img,
@@ -159,26 +179,27 @@ class CBDisplay:
                     seccolor='yellow'
                 )
                 self._layers[bay_obj.id][lateral][side]['fault'] = img
-                del(img)
+                del (img)
 
                 # Make an image for no_object
-                img = Image.new('RGBA', (w, h), (0,0,0,0))
+                img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
                 # Draw white lines up the section.
                 draw = ImageDraw.Draw(img)
-                draw.line([nointercept_x,1 + accumulated_height,nointercept_x,1 + accumulated_height + pixel_lengths[i]],
-                          fill='white', width=1)
+                draw.line(
+                    [nointercept_x, 1 + accumulated_height, nointercept_x, 1 + accumulated_height + pixel_lengths[i]],
+                    fill='white', width=1)
                 self._layers[bay_obj.id][lateral][side][DETECTOR_NOINTERCEPT] = img
-                del(img)
+                del (img)
 
                 for item in status_lookup:
                     self._logger.debug("Creating layer for side {}, status {} with border {}, fill {}."
                                        .format(side, item['status'], item['border'], item['fill']))
                     # Make the image.
-                    img = Image.new('RGBA', (w, h), (0,0,0,0))
+                    img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
                     draw = ImageDraw.Draw(img)
                     # Draw the rectangle
                     draw.rectangle(
-                        [line_w,1 + accumulated_height,line_w+2,1 + accumulated_height + pixel_lengths[i]],
+                        [line_w, 1 + accumulated_height, line_w + 2, 1 + accumulated_height + pixel_lengths[i]],
                         fill=item['fill'],
                         outline=item['border'],
                         width=1)
@@ -186,8 +207,8 @@ class CBDisplay:
                     self._layers[bay_obj.id][lateral][side][item['status']] = img
                     # Write for debugging
                     # img.save("/tmp/CobraBay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
-                    del(draw)
-                    del(img)
+                    del (draw)
+                    del (img)
 
             # Now add the height of this bar to the accumulated height, to get the correct start for the next time.
             accumulated_height += pixel_lengths[i]
@@ -195,8 +216,7 @@ class CBDisplay:
             i += 1
         self._logger.debug("Created laterals for {}: {}".format(bay_obj.id, self._layers[bay_obj.id]))
 
-    # General purpose message displayer
-    def show(self, mode, system_status=None,  message=None, color="white", icons=True):
+    def show(self, mode, system_status=None, message=None, color="white", icons=True):
         """
         Show a general-purpose message on the display.
 
@@ -213,10 +233,14 @@ class CBDisplay:
         :return:
         """
 
+        # By default, font_size should auto-scale, so make it none.
+        font_size = None
+
         if mode == 'clock':
-            string = datetime.now().strftime("%-I:%M %p")
+            string = datetime.now().strftime("%-I:%M")
             # Clock is always in green.
             color = "green"
+            font_size = self._font_size_clock
         elif mode == 'message':
             if message is None:
                 raise ValueError("Show requires a message when used in Message mode.")
@@ -225,14 +249,14 @@ class CBDisplay:
             raise ValueError("Show mode '{}' is not valid. Must be 'clock' or 'message'.".format(mode))
 
         # Make a base layer.
-        img = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0,0,0,255))
+        img = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0, 0, 0, 255))
         # If enabled, put status icons at the bottom of the display.
         if icons and (system_status is not None):
             # Network status icon, shows overall network and MQTT status.
-            network_icon = self._icon_network(system_status['network'],system_status['mqtt'])
+            network_icon = self._icon_network(system_status['network'], system_status['mqtt'])
             img = Image.alpha_composite(img, network_icon)
             # Adjust available placard height so we don't stomp over the icons.
-            placard_h=6
+            placard_h = 6
         elif icons and (system_status is None):
             self._logger.warning("Icons requested but system status not provided. Skipping.")
             placard_h = 0
@@ -240,17 +264,16 @@ class CBDisplay:
             placard_h = 0
 
         # Placard with the text.
-        placard = self._placard(string, color, w_adjust=0, h_adjust=placard_h)
+        placard = self._placard(string, color, font_size=font_size, w_adjust=0, h_adjust=placard_h)
         img = Image.alpha_composite(img, placard)
         # Send it to the display!
-        self._output_image(img)
+        self.current = img
 
-    # Specific displayer for docking.
     def show_motion(self, direction, bay_obj):
         self._logger.debug("Show Motion received bay '{}'".format(bay_obj.name))
 
         # Don't do motion display if the bay isn't in a motion state.
-        if bay_obj.state not in ('docking','undocking'):
+        if bay_obj.state not in ('docking', 'undocking'):
             self._logger.error("Asked to show motion for bay that isn't performing a motion. Will not do!")
             return
 
@@ -258,7 +281,7 @@ class CBDisplay:
         w = self._matrix_width
         h = self._matrix_height
         # Make a base image, black background.
-        final_image = Image.new("RGBA", (w, h), (0,0,0,255))
+        final_image = Image.new("RGBA", (w, h), (0, 0, 0, 255))
 
         ## Center area, the range number.
         self._logger.debug("Compositing range placard...")
@@ -268,7 +291,6 @@ class CBDisplay:
             bay_obj.state
         )
         final_image = Image.alpha_composite(final_image, range_layer)
-
 
         # ## Bottom strobe box.
         self._logger.debug("Compositing strobe...")
@@ -304,7 +326,7 @@ class CBDisplay:
             elif dq in (DETECTOR_QUALITY_OK, DETECTOR_QUALITY_WARN, DETECTOR_QUALITY_CRIT):
                 # Pick which side the vehicle is offset towards.
                 if detector.value == 0:
-                    skew = ('L','R')  # In the rare case the value is exactly zero, show both sides.
+                    skew = ('L', 'R')  # In the rare case the value is exactly zero, show both sides.
                 elif detector.side == 'R' and dv > 0:
                     skew = ('R')
                 elif detector.side == 'R' and dv < 0:
@@ -314,7 +336,8 @@ class CBDisplay:
                 elif detector.side == 'L' and dv < 0:
                     skew = ('R')
 
-                self._logger.debug("Compositing in lateral indicator layer for {} {} {}".format(detector.name, skew, dq))
+                self._logger.debug(
+                    "Compositing in lateral indicator layer for {} {} {}".format(detector.name, skew, dq))
                 for item in skew:
                     selected_layer = self._layers[bay_obj.id][detector.id][item][dq]
                     final_image = Image.alpha_composite(final_image, selected_layer)
@@ -325,96 +348,169 @@ class CBDisplay:
                 )
                 final_image = Image.alpha_composite(final_image, combined_layers)
         self._logger.debug("Returning final image.")
-        self._output_image(final_image)
+        self.current = final_image
 
-    def _strobe(self, range_quality, range_pct):
-        '''
-        Construct a strober for the display.
+    ## Public Properties
+    @property
+    def current(self):
+        """
+        Base64 encoded current version of what's on the display.
 
-        :param range_quality: Quality value of the range detector.
-        :type range_quality: str
-        :param range_pct: Percentage of distance from garage door to the parking point.
         :return:
-        '''
-        w = self._matrix_width
-        h = self._matrix_height
-        # Set up a base image to draw on.
-        img = Image.new("RGBA", (w, h), (0,0,0,0))
-        draw = ImageDraw.Draw(img)
-        # Back up and emergency distances, we flash the whole bar.
-        if range_quality in ('back_up','emergency'):
-            if monotonic_ns() > self._running['strobe_timer'] + self._strobe_speed:
-                try:
-                    if self._running['strobe_color'] == 'red':
-                        self._running['strobe_color'] = 'black'
-                    elif self._running['strobe_color'] == 'black':
-                        self._running['strobe_color'] = 'red'
-                except KeyError:
-                    self._running['strobe_color'] = 'red'
-                self._running['strobe_timer'] = monotonic_ns()
-            # draw.line([(1,h-2),(w-2,h-2)], fill=self._running['strobe_color'])
-            draw.rectangle([(1,h-3),(w-2,h-1)], fill=self._running['strobe_color'])
-        else:
-            # If we need to back up, have blockers be zero
-            if range_quality == 'back_up':
-                blocker_width = 0
+        """
+        return self._current_image
+
+    @current.setter
+    def current(self, image):
+        """
+        Take an image, send it to the display, and save it as a Base64 encoded version for pickup by MQTT.
+
+        :param image: Image to output.
+        :type image: Image
+        :return:
+        """
+
+        # Send to the matrix
+        self._matrix.SetImage(image.convert('RGB'))
+        # Convert to Base64 and save.
+        image_buffer = BytesIO()
+        # Put in the staging variable for pickup, base64 encoded.
+        image.save(image_buffer, format='PNG')
+        self._current_image = b64encode(image_buffer.getvalue())
+
+    @property
+    def unit_system(self):
+        """
+        The current unit system of the display.
+        :return:
+        """
+        return self._unit_system
+
+    @unit_system.setter
+    def unit_system(self, the_input):
+        """
+        Set the unit system
+
+        :param the_input:
+        :return:
+        """
+        if the_input.lower() not in ('imperial', 'metric'):
+            raise ValueError("Unit system must be one of 'imperial' or 'metric'. Instead got '{}' ({})".
+                             format(the_input, type(the_input)))
+        self._unit_system = the_input.lower()
+
+    ## Private Methods
+    def _create_matrix(self, width, height, gpio_slowdown):
+        """
+        Create a matrix with specified parameters
+
+        :param width: Width of the display
+        :type width: int
+        :param height: Height of the display
+        :type height: int
+        :param gpio_slowdown: GPIO Slowdown factor for flicker reduction.
+        :type gpio_slowdown: int
+        :return:
+        """
+        # Create a matrix. This is hard-coded for now.
+        matrix_options = RGBMatrixOptions()
+        matrix_options.cols = width
+        matrix_options.rows = height
+        matrix_options.chain_length = 1
+        matrix_options.parallel = 1
+        matrix_options.hardware_mapping = 'adafruit-hat-pwm'
+        matrix_options.disable_hardware_pulsing = True
+        matrix_options.gpio_slowdown = gpio_slowdown
+        return RGBMatrix(options=matrix_options)
+
+    def _find_font_size_clock(self, width, height):
+        # Clock size can always be
+        font_size = None
+        for hour in range(0, 24):
+            hour = str(hour).zfill(2)
+            for minute in range(0, 60):
+                minute = str(minute).zfill(2)
+                time_string = hour + ":" + minute
+                time_size = self._scale_font(str(time_string), width, height)
+                if font_size is None:
+                    font_size = time_size
+                else:
+                    if time_size < font_size:
+                        font_size = time_size
+        return font_size
+
+    def _find_font_size_range(self, depth, min_depth, w=None, h=None):
+        # Default the width to the whole matrix
+        if w is None:
+            w = self._matrix_width
+        # Default the height to the whole matrix
+        if h is None:
+            h = self._matrix_height
+        font_size = None
+        while depth >= min_depth:
+            depth_string = self._range_string(depth)
+            print("Trying depth string '{}'".format(depth_string))
+            depth_size = self._scale_font(depth_string, w, h)
+            if font_size is None:
+                font_size = depth_size
             else:
-                # Calculate where the blockers need to be.
-                available_width = (w-2)/2
-                blocker_width = math.floor(available_width * (1-range_pct))
-            self._logger.debug("Strober blocker width: {}".format(blocker_width))
-            # Because of rounding, we can wind up with an entirely closed bar if we're not fully parked.
-            # Thus, fudge the space unless we're okay.
-            if range_quality != 'ok' and blocker_width > 28:
-                blocker_width = 28
-            # Draw the blockers.
-            #draw.line([(1, h-2),(blocker_width+1, h-2)], fill="white")
-            #draw.line([(w-blocker_width-2, h-2), (w-2, h-2)], fill="white")
-            # If we're fully parked the line is full and there's nowhere for the bugs, so don't bother.
-            if blocker_width < 30:
-                left_strobe_start = blocker_width+2+self._running['strobe_offset']
-                left_strobe_stop = left_strobe_start + 3
-                if left_strobe_stop > (w/2)-1:
-                    left_strobe_stop = (w/2)-1
-                # draw.line([(left_strobe_start, h-2),(left_strobe_stop,h-2)], fill="red")
-                draw.rectangle([(left_strobe_start, h - 3), (left_strobe_stop, h - 1)], fill="red")
-                right_strobe_start = w - 2 - blocker_width - self._running['strobe_offset']
-                right_strobe_stop = right_strobe_start - 3
-                if right_strobe_stop < (w/2)+1:
-                    right_strobe_stop = (w/2)+1
-                # draw.line([(right_strobe_start, h - 2), (right_strobe_stop, h - 2)], fill="red")
-                draw.rectangle([(right_strobe_start, h - 3), (right_strobe_stop, h - 1)], fill="red")
-            # If time is up, move the strobe bug forward.
-            if monotonic_ns() > self._running['strobe_timer'] + self._strobe_speed:
-                self._running['strobe_offset'] += 1
-                self._running['strobe_timer'] = monotonic_ns()
-                # Don't let the offset push the bugs out to infinity.
-                if self._running['strobe_offset'] > (w/2) - blocker_width:
-                    self._running['strobe_offset'] = 0
-        return img
+                if depth_size < font_size:
+                    font_size = depth_size
+            depth = (depth.magnitude - 1) * depth.units
+        return font_size
 
-    # Methods to create image objects that can then be composited.
-    def _frame_approach(self):
-        w = self._matrix_width
-        h = self._matrix_height
-        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        draw.rectangle([(0, h - 3), (w - 1, h - 1)], width=1)
-        return img
+    @staticmethod
+    def _frame_lateral(width, height):
+        """
+        Draw lateral zone frames on either side of the display.
+        Border is one pixel, with one pixel down the middle.
 
-    def _frame_lateral(self):
-        # Localize matrix width and height, just to save readability
-        w = self._matrix_width
-        h = self._matrix_height
-        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        :return:
+        """
+
+        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         # Left Rectangle
-        draw.rectangle([(0, 0), (2, h-5)], width=1)
+        draw.rectangle([(0, 0), (2, height - 5)], width=1)
         # Right Rectangle
-        draw.rectangle([(w-3, 0), (w-1, h-5)], width=1)
+        draw.rectangle([(width - 3, 0), (width - 1, height - 5)], width=1)
+        return img
+
+    @staticmethod
+    def _frame_strobe(width, height):
+        """
+        Draws the border box for the strobe along the bottom of the display.
+        Border is one pixel, with one pixel open in the middle.
+
+        :param width: Width of the matrix
+        :type width: int
+        :param height: Height of the matrix
+        :type height: int
+        :return: Image
+        """
+        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([(0, height - 3), (width - 1, height - 1)], width=1)
         return img
 
     def _icon_network(self, net_status=False, mqtt_status=False, x_input=None, y_input=None):
+        """
+        Draw a network icon based on current status. Icon will be color coded based on the statuses.
+        Green = Connected
+        Red = Not connected
+        Yellow = Unable to connect because of other errors (ie: MQTT can't connect because network is down)
+
+        :param net_status: Network connection status
+        :type net_status: bool
+        :param mqtt_status: MQTT broker connection status
+        :type mqtt_status: bool
+        :param x_input: X position of the icon. Defaults to 5 pixels from the right side.
+        :type x_input: int
+        :param y_input: Y position of the icon. Defaults to 5 pixels from the bottom.
+        :type y_input: int
+        :return:
+        """
+
         # determine the network status color based on combined network and MQTT status.
         if net_status is False:
             net_color = 'red'
@@ -432,19 +528,19 @@ class CBDisplay:
 
         # Default to lower right placement if no alternate positions given.
         if x_input is None:
-            x_input = self._matrix_width-5
+            x_input = self._matrix_width - 5
         if y_input is None:
-            y_input = self._matrix_height-5
+            y_input = self._matrix_height - 5
 
         w = self._matrix_width
         h = self._matrix_height
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-        draw.rectangle([x_input+1,y_input,x_input+3,y_input+2], outline=mqtt_color, fill=mqtt_color)
+        draw.rectangle([x_input + 1, y_input, x_input + 3, y_input + 2], outline=mqtt_color, fill=mqtt_color)
         # Base network line.
-        draw.line([x_input,y_input+4,x_input+4,y_input+4],fill=net_color)
+        draw.line([x_input, y_input + 4, x_input + 4, y_input + 4], fill=net_color)
         # Network stem
-        draw.line([x_input+2,y_input+3,x_input+2,y_input+4], fill=net_color)
+        draw.line([x_input + 2, y_input + 3, x_input + 2, y_input + 4], fill=net_color)
         return img
 
     def _icon_vehicle(self, x_input=None, y_input=None):
@@ -461,34 +557,70 @@ class CBDisplay:
         draw = ImageDraw.Draw(img)
         # Draw the vehicle box.
 
-        draw.rectangle([x_input+2,y_input,x_input+4,y_input-5], outline='green', fill='green')
+        draw.rectangle([x_input + 2, y_input, x_input + 4, y_input - 5], outline='green', fill='green')
         # Lateral sensor. Presuming one!
-        draw.line([x_input+3,y_input-7,x_input+3,y_input-7],fill=self._status_color(DETECTOR_QUALITY_WARN)['fill'])
+        draw.line([x_input + 3, y_input - 7, x_input + 3, y_input - 7],
+                  fill=self._status_color(DETECTOR_QUALITY_WARN)['fill'])
         # Lateral sensors.
         return img
 
-    def _status_color(self, status):
+    # def _output_image(self, image):
+    #     """
+    #     Send an image to the display.
+    #
+    #     :param image:
+    #     :return:
+    #     """
+    #     # Send to the matrix
+    #     self._matrix.SetImage(image.convert('RGB'))
+    #
+    #     image_buffer = BytesIO()
+    #     # Put in the staging variable for pickup, base64 encoded.
+    #     image.save(image_buffer, format='PNG')
+    #     self.current = b64encode(image_buffer.getvalue())
+
+    # Divide into roughly equal parts. Found this here:
+    # https://stackoverflow.com/questions/52697875/split-number-into-rounded-numbers
+    @staticmethod
+    def _parts(a, b):
+        q, r = divmod(a, b)
+        return [q + 1] * r + [q] * (b - r)
+
+    def _placard(self, text, color, font_size=None, w_adjust=8, h_adjust=4):
         """
-        Convert a status into a color
-        :param status:
+        Write arbitrary text on the image in the appropriate size.
+
+        :param text: Text to format
+        :type text: str
+        :param color: Color of the text
+        :param font_size: Font size of the text. Will auto-scale if not provided.
+        :type font_size: int
+        :param w_adjust: Margin for the width. Will be divded equally from the left and right
+        (ie: w_adjust=8 takes 4 pixels from left and right)
+        :type w_adjust: int
+        :param h_adjust: Margin for the height. Shifts upward from the bottom of the display.
+        :type h_adjust: int
+        :return: Image
+        """
+        img = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        # If no font size was specified, dynamically size the text to fit the space we have.
+        if font_size is None:
+            font_size = self._scale_font(text, self._matrix_width - w_adjust, self._matrix_height - h_adjust)
+        font = ImageFont.truetype(font=self._font, size=font_size)
+        # Make the text. Center it in the middle of the area, using the derived font size.
+        draw.text((self._matrix_width / 2, (self._matrix_height - 4) / 2), text,
+                  fill=ImageColor.getrgb(color), font=font, anchor="mm")
+        return img
+
+    def _placard_range(self, input_range, range_quality, bay_state):
+        """
+
+        :param input_range: Range to display
+        :param range_quality: Range quality, used to color-code the text.
+        :param bay_state: Operating state of the bay. Used to determine which
         :return:
         """
-        # Pre-defined quality-color mappings.
-        color_table = {
-            DETECTOR_QUALITY_OK: {'border': (0,128,0,255), 'fill': (0,128,0,255)},
-            DETECTOR_QUALITY_WARN: {'border': (255,255,0,255), 'fill': (255,255,0,255)},
-            DETECTOR_QUALITY_CRIT: {'border': (255,0,0,255), 'fill': (255,0,0,255)},
-            DETECTOR_QUALITY_NOOBJ: {'border': (255,255,255,255), 'fill': (0,0,0,0)}
-        }
-        try:
-            return color_table[status]
-        except KeyError:
-            # Since red is used for 'critical', blue is the 'error' color.
-            return {'border': (0, 255, 255, 0 ), 'fill': (0,255,255,0)}
-
-
-    # Make a placard to show range.
-    def _placard_range(self, input_range, range_quality, bay_state):
         self._logger.debug("Creating range placard with range {} and quality {}".format(input_range, range_quality))
         # Define a default range string. This should never show up.
         range_string = "NOVAL"
@@ -497,20 +629,18 @@ class CBDisplay:
         # Override string states. If the range quality has these values, we go ahead and show the string rather than the
         # measurement.
         if range_quality == DETECTOR_QUALITY_BACKUP:
-            range_string = "BACK UP!"
+            return self._layers['backup']
         elif range_quality in (DETECTOR_QUALITY_DOOROPEN, DETECTOR_QUALITY_BEYOND):
             # DOOROPEN is when the detector cannot get a reflection, ie: the door is open.
             # BEYOND is when a reading is found but it's beyond the defined length of the bay.
             # Either way, this indicates either no vehicle is present yet, or a vehicle is present but past the garage
             # door
             if bay_state == BAYSTATE_DOCKING:
-                range_string = "APPROACH"
-                text_color = 'blue'
+                return self._layers['approach']
             elif bay_state == BAYSTATE_UNDOCKING:
-                range_string = "CLEAR!"
-                text_color = 'white'
+                return self._layers['clear']
         elif input_range == 'unknown':
-            range_string = "Unknown"
+            return self._layers['noval']
         else:
             try:
                 range_converted = input_range.to(self._target_unit)
@@ -519,18 +649,10 @@ class CBDisplay:
                                      format(input_range, type(input_range)))
                 range_string = input_range
             else:
-                if self._unit_system.lower() == 'imperial':
-                    if range_converted.magnitude < 12:
-                        range_string = "{}\"".format(round(range_converted.magnitude,1))
-                    else:
-                        feet = int(range_converted.to(ureg.inch).magnitude // 12)
-                        inches = round(range_converted.to(ureg.inch).magnitude % 12)
-                        range_string = "{}'{}\"".format(feet,inches)
-                else:
-                    range_string = "{} m".format(round(range_converted.magnitude,2))
+                range_string = self._range_string(range_converted)
 
         # Determine a color based on quality
-        if range_quality in ('critical','back_up'):
+        if range_quality in ('critical', 'back_up'):
             text_color = 'red'
         elif range_quality == 'warning':
             text_color = 'yellow'
@@ -542,49 +664,77 @@ class CBDisplay:
         self._logger.debug("Requesting placard with range string {} in color {}".format(range_string, text_color))
         return self._placard(range_string, text_color)
 
-    # Generalized placard creator. Make an image for arbitrary text.
-    def _placard(self,text,color,w_adjust=8,h_adjust=4):
-        # Localize matrix and adjust.
-        w = self._matrix_width
-        h = self._matrix_height
-        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    @staticmethod
+    def _pm_indicator(width, height):
+        """
+        Draw a PM indicator
+
+        :param width: Width of the display
+        :type width: int
+        :param height: Height of the display
+        :type height: int
+        :return: Image
+        """
+        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-        # Find the font size we can use.
-        font = ImageFont.truetype(font=self._core_font,
-                                  size=self._scale_font(text, w-w_adjust, h-h_adjust))
-        # Make the text. Center it in the middle of the area, using the derived font size.
-        draw.text((w/2, (h-4)/2), text, fill=ImageColor.getrgb(color), font=font, anchor="mm")
+        draw.rectangle((width-2, 0, width, 2), fill='green', outline='green', width=1)
         return img
 
     def _progress_bar(self, range_pct):
-        img = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0,0,0,0))
+        """
+        Draw a progress bar based on percentage of range covered.
+
+        :param range_pct:
+        :return: Image
+        """
+        img = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-        draw.rectangle((0,0,self._matrix_width-1,self._matrix_height-1),fill=None, outline='white', width=1)
+        draw.rectangle((0, 0, self._matrix_width - 1, self._matrix_height - 1), fill=None, outline='white', width=1)
         self._logger.debug("Total matrix width: {}".format(self._matrix_width))
         self._logger.debug("Range percentage: {}".format(range_pct))
-        progress_pixels = int((self._matrix_width-2)*range_pct)
+        progress_pixels = int((self._matrix_width - 2) * range_pct)
         self._logger.debug("Progress bar pixels: {}".format(progress_pixels))
-        draw.line((1,self._matrix_height-2,1+progress_pixels,self._matrix_height-2),fill='green', width=1)
+        draw.line((1, self._matrix_height - 2, 1 + progress_pixels, self._matrix_height - 2), fill='green', width=1)
         return img
 
-    # Utility method to find the largest font size that can fit in a space.
-    def _scale_font(self, text, w, h):
-        # Start at font size 1.
-        fontsize = 1
-        while True:
-            font = ImageFont.truetype(font=self._core_font, size=fontsize)
-            bbox = font.getbbox(text)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-            if text_width < w and text_height < h:
-                fontsize += 1
-            else:
-                break
-        return fontsize
+    def _range_string(self, input_range):
+        """
+        Format a given range into a string for display.
 
-    # Create a two-color, 45 degree striped rectangle
+        :param input_range:
+        :param unit_system:
+        :return: str
+        """
+        if self.unit_system == 'imperial':
+            if abs(input_range.magnitude) < 12:
+                range_string = "{}\"".format(round(input_range.magnitude, 1))
+            else:
+                feet = int(input_range.to("in").magnitude // 12)
+                inches = round(input_range.to("in").magnitude % 12)
+                range_string = "{}'{}\"".format(feet, inches)
+        else:
+            range_meters = input_range.to("m").magnitude
+            if range_meters <= 0.5:
+                range_string = "{} cm".format(round(range_meters / 100, 2))
+            else:
+                range_string = "{} m".format(round(range_meters, 2))
+        return range_string
+
     @staticmethod
     def _rectangle_striped(input_image, start, end, pricolor='red', seccolor='yellow'):
+        """
+        Create a rectangled with zebra-stripes at a 45-degree angle.
+
+        :param input_image: Image to draw onto
+        :type input_image: Image
+        :param start: Start coordinates, X, Y
+        :type start: tuple or list
+        :param end: End coordinates, X, Y
+        :type end: tuple or list
+        :param pricolor: Primary color.
+        :param seccolor: Secondary color.
+        :return: Image
+        """
         # Simple breakout of input. Replace with something better later, maybe.
         x_start = start[0]
         y_start = start[1]
@@ -624,45 +774,68 @@ class CBDisplay:
             current_x += 1
         return input_image
 
-    # Utility method to do all the matrix creation.
-    def _create_matrix(self, width, height, gpio_slowdown):
-        self._logger.info("Initializing Matrix...")
-        # Create a matrix. This is hard-coded for now.
-        matrix_options = RGBMatrixOptions()
-        matrix_options.cols = width
-        matrix_options.rows = height
-        matrix_options.chain_length = 1
-        matrix_options.parallel = 1
-        matrix_options.hardware_mapping = 'adafruit-hat-pwm'
-        matrix_options.disable_hardware_pulsing = True
-        matrix_options.gpio_slowdown = gpio_slowdown
-        self._matrix = RGBMatrix(options=matrix_options)
+    def _scale_font(self, text, w, h):
+        # Start at font size 1.
+        fontsize = 1
+        while True:
+            font = ImageFont.truetype(font=self._font, size=fontsize)
+            bbox = font.getbbox(text)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            if text_width < w and text_height < h:
+                fontsize += 1
+            else:
+                break
+        return fontsize
 
-    # Outputs a given image to the matrix, and puts it in the current_image property to be picked up
-    # and put on the MQTT stack.
-    def _output_image(self,image):
-        # Send to the matrix
-        self._matrix.SetImage(image.convert('RGB'))
+    def _setup_layers(self):
+        """
+        Create static layers that can be composited as needed.
 
-        image_buffer = BytesIO()
-        # Put in the staging variable for pickup, base64 encoded.
-        image.save(image_buffer, format='PNG')
-        self.current = b64encode(image_buffer.getvalue())
+        :return:
+        """
+        # Initialize the layers.
+        self._layers['frame_approach'] = self._frame_strobe(self._matrix_width, self._matrix_height)
+        self._layers['frame_lateral'] = self._frame_lateral(self._matrix_width, self._matrix_height)
+        self._layers['approach'] = self._placard('APPROACH', 'blue')
+        self._layers['clear'] = self._placard('CLEAR!', 'white')
+        self._layers['backup'] = self._placard('BACK UP!', 'red')
+        self._layers['noval'] = self._placard('NOVAL', 'red')
+        self._layers['error'] = self._placard('ERROR', 'red')
+        self._layers['offline'] = self._placard('OFFLINE', 'white')
+        self._layers['pm_indicator'] = self._pm_indicator(self._matrix_width, self._matrix_height)
 
-        # For debugging, write to a file in tmp.
-        # image.save("/tmp/CobraBay-display.png", format='PNG')
+    def _status_color(self, status):
+        """
+        Convert a status into a color
+        :param status:
+        :return:
+        """
+        # Pre-defined quality-color mappings.
+        color_table = {
+            DETECTOR_QUALITY_OK: {'border': (0, 128, 0, 255), 'fill': (0, 128, 0, 255)},
+            DETECTOR_QUALITY_WARN: {'border': (255, 255, 0, 255), 'fill': (255, 255, 0, 255)},
+            DETECTOR_QUALITY_CRIT: {'border': (255, 0, 0, 255), 'fill': (255, 0, 0, 255)},
+            DETECTOR_QUALITY_NOOBJ: {'border': (255, 255, 255, 255), 'fill': (0, 0, 0, 0)}
+        }
+        try:
+            return color_table[status]
+        except KeyError:
+            # Since red is used for 'critical', blue is the 'error' color.
+            return {'border': (0, 255, 255, 0), 'fill': (0, 255, 255, 0)}
 
+    ## Private Properties
     @property
-    def current(self):
-        return self._current_image
+    def _target_unit(self):
+        """
+        Unit for output conversion, determined by the overall unit system.
+        Imperial always uses inches, metric always uses meters.
+        :return:
+        """
 
-    @current.setter
-    def current(self,image):
-        self._current_image = image
-
-    # Divide into roughly equal parts. Found this here:
-    # https://stackoverflow.com/questions/52697875/split-number-into-rounded-numbers
-    @staticmethod
-    def _parts(a, b):
-        q, r = divmod(a, b)
-        return [q + 1] * r + [q] * (b - r)
+        if self.unit_system == 'imperial':
+            return 'in'
+        elif self.unit_system == 'metric':
+            return 'm'
+        else:
+            return None

@@ -174,9 +174,11 @@ class CBConfig:
                          'default_setter':
                              lambda doc: str(
                                  importlib.resources.files('CobraBay.data').joinpath('OpenSans-Light.ttf'))},
-                'strobe_speed': {'type': 'quantity', 'coerce': 'pint_seconds'},
-                'mqtt_image': {'type': 'boolean', 'default': True},
-                'mqtt_update_interval': {'type': 'quantity', 'coerce': 'pint_seconds', 'default': '5s'}
+                'font_size_clock': {'type': 'integer' },
+                'font_size_range': {'type': 'integer' },
+                'strobe_speed': {'type': 'quantity', 'coerce': 'pint_seconds'}
+                # 'mqtt_image': {'type': 'boolean', 'default': True},
+                # 'mqtt_update_interval': {'type': 'quantity', 'coerce': 'pint_seconds', 'default': '5s'}
             }
         },
         'detectors': {
