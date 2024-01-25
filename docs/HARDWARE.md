@@ -56,31 +56,16 @@ Lateral Sensor Box
 * [Adafruit VL53L1X range sensor](https://www.adafruit.com/product/3967)
 
 
-Basic System Configuration
-
-1. Install Raspbian
-2. Configure network.
-3. Run a complete update
-````
-apt-get update
-apt-get upgrade
-````
-4. Set up serial
-   1. Open the /boot/config.txt file in an editor
-   ````
-   sudo nano /boot/config.txt
-   ````
-   2. Disable audio. Find the setting below and change **on** to **off**.
-   ````
-   dtparam=audio=on
-   ````
-   3. Add the following lines to the end of the /boot/config.txt to turn on the UART and turn off Bluetooth
-   (which by default will use the hardware UART.)
-   ````
-   enable_uart=1
-   dtoverlay=pi3-disable-bt
-   ````
-   4. Reboot.
-   ````
-   sudo reboot
-   ````
+| Item | Description | Source | Part # |
+| --- | --- | --- | --- |
+| Metro M4 Airlift | Microcontroller| Adafruit | [4000](https://www.adafruit.com/product/4000) |
+| 64x32 RGB LED Matrix @ 4mm pitch | Display | Adafruit | [4886](https://www.adafruit.com/product/4886) |
+| Matrix Shield | Display interface | Adafruit | [2601](https://www.adafruit.com/product/2601) |
+| AW9523 GPIO Expander | Additional GPIO | Adafruit | [4886](https://www.adafruit.com/product/4886) |
+| US-100 | Ultrasonic Rangefinder | Adafruit | [4019](https://www.adafruit.com/product/4019) |
+| VL53L1X | Laser Rangefinder | Adafruit | [3967](https://www.adafruit.com/product/3967) |
+| 5V4A Switching Supply | Power Supply | Adafruit | [1466](https://www.adafruit.com/product/1466) |
+| 2.1mm DC Barrel jack | Panel Power Jack | Adafruit | [610](https://www.adafruit.com/product/610) |
+| QT/Qwiic JST SH 4-pin to Male Headers | I2C Board Connectors | Adafruit | [4209](https://www.adafruit.com/product/4209) |
+| 5-pin DIN plug | Remote sensor cables | Parts Express | [092-150](https://www.parts-express.com/Rean-NYS322-5-Pin-DIN-Plug-092-150) |
+| 5-pin DIN female chassis connector | Remote sensor ports | Parts Express | [092-154](https://www.parts-express.com/Rean-NYS325-5-Pin-DIN-Female-Chassis-Connector-092-154) |

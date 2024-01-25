@@ -10,6 +10,7 @@ from .network import CBNetwork
 from .systemhw import CBPiStatus
 from .version import __version__
 
+import CobraBay.const
 import CobraBay.detectors
 import CobraBay.sensors
 import CobraBay.triggers

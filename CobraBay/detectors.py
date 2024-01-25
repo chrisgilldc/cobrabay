@@ -1,16 +1,18 @@
 ####
 # CobraBay Detector
 ####
-import pint.errors
 
+from functools import wraps
+import logging
+from time import monotonic_ns
+from pint import UnitRegistry, Quantity, DimensionalityError
+import pint.errors
+from pprint import pformat
+from collections import OrderedDict
 from .sensors import CB_VL53L1X, TFMini, FileSensor, I2CSensor, SerialSensor
 from CobraBay.const import *
 import CobraBay.exceptions
-from pint import UnitRegistry, Quantity, DimensionalityError
-from time import monotonic_ns
-from functools import wraps
-import logging
-from collections import namedtuple
+from CobraBay.datatypes import iface_info, Vector
 
 
 # Decorator method to check if a method is ready.
@@ -85,7 +87,7 @@ def read_if_stale(func):
                 if time_delta > self._sensor_obj.timing_budget.to('ns').magnitude * 1.1:
                     read_sensor = True
             else:
-                read_sensor = True  ## Must read the sensor, there isn't any history. This should only happen on startup.
+                read_sensor = True  # Must read the sensor, there isn't any history. This should only happen on startup.
 
         # If flag is set, read the sensor and put its value into the history.
         if read_sensor:
@@ -180,6 +182,7 @@ class Detector:
     def _when_ready(self):
         pass
 
+
 # Single Detectors add wrappers around a single sensor. Sensor arrays are not currently supported, but may be in the
 # future.
 class SingleDetector(Detector):
@@ -239,15 +242,15 @@ class SingleDetector(Detector):
     @property
     def fault(self):
         """
-        Utility property for determining if the detector is in a fault state. The status and state should always match up,
-        so if they don't, something is wrong. More complex logic to figure out what the fault is and what action to take
-        should be implemented elsewhere.
+        Utility property for determining if the detector is in a fault state. The status and state should always match
+        up, so if they don't, something is wrong. More complex logic to figure out what the fault is and what action to
+        take should be implemented elsewhere.
 
         :return: bool
         """
         if self.status != self.state:
-            self._logger.warning("Detector is in a fault state. Operating status '{}' does not equal running state '{}'".
-                                 format(self.status, self.state))
+            self._logger.warning("Detector is in a fault state. Operating status '{}' does not equal running state '{}'"
+                                 .format(self.status, self.state))
             return True
         else:
             return False
@@ -259,7 +262,6 @@ class SingleDetector(Detector):
 
     @property
     def sensor_interface(self):
-        iface_info = namedtuple("iface_info", ['type', 'addr'])
         if isinstance(self._sensor_obj, SerialSensor):
             iface = iface_info("serial", self._sensor_obj.serial_port)
         elif isinstance(self._sensor_obj, I2CSensor):
@@ -296,7 +298,8 @@ class Longitudinal(SingleDetector):
         super().__init__(detector_id=detector_id, name=name, error_margin=error_margin, sensor_type=sensor_type,
                          sensor_settings=sensor_settings, log_level=log_level)
         # Required properties. These are checked by the check_ready decorator function to see if they're not None.
-        # Once all required properties are not None, the object is set to ready. Doesn't check for values being *correct*.
+        # Once all required properties are not None, the object is set to ready. Doesn't check for values being
+        # *correct*.
         self._required = ['bay_depth', 'spread_park', 'pct_warn', 'pct_crit']
         # Save parameters
         self._error_margin = error_margin
@@ -310,11 +313,19 @@ class Longitudinal(SingleDetector):
         self._dist_warn = None
         self._dist_crit = None
 
+        # Define the Quality ranges for this detector.
+        self._qualities = OrderedDict()
+        # Initialize all the qualities with an empty list.
+        for key in (DETECTOR_QUALITY_EMERG, DETECTOR_QUALITY_BACKUP, DETECTOR_QUALITY_PARK, DETECTOR_QUALITY_FINAL,
+                    DETECTOR_QUALITY_BASE, DETECTOR_QUALITY_OK, DETECTOR_QUALITY_BEYOND):
+            self._qualities[key] = []
+
     # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
     @read_if_stale
     def value_raw(self):
-        # Note, the read_if_stale decorator will trap this if the sensor itself isn't ranging. Thus, we can assume it is.
+        # Note, the read_if_stale decorator will trap this if the sensor itself isn't ranging. Thus, we can assume it
+        # is.
         self._logger.debug("Most recent reading is: {}".format(self._history[0][0]))
         if isinstance(self._history[0][0], Quantity) or isinstance(self._history[0][0], BaseException):
             return self._history[0][0]
@@ -334,41 +345,23 @@ class Longitudinal(SingleDetector):
     def quality(self):
         # Pull the current value for evaluation.
         current_raw_value = self.value_raw
-        self._logger.debug("Evaluating current raw value '{}' for quality".format(current_raw_value))
-        if isinstance(self.value_raw, Quantity):
-            # Make an adjusted value as well.
-            current_adj_value = current_raw_value - self.offset
-            # Actual reading, evaluate.
-            if current_raw_value < Quantity("2 in"):
-                return DETECTOR_QUALITY_EMERG
-            elif (self.bay_depth * 0.90) <= current_raw_value:
-                # Check the actual distance. If more than 90% of the bay distance is clear, probably nothing there.
-                self._logger.debug(
-                    "Reading is more than 90% of bay depth ({})".format(self.bay_depth * .9))
-                return DETECTOR_QUALITY_NOOBJ
-            # Now consider the adjusted values.
-            elif current_adj_value < 0 and abs(current_adj_value) > self.spread_park:
-                # Overshot stop point and too far to be considered an okay park, backup.
-                return DETECTOR_QUALITY_BACKUP
-            elif abs(current_adj_value) < self.spread_park:
-                # Just short of stop point, but within allowed range, parked.
-                return DETECTOR_QUALITY_PARK
-            elif current_adj_value <= self._dist_crit:
-                # Within critical range, this is "final"
-                return DETECTOR_QUALITY_FINAL
-            elif current_adj_value <= self._dist_warn:
-                # within warning range, this is "base"
-                return DETECTOR_QUALITY_BASE
-            else:
-                # Too far to be in another status, but reading something, so this is the general 'OK' state.
-                return DETECTOR_QUALITY_OK
-        # Handle non-Quantity values from the reading.
-        elif current_raw_value == SENSOR_VALUE_WEAK:
-            return DETECTOR_QUALITY_DOOROPEN
-        elif current_raw_value in (SENSOR_VALUE_FLOOD, SENSOR_VALUE_STRONG):
-            return DETECTOR_NOREADING
-        else:
-            return GEN_UNKNOWN
+        self._logger.debug("Evaluating longitudinal raw value '{}' for quality".format(current_raw_value))
+        self._logger.debug("Available qualities: {}".format(self._qualities.keys()))
+        for quality in self._qualities:
+            self._logger.debug("Checking quality '{}'".format(quality))
+            try:
+                if self._qualities[quality][0] <= current_raw_value < self._qualities[quality][1]:
+                    self._logger.debug("In quality range '{}' ({} <= X < {})".format(quality,
+                                                                                     self._qualities[quality][0],
+                                                                                     self._qualities[quality][1]))
+                    return quality
+            except ValueError:
+                self._logger.error("Received ValueError when finding quality. Range start {} ({}), end {} ({}), read "
+                                   "value {}".format(
+                    self._qualities[quality][0],type(self._qualities[quality][0]),
+                    self._qualities[quality][1],type(self._qualities[quality][1]),
+                    current_raw_value
+                ))
 
     # Determine the rate of motion being measured by the detector.
     @property
@@ -413,28 +406,32 @@ class Longitudinal(SingleDetector):
 
     @property
     def vector(self):
-
+        """
+        Speed and direction of motion found by this detector.
+        """
         # Grab the movement value.
         movement = self._movement
 
         # Can't determine a vector if sensor is NOT RANGING or return UNKNOWN.
-        if movement in (SENSTATE_NOTRANGING,GEN_UNKNOWN):
-            return {"speed": GEN_UNKNOWN, "direction": GEN_UNKNOWN}
+        if movement in (SENSTATE_NOTRANGING, GEN_UNKNOWN):
+            return Vector(GEN_UNKNOWN, GEN_UNKNOWN)
         # Determine a direction.
         self._logger.debug("Have movement value: {}".format(movement))
 
         # Okay, not none, so has value!
         if movement['net_dist'] > Quantity(self._error_margin):
-            return {'speed': abs(movement['speed']), 'direction': DIR_REV}
+            return Vector(abs(movement['speed']), DIR_REV)
+#            {'speed': abs(movement['speed']), 'direction': DIR_REV}
         elif movement['net_dist'] < (Quantity(self._error_margin) * -1):
-            return {'speed': abs(movement['speed']), 'direction': DIR_FWD}
+            return Vector(abs(movement['speed']), DIR_FWD)
+            # return {'speed': abs(movement['speed']), 'direction': DIR_FWD}
         else:
-            return {'speed': Quantity("0 kph"), 'direction': DIR_STILL}
+            return Vector(Quantity("0 kph"), DIR_STILL)
 
     # Gets called when the rangefinder has all settings and is being made ready for use.
     def _when_ready(self):
         # Calculate specific distances to use based on the percentages.
-        self._derived_distances()
+        self._quality_ranges()
 
     # Allow dynamic distance mode changes to come from the bay. This is largely used for debugging.
     def distance_mode(self, target_mode):
@@ -459,8 +456,8 @@ class Longitudinal(SingleDetector):
 
     @spread_park.setter
     @check_ready
-    def spread_park(self, input):
-        self._spread_park = self._convert_value(input)
+    def spread_park(self, the_input):
+        self._spread_park = self._convert_value(the_input)
 
     # Properties for warning and critical percentages. We take these are "normal" percentages (ie: 15.10) and convert
     # to decimal so it can be readily used for multiplication.
@@ -491,14 +488,33 @@ class Longitudinal(SingleDetector):
         self._pct_crit = the_input / 100
 
     # Pre-bake distances for warn and critical to make evaluations a little easier.
-    def _derived_distances(self):
-        self._logger.info("Calculating derived distances.")
-        adjusted_distance = self.bay_depth - self._offset
-        self._logger.info("Adjusted distance: {}".format(adjusted_distance))
-        self._dist_warn = (adjusted_distance.magnitude * self.pct_warn) / 100 * adjusted_distance.units
-        self._logger.info("Warning distance: {}".format(self._dist_warn))
-        self._dist_crit = (adjusted_distance.magnitude * self.pct_crit) / 100 * adjusted_distance.units
-        self._logger.info("Critical distance: {}".format(self._dist_crit))
+    def _quality_ranges(self):
+        self._logger.info("Calculating quality ranges.")
+        self._logger.debug("Total bay depth: {}".format(self._bay_depth))
+        self._logger.debug("Offset: {}".format(self._offset))
+        # Adjusted distance of the bay. Distance from the offset point to the end of the bay
+        adjusted_depth = self.bay_depth - self._offset
+        self._logger.debug("Adjusted depth: {}".format(adjusted_depth))
+        self._logger.debug("Critical multiplier: {}".format(self._pct_crit))
+        self._logger.debug("Warn multiplier: {}".format(self._pct_warn))
+        # Crit and Warn are as a percentage of the *adjusted* distance.
+        crit_distance = self._offset + ( adjusted_depth *  self._pct_crit )
+        self._logger.debug("Critical distance: {}".format(crit_distance))
+        warn_distance = self._offset + ( adjusted_depth * self._pct_warn)
+        self._logger.debug("Warning distance: {}".format(warn_distance))
+
+        # Set the quality ranges.
+        ## Okay is the Offset, +/- the error margin.
+        self._qualities[DETECTOR_QUALITY_EMERG] = [Quantity("0 in"), Quantity("2 in")]
+        self._qualities[DETECTOR_QUALITY_BACKUP] = [Quantity("2 in"), self._offset - self._error_margin]
+        self._qualities[DETECTOR_QUALITY_PARK] = [self._offset - self._error_margin, self._offset + self._error_margin]
+        self._qualities[DETECTOR_QUALITY_FINAL] = [self._qualities[DETECTOR_QUALITY_PARK][1], crit_distance]
+        self._qualities[DETECTOR_QUALITY_BASE] = [crit_distance, warn_distance]
+        self._qualities[DETECTOR_QUALITY_OK] = [warn_distance, self._bay_depth]
+        # End of Beyond has to have *an* end. One light year is probably fine as an arbitrarily large value.
+        self._qualities[DETECTOR_QUALITY_BEYOND] = [self._bay_depth, Quantity('1ly')]
+        self._logger.debug("Calculated quality ranges --")
+        self._logger.debug(pformat(self._qualities))
 
     # Reference some properties upward to the parent class. This is necessary because properties aren't directly
     # inherented.
@@ -522,7 +538,7 @@ class Longitudinal(SingleDetector):
 
 # Detector for lateral position
 class Lateral(SingleDetector):
-    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING" ):
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING"):
         super().__init__(detector_id=detector_id, name=name, sensor_type=sensor_type, sensor_settings=sensor_settings,
                          log_level=log_level)
         self._intercept = None

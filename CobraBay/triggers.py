@@ -6,7 +6,7 @@ from json import loads as json_loads
 import logging
 
 class Trigger:
-    def __init__(self, id, log_level="WARNING", **kwargs):
+    def __init__(self, id, log_level="DEBUG", **kwargs):
         """
         :param id: str
         :param log_level: Log level for the bay, must be a Logging level.
@@ -14,8 +14,8 @@ class Trigger:
         """
         self.id = id
         # Create a logger.
-        self._logger = logging.getLogger("CobraBay").getChild("Triggers").getChild(self.id)
-        self._logger.setLevel(log_level)
+        self._logger = logging.getLogger("CobraBay").getChild("Trigger").getChild(self.id)
+        self._logger.setLevel(log_level.upper())
         self._logger.info("Initializing trigger: {}".format(self.id))
 
         # Initialize command stack.
@@ -29,7 +29,6 @@ class Trigger:
         else:
             return False
 
-    # Return the first command from the stack.
     @property
     def cmd_stack(self):
         return self._cmd_stack
@@ -49,7 +48,7 @@ class Trigger:
 
 # Subclass for common MQTT elements
 class MQTTTrigger(Trigger):
-    def __init__(self, id, topic, topic_mode="full", topic_prefix = None, log_level="WARNING"):
+    def __init__(self, id, topic, topic_mode="full", topic_prefix = None, log_level="DEBUG"):
         """
         General class for MQTT-based triggers.
 
@@ -65,6 +64,7 @@ class MQTTTrigger(Trigger):
         """
         super().__init__(id, log_level.upper())
 
+        self._outbound_messages = []
         self._topic = topic
         self._topic_mode = topic_mode
         self._topic_prefix = topic_prefix
@@ -85,6 +85,10 @@ class MQTTTrigger(Trigger):
     def topic_prefix(self, prefix):
         self._topic_prefix = prefix
         self._logger.info("Trigger '{}' prefix updated, MQTT topic is now '{}'".format(self.id, self.topic))
+
+    @property
+    def outbound_messages(self):
+        return self._outbound_messages
 
     @property
     def topic_mode(self):
@@ -116,13 +120,13 @@ class SysCommand(MQTTTrigger):
         self._cmd_stack_network = []
 
     def callback(self, client, userdata, message):
-
         # Decode the JSON.
         message_text = str(message.payload, 'utf-8').lower()
+        self._logger.debug("Received message: '{}'".format(message_text))
 
         # Commands need to get routed to the right module.
         # Core commands
-        if message_text in ('restart', 'rescan'):
+        if message_text in ('restart', 'rescan', 'save_config'):
             self._logger.info("Received command {}. Adding to core command stack.".format(message_text))
             self._cmd_stack_core.append(message_text)
         elif message_text in ('rediscover'):
@@ -169,12 +173,14 @@ class BayCommand(MQTTTrigger):
     def callback(self, client, userdata, message):
         # Do a string convert.
         message_text = str(message.payload, 'utf-8').lower()
+        self._logger.debug("Received message: '{}'".format(message_text))
 
         # Check the commands and filter based on bay state.
-        # Dock, undock or verify, only if bay isn't already docking or undocking.
-        if message_text in ('dock', 'undock', 'verify') and self._bay_obj.state not in ('Docking', 'Undocking'):
+        # Dock, undock or verify, only if bay isn't already in an active state
+        if message_text in ('dock', 'undock', 'verify') and not self._bay_obj.active:
             self._cmd_stack.append(message_text)
-        elif message_text in ('abort'):
+        # Abort the action, only if it's active.
+        elif message_text in ('abort') and self._bay_obj.active:
             self._cmd_stack.append(message_text)
         else:
             self._logger.warning("Ignoring invalid command: {}".format(message_text))
@@ -183,13 +189,6 @@ class BayCommand(MQTTTrigger):
     @property
     def bay_id(self):
         return self._bay_obj.id
-    #
-    # @property
-    # def topic(self):
-    #     if self._settings['topic_mode'] == 'full':
-    #         return self._settings['topic']
-    #     else:
-    #         return self._topic_prefix + "/" + self.bay_id + "/" + self._settings['topic']
 
 
 # State-based MQTT triggers
@@ -204,6 +203,7 @@ class MQTTSensor(MQTTTrigger):
         Trigger which will take action based on an MQTT value change. Defining an MQTT Sensor trigger subscribes the system
         to that topic. When the topic's payload changes to or from a defined state, the defined action will be executed.
 
+        :rtype: object
         :param id: ID of this trigger. Case-insensitive, no spaces.
         :type id: str
         :param topic: Topic for the trigger. If topic_mode is 'full', this will be the complete topic used.
@@ -243,11 +243,13 @@ class MQTTSensor(MQTTTrigger):
     def callback(self, client, userdata, message):
         # Convert to a flat string
         message_text = str(message.payload, 'utf-8').lower()
+        self._logger.debug("Received message: '{}'".format(message_text))
 
         # Check the message text against our trigger value.
         # For 'to' type, previous value doesn't matter, just check it!
         if self._change_type == 'to':
             if message_text == self._trigger_value:
+                self._logger.debug("Triggering action.")
                 self._trigger_action()
         elif self._change_type == 'from':
             if (
@@ -255,55 +257,64 @@ class MQTTSensor(MQTTTrigger):
                     or
                     (self._previous_value == self._trigger_value and message_text != self._trigger_value)
             ):
+                self._logger.debug("Triggering action.")
                 self._trigger_action()
             # Always save the most-recently seen value as the 'previous value'
             self._previous_value = message_text
 
+    #TODO: Something here is slowing down triggering. Figure it out!
     def _trigger_action(self):
         # If action is supposed to be occupancy determined, check the bay.
         if self._action == 'occupancy':
-            if self._bay_obj.occupied == 'Occupied':
-                # If bay is occupied, vehicle must be leaving.
-                self._cmd_stack.append('undock')
-            elif self._bay_obj.occupied == 'Unoccupied':
-                # Bay is unoccupied, so vehicle approaching.
-                self._cmd_stack.append('dock')
+            try:
+                if self._bay_obj.occupied:
+                    # If bay is occupied, vehicle must be leaving.
+                    self._logger.debug("Appending 'undock' command.")
+                    self._cmd_stack.append('undock')
+                else:
+                    # Bay is unoccupied, so vehicle approaching.
+                    self._logger.debug("Appending 'dock' command.")
+                    self._cmd_stack.append('dock')
+            except TypeError:
+                self._logger.warning("Bay has occupancy state '{}', cannot set command.".format(self._bay_obj.occupied))
         else:
             # otherwise drop the action through.
+            self._logger.debug("Appending '{}' command.".format(self._action))
             self._cmd_stack.append(self._action)
 
     @property
     def bay_id(self):
         return self._bay_obj.id
 
-class Range(Trigger):
-    def __init__(self, config, bay_obj, detector_obj):
-        super().__init__(config)
-
-        # Store the bay object reference.
-        self._bay_obj = bay_obj
-
-        # Store the detector object reference.
-        self._detector_obj = detector_obj
-
-    def check(self):
-        if self._detector_obj.motion:
-            self._trigger_action()
-
-    def _trigger_action(self):
-        # If action is supposed to be occupancy determined, check the bay.
-        if self._settings['when_triggered'] == 'occupancy':
-            if self._bay_obj.occupied == 'Occupied':
-                # If bay is occupied, vehicle must be leaving.
-                self._cmd_stack.append('undock')
-            elif self._bay_obj.occupied == 'Unoccupied':
-                # Bay is unoccupied, so vehicle approaching.
-                self._cmd_stack.append('dock')
-        else:
-            # otherwise drop the action through.
-            self._cmd_stack.append(self._settings['when_triggered'])
-
-    # Bay ID this trigger is linked to.
-    @property
-    def bay_id(self):
-        return self._bay_obj.id
+# Old Range Trigger class. May rework someday.
+# class Range(Trigger):
+#     def __init__(self, config, bay_obj, detector_obj):
+#         super().__init__(config)
+#
+#         # Store the bay object reference.
+#         self._bay_obj = bay_obj
+#
+#         # Store the detector object reference.
+#         self._detector_obj = detector_obj
+#
+#     def check(self):
+#         if self._detector_obj.motion:
+#             self._trigger_action()
+#
+#     def _trigger_action(self):
+#         # If action is supposed to be occupancy determined, check the bay.
+#         if self._settings['when_triggered'] == 'occupancy':
+#             if self._bay_obj.occupied == 'Occupied':
+#                 # If bay is occupied, vehicle must be leaving.
+#                 self._cmd_stack.append('undock')
+#             elif self._bay_obj.occupied == 'Unoccupied':
+#                 # Bay is unoccupied, so vehicle approaching.
+#                 self._cmd_stack.append('dock')
+#         else:
+#             # otherwise drop the action through.
+#             self._cmd_stack.append(self._settings['when_triggered'])
+#
+#     # Bay ID this trigger is linked to.
+#     @property
+#     def bay_id(self):
+#         return self._bay_obj.id
