@@ -163,13 +163,13 @@ class CBDisplay:
                     line_w = 0
                     nointercept_x = 1
                 elif side == 'R':
-                    line_w = w - 3
-                    nointercept_x = w - 2
+                    line_w = self._matrix_width - 3
+                    nointercept_x = self._matrix_width - 2
                 else:
                     raise ValueError("Not a valid side option, this should never happen!")
 
                 # Make an image for the 'fault' status.
-                img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+                img = Image.new('RGBA', (self._matrix_width, self._matrix_height), (0, 0, 0, 0))
                 # Make a striped box for fault.
                 img = self._rectangle_striped(
                     img,
@@ -182,7 +182,7 @@ class CBDisplay:
                 del (img)
 
                 # Make an image for no_object
-                img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+                img = Image.new('RGBA', (self._matrix_width, self._matrix_height), (0, 0, 0, 0))
                 # Draw white lines up the section.
                 draw = ImageDraw.Draw(img)
                 draw.line(
@@ -195,7 +195,7 @@ class CBDisplay:
                     self._logger.debug("Creating layer for side {}, status {} with border {}, fill {}."
                                        .format(side, item['status'], item['border'], item['fill']))
                     # Make the image.
-                    img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+                    img = Image.new('RGBA', (self._matrix_width, self._matrix_height), (0, 0, 0, 0))
                     draw = ImageDraw.Draw(img)
                     # Draw the rectangle
                     draw.rectangle(

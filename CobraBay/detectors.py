@@ -183,9 +183,10 @@ class Detector:
         pass
 
 
-# Single Detectors add wrappers around a single sensor. Sensor arrays are not currently supported, but may be in the
-# future.
 class SingleDetector(Detector):
+    """
+    Wrapper class to turn a single physical sensor into a detector. Sensor arrays may be supported in the future.
+    """
     def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING", **kwargs):
         super().__init__(detector_id=detector_id, name=name, log_level=log_level)
         self._logger.debug("Creating sensor object using options: {}".format(sensor_settings))
@@ -211,12 +212,14 @@ class SingleDetector(Detector):
         mt = timing_input.to('microseconds').magnitude
         self._sensor_obj.measurement_time = mt
 
-    # The status of a single detector is definitionally the status of its enwrapped sensor.
     @property
     def status(self):
+        """
+        The status of the Detector, which for a SingleDetector is the status of its enwrapped sensor.
+        :return: str
+        """
         return self._sensor_obj.status
 
-    # Change the status of the detector.
     @status.setter
     def status(self, target_status):
         """
@@ -237,6 +240,11 @@ class SingleDetector(Detector):
     # Pass through for the operating state of the sensor object.
     @property
     def state(self):
+        """
+        Directly access the state of the Detector's sensor object.
+
+        :return: str
+        """
         return self._sensor_obj.state
 
     @property
@@ -258,6 +266,11 @@ class SingleDetector(Detector):
     # Debugging methods to let the main system know a few things about the attached sensor.
     @property
     def sensor_type(self):
+        """
+        Check the type of the enwrapped sensor.
+
+        :return: str
+        """
         return type(self._sensor_obj)
 
     @property
@@ -292,8 +305,10 @@ class SingleDetector(Detector):
         raise NotImplementedError("Raw value method should be implemented on a class basis.")
 
 
-# Detector that measures range progress.
 class Longitudinal(SingleDetector):
+    """
+    Detectors that read in the same direction as vehicle movement.
+    """
     def __init__(self, detector_id, name, error_margin, sensor_type, sensor_settings, log_level="WARNING"):
         super().__init__(detector_id=detector_id, name=name, error_margin=error_margin, sensor_type=sensor_type,
                          sensor_settings=sensor_settings, log_level=log_level)
@@ -333,7 +348,7 @@ class Longitudinal(SingleDetector):
             self._logger.debug("Latest reading was None. Returning 'unknown'")
             return "unknown"
         elif isinstance(self._history[0][0], str):
-            self._logger.debug("History had string '{}'. Returning 'no_reading'".format(self._history[0][0]))
+            self._logger.warning("History had string '{}'. Returning 'no_reading'".format(self._history[0][0]))
             return "no_reading"
         else:
             self._logger.debug("Unknown reading state, returning 'error'")
@@ -538,6 +553,9 @@ class Longitudinal(SingleDetector):
 
 # Detector for lateral position
 class Lateral(SingleDetector):
+    """
+    Detector which reads perpendicular to the motion of the vehicle.
+    """
     def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING"):
         super().__init__(detector_id=detector_id, name=name, sensor_type=sensor_type, sensor_settings=sensor_settings,
                          log_level=log_level)

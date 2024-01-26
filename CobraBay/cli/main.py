@@ -25,7 +25,6 @@ def main():
     parser.add_argument("-b", "--base", default=".", help="Base directory, for all other paths")
     parser.add_argument("-c", "--config", default="./config.yaml", help="Config file location.")
     parser.add_argument("-cd", "--configdir", default=".", help="Directory for config files.")
-    parser.add_argument("-p", "--profile", action='store_true', help="Enable profiler.")
     parser.add_argument("-r", "--rundir", default="/tmp", help="Run directory, for the PID file.")
     parser.add_argument("-ld", "--logdir", default=".", help="Directory to write logs to.")
     parser.add_argument("-lf", "--logfile", default="./cobrabay.log", help="Log file name to write")
@@ -43,8 +42,7 @@ def main():
             input_configfile=args.config,
             input_logdir=args.logdir,
             input_logfile=args.logfile,
-            input_loglevel=args.loglevel,
-            input_profile=args.profile
+            input_loglevel=args.loglevel
         )
     except BaseException as e:
         print(e)
@@ -76,7 +74,7 @@ def main():
 
             # Start.
             master_logger.info("Initialization complete. Operation start.")
-            cb.run(profile=environment.profile, rundir=environment.rundir)
+            cb.run()
     except pid.base.PidFileAlreadyLockedError:
         print("Cannot start, already running!")
 
@@ -87,8 +85,7 @@ def _validate_environment(input_base,
                           input_configfile,
                           input_logdir,
                           input_logfile,
-                          input_loglevel,
-                          input_profile):
+                          input_loglevel):
     # Check the base directory.
     try:
         base = pathlib.Path(input_base)
@@ -180,11 +177,6 @@ def _validate_environment(input_base,
     else:
         loglevel = None
 
-    # Profiler enable.
-    if input_profile not in (True, False):
-        raise ValueError("Profile must be either true or false. Instead got '{}', which should be impossible!".
-                         format(input_profile))
-
     valid_environment = ENVOPTIONS(
         base=basedir,
         rundir=rundir,
@@ -192,8 +184,7 @@ def _validate_environment(input_base,
         configfile=configfile,
         logdir=logdir,
         logfile=logfile,
-        loglevel=loglevel,
-        profile=input_profile
+        loglevel=loglevel
     )
 
     return valid_environment
