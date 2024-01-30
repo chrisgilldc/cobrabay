@@ -31,6 +31,9 @@ SENSTATE_ENABLED = 'enabled'
 SENSTATE_RANGING = 'ranging'
 SENSTATE_NOTRANGING = 'not_ranging'
 
+## Sensor response codes
+SENRESP_OK = 'ok'
+
 # Non-Quantity values the sensor can be in without
 SENSOR_VALUE_OK = 'ok'
 SENSOR_VALUE_WEAK = 'weak'

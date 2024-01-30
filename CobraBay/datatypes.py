@@ -36,5 +36,21 @@ class TFMP_data(namedtuple_typed):
     temperature: float
 
 
-# Sensor movement vector
-Vector = namedtuple_untyped('Vector', ['speed', 'direction'])
+class Sensor_Response(namedtuple_typed):
+    """
+    Response from sensor
+    response_type will be as defined in const.SENOR_VALUE_*. Only SENOR_VALUE_OK should be considered readable.
+    All other response codes can be considered failures to read. They may be lumped together or parsed out as
+    appropriate.
+    """
+    response_type: str
+    reading: Quantity
+
+
+#Vector = namedtuple_untyped('Vector', ['speed', 'direction'])
+class Vector(namedtuple_typed):
+    """
+    Vector of longitudinal movement
+    """
+    speed: float
+    direction: str

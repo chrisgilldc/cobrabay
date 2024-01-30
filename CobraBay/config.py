@@ -64,6 +64,7 @@ class CBConfig:
             'schema': {
                 'name': {'type': 'string'},
                 'error_margin': {'type': 'quantity', 'coerce': 'pint_cm'},
+                'always_range': {'type': 'boolean', 'default': False},
                 'sensor_type': {'type': 'string', 'required': True, 'allowed': ['TFMini', 'VL53L1X']},
                 # 'timing': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
                 'sensor_settings': {

@@ -109,10 +109,11 @@ def read_if_stale(func):
 
 
 class Detector:
-    def __init__(self, detector_id, name, offset="0 cm", log_level="WARNING"):
+    def __init__(self, detector_id, name, offset="0 cm", always_range=False, log_level="WARNING"):
         # Save parameters.
         self._detector_id = detector_id
         self._name = name
+        self._always_range = always_range
         # Create a logger.
         self._logger = logging.getLogger("CobraBay").getChild("Detector").getChild(self._name)
         self._logger.setLevel(log_level.upper())
@@ -137,6 +138,14 @@ class Detector:
         raise NotImplementedError
 
     # These properties and methods are common to all detectors.
+    @property
+    def always_range(self):
+        """
+        Should this detector be enabled and disabled as a matter of course, or always kept running?
+        :return: bool
+        """
+        return self._always_range
+
     @property
     def ready(self):
         return self._ready
@@ -187,8 +196,8 @@ class SingleDetector(Detector):
     """
     Wrapper class to turn a single physical sensor into a detector. Sensor arrays may be supported in the future.
     """
-    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING", **kwargs):
-        super().__init__(detector_id=detector_id, name=name, log_level=log_level)
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, always_range=False, log_level="WARNING", **kwargs):
+        super().__init__(detector_id=detector_id, name=name, always_range=always_range, log_level=log_level)
         self._logger.debug("Creating sensor object using options: {}".format(sensor_settings))
         if sensor_type == 'VL53L1X':
             self._logger.debug("Setting up VL53L1X with sensor settings: {}".format(sensor_settings))
@@ -309,9 +318,10 @@ class Longitudinal(SingleDetector):
     """
     Detectors that read in the same direction as vehicle movement.
     """
-    def __init__(self, detector_id, name, error_margin, sensor_type, sensor_settings, log_level="WARNING"):
+    def __init__(self, detector_id, name, error_margin, sensor_type, sensor_settings,
+                 always_range=False, log_level="WARNING"):
         super().__init__(detector_id=detector_id, name=name, error_margin=error_margin, sensor_type=sensor_type,
-                         sensor_settings=sensor_settings, log_level=log_level)
+                         sensor_settings=sensor_settings, always_range=always_range, log_level=log_level)
         # Required properties. These are checked by the check_ready decorator function to see if they're not None.
         # Once all required properties are not None, the object is set to ready. Doesn't check for values being
         # *correct*.
@@ -556,9 +566,9 @@ class Lateral(SingleDetector):
     """
     Detector which reads perpendicular to the motion of the vehicle.
     """
-    def __init__(self, detector_id, name, sensor_type, sensor_settings, log_level="WARNING"):
+    def __init__(self, detector_id, name, sensor_type, sensor_settings, always_range=False, log_level="WARNING"):
         super().__init__(detector_id=detector_id, name=name, sensor_type=sensor_type, sensor_settings=sensor_settings,
-                         log_level=log_level)
+                         always_range=always_range, log_level=log_level)
         self._intercept = None
         self._required = ['side', 'spread_ok', 'spread_warn']
         self._side = None
@@ -567,22 +577,34 @@ class Lateral(SingleDetector):
         self._limit = None
         self._bay_obj = None
 
-    # Method to get the raw sensor reading. This is used to report upward for HA extended attributes.
     @property
-    @read_if_stale
     def value_raw(self):
-        if isinstance(self._history[0][0], Quantity):
-            return self._history[0][0]
-        elif isinstance(self._history[0][0], CobraBay.exceptions.SensorException):
-            # If the sensor has already errored, raise that.
-            raise self._history[0][0]
+        """
+        Get the reading directly from the sensor.
+
+        :return:
+        """
+        # If the sensor isn't set to ranging, say so and quit.
+        if self._sensor_obj.status != 'ranging':
+            return SENSTATE_NOTRANGING
         else:
-            # Anything else, treat it as the sensor returning no reading.
-            return DETECTOR_NOREADING
+            return self._sensor_obj.range
+        #
+        #
+        #
+        # if isinstance(self._history[0][0], Quantity):
+        #     return self._history[0][0]
+        # elif isinstance(self._history[0][0], CobraBay.exceptions.SensorException):
+        #     # If the sensor has already errored, raise that.
+        #     raise self._history[0][0]
+        # else:
+        #     # Anything else, treat it as the sensor returning no reading.
+        #     return DETECTOR_NOREADING
 
     @property
-    @read_if_stale
     def quality(self):
+        # Read the value once. This prevents repeated hits or changing values during evaluation.
+        current_value = self.value
         self._logger.debug("Assessing quality for value: {}".format(self.value))
         # Process quality if we get a quantity from the Detector.
         if isinstance(self.value, Quantity):

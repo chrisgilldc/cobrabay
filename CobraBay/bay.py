@@ -439,13 +439,18 @@ class CBBay:
 
     # Traverse the detectors dict, activate everything that needs activating.
     def _detector_state(self, target_status):
+        """
+        Set all of the Bay's detectors at once.
+        :param target_status: Status to set the detectors to.
+        :return: None
+        """
         self._logger.info("{} - Starting detector state set.".format(time.monotonic()))
         if target_status in (SENSTATE_DISABLED, SENSTATE_ENABLED, SENSTATE_RANGING):
             # self._logger.debug("Traversing detectors to set status to '{}'".format(target_status))
             # Traverse the dict looking for detectors that need activation.
             for detector in self._detectors:
                 self._logger.info("{} - Setting detector {}".format(time.monotonic(), detector))
-                # self._logger.debug("Changing detector {}".format(detector))
+                self._logger.debug("Changing detector {}".format(detector))
                 self._detectors[detector].status = target_status
                 self._logger.info("{} - Set complete.".format(time.monotonic()))
         else:
