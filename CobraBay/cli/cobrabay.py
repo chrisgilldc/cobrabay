@@ -15,6 +15,7 @@ from logging.handlers import WatchedFileHandler
 from pid import PidFile
 from CobraBay.datatypes import ENVOPTIONS
 
+
 def main():
     print("CobraBay Parking System - {}".format(CobraBay.__version__))
     print("Running as '{}'".format(pwd.getpwuid(os.getuid()).pw_name))
@@ -29,7 +30,7 @@ def main():
     parser.add_argument("-ld", "--logdir", default=".", help="Directory to write logs to.")
     parser.add_argument("-lf", "--logfile", default="./cobrabay.log", help="Log file name to write")
     parser.add_argument("-ll", "--loglevel", help="General logging level. More fine-grained control "
-                                                                      "in config file.")
+                                                  "in config file.")
     args = parser.parse_args()
 
     # Validate the environment options.
@@ -70,7 +71,7 @@ def main():
 
             # Initialize the system
             master_logger.info("Initializing...")
-            cb = CobraBay.CBCore(config_obj=cbconfig,envoptions=environment)
+            cb = CobraBay.CBCore(config_obj=cbconfig, envoptions=environment)
 
             # Start.
             master_logger.info("Initialization complete. Operation start.")
@@ -79,7 +80,7 @@ def main():
         print("Cannot start, already running!")
 
 
-def _validate_environment(input_base, 
+def _validate_environment(input_base,
                           input_rundir,
                           input_configdir,
                           input_configfile,
@@ -188,6 +189,7 @@ def _validate_environment(input_base,
     )
 
     return valid_environment
+
 
 if __name__ == "__main__":
     sys.exit(main())

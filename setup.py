@@ -11,8 +11,8 @@ setup(
     include_package_data=True,
     entry_points={
         "console_scripts": [
-            "CobraBay = CobraBay.cli.main:main",
-            "cbsensortest = CobraBay.cli.sensor_test:main"
+            "cobrabay = CobraBay.cli.cobrabay:main",
+            "cbsensormgr = CobraBay.cli.cbsensormgr:main"
         ]
     }
 )

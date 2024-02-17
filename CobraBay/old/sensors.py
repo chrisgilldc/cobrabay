@@ -27,7 +27,7 @@ class BaseSensor:
         """
         Base class for Sensors.
 
-        :param sensor_name:
+        :param sensor_name:skeleton.py
         :param parent_logger: Parent logger to attach to.
         :type parent_logger: logger
         :param log_level: If no parent logger provided, log level of the new logger to create.
@@ -398,7 +398,7 @@ class CB_VL53L1X(I2CSensor):
             self._logger.error("Could not enable sensor after {} attempts. Marking as faulty.".
                                format(self._enable_attempt_counter))
             self._fault = True
-            raise CobraBay.exceptions.SensorException
+            raise IOError("Could not enable sensor.")
         else:
             self._logger.warning("Could not enable sensor on attempt {}. Disabling and retrying.".
                                  format(self._enable_attempt_counter))
@@ -473,7 +473,6 @@ class CB_VL53L1X(I2CSensor):
             else:
                 reading = self._recoverable_reading()
                 self._sensor_obj.clear_interrupt()
-
             # else:
             if reading is None:
                 # The Adafruit VL53L1X wraps up all invalid statuses with a 'None' return. See
@@ -738,7 +737,7 @@ class TFMini(SerialSensor):
             elif reading.status == 'Strong':
                 return CobraBay.const.SENSOR_VALUE_STRONG
             else:
-                raise CobraBay.exceptions.SensorException("TFMini sensor '{}' had unexpected reading '{}'".
+                raise IOError("TFMini sensor '{}' had unexpected reading '{}'".
                                                           format(self._name, reading))
 
     # The clustered read method requires the sensor to be returning a consistent result to return.

@@ -11,6 +11,8 @@ import importlib.resources
 from datetime import datetime
 from CobraBay.datatypes import CBValidation, ENVOPTIONS_EMPTY
 
+## TODO: Rework config so sensor manager can run separately.
+
 # Subclass Validator to add custom rules, maybe types.
 class CBValidator(cerberus.Validator):
     types_mapping = cerberus.Validator.types_mapping.copy()

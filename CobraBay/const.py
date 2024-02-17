@@ -3,6 +3,7 @@
 ## General constants. Multiple types of objects need these.
 GEN_UNKNOWN = 'unknown'
 GEN_UNAVAILABLE = 'unavailable'
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 ## Bay States
 BAYSTATE_DOCKING = 'docking'
@@ -31,11 +32,9 @@ SENSTATE_ENABLED = 'enabled'
 SENSTATE_RANGING = 'ranging'
 SENSTATE_NOTRANGING = 'not_ranging'
 
-## Sensor response codes
-SENRESP_OK = 'ok'
-
 # Non-Quantity values the sensor can be in without
 SENSOR_VALUE_OK = 'ok'
+SENSOR_VALUE_INR = 'inr'  ## Interrupt Not Ready. IE: sensor wasn't ready to read.
 SENSOR_VALUE_WEAK = 'weak'
 SENSOR_VALUE_STRONG = 'strong'
 SENSOR_VALUE_FLOOD = 'flood'

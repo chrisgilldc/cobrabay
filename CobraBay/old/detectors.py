@@ -57,12 +57,12 @@ def use_value_cache(func):
             if time_delta < sensor_timing:  # If not enough time has passed, send back the most recent reading.
                 value = self._history[0][0]
             else:
-                value = self._sensor_obj.range
+                value = self._sensor_obj.reading
                 # Add value to the history and truncate history to ten records.
                 self._history.insert(0, value)
                 self._history = self._history[:10]
         else:
-            value = self._sensor_obj.range
+            value = self._sensor_obj.reading
         # Send whichever value it is into the function.
         return func(self, value)
 
@@ -92,7 +92,7 @@ def read_if_stale(func):
         # If flag is set, read the sensor and put its value into the history.
         if read_sensor:
             try:
-                value = self._sensor_obj.range
+                value = self._sensor_obj.reading
                 self._logger.debug("Triggered sensor reading. Got: {} ({})".format(value, type(value)))
             except CobraBay.exceptions.SensorException as e:
                 raise
@@ -625,11 +625,11 @@ class Lateral(SingleDetector):
         # Check for interception. If this is enabled, we stomp over everything else.
         if self.attached_bay is not None and self.intercept is not None:
             self._logger.debug("Evaluating for interception.")
-            lv = self.attached_bay.range.value_raw
+            lv = self.attached_bay.reading.value_raw
             try:
                 if lv > self.intercept:
                     self._logger.debug("Reported range '{}' greater than intercept '{}'. Not intercepted.".format(
-                        self.attached_bay.range.value, self.intercept
+                        self.attached_bay.reading.value, self.intercept
                     ))
                     qv = DETECTOR_NOINTERCEPT
             except ValueError:

@@ -7,7 +7,9 @@ import board
 import busio
 from time import sleep
 from datetime import timedelta
-import CobraBay.exceptions
+import logging
+import CobraBay.const
+
 
 # General purpose converter.
 class Convertomatic:
@@ -47,7 +49,9 @@ class Convertomatic:
                 output = input_value
             # Anything else is out of left field, raise an error.
             else:
-                raise ValueError("'{}' has unsupported dimensionality '{}' and/or units of '{}'.".format(input_value, input_value.dimensionality, input_value.units))
+                raise ValueError("'{}' has unsupported dimensionality '{}' and/or units of '{}'.".format(input_value,
+                                                                                                         input_value.dimensionality,
+                                                                                                         input_value.units))
             # If still a Quantity (ie: Not a string), take the magnitude, round and output as float.
             if isinstance(output, Quantity):
                 output = round(output.magnitude, 2)
@@ -65,7 +69,7 @@ class Convertomatic:
         elif isinstance(input_value, bool):
             result = str(input_value).lower()
         # Convert sensor warning exceptions....
-        elif isinstance(input_value, CobraBay.exceptions.SensorException):
+        elif isinstance(input_value, IOError):
             result = "sensor_error"
         elif isinstance(input_value, BaseException):
             print("Cannot convert {}: {}".format(type(input_value), str(input_value)))
@@ -115,7 +119,12 @@ def mqtt_message_search(input_value, element, value, extract=None):
                 return_values.append(matched_message[extract])
             return return_values
 
+
 def aw9523_reset(aw9523_obj):
+    """
+    Reset all pins on an AW9523 to outputs and turn them off.
+    :param aw9523_obj: AW9523
+    """
     for pin in range(15):
         pin_obj = aw9523_obj.get_pin(pin)
         pin_obj.switch_to_output()
@@ -135,3 +144,30 @@ def scan_i2c():
     sleep(2)
     i2c.unlock()
     return found_addresses
+
+
+def default_logger(name, parent_logger=None, log_level="WARNING"):
+    """
+    General
+    :param name: Name to be logging as.
+    :type name: str
+    :param parent_logger: Logger to make a child logger of.
+    :type parent_logger: logging.Logger or None
+    :param log_level: Level to log at, defaults to WARNING.
+    :type log_level: str
+    :return: logging.Logger
+    """
+
+    if parent_logger is None:
+        # If no parent is given, create a direct stream logger.
+        the_logger = logging.getLogger(name)
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(logging.Formatter(CobraBay.const.LOG_FORMAT))
+        console_handler.setLevel(log_level)
+        the_logger.addHandler(console_handler)
+        the_logger.setLevel(log_level)
+    else:
+        the_logger = parent_logger.getChild(name)
+        the_logger.setLevel(log_level)
+
+    return the_logger

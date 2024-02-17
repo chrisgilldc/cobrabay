@@ -286,8 +286,8 @@ class CBDisplay:
         ## Center area, the range number.
         self._logger.debug("Compositing range placard...")
         range_layer = self._placard_range(
-            bay_obj.range.value,
-            bay_obj.range.quality,
+            bay_obj.reading.value,
+            bay_obj.reading.quality,
             bay_obj.state
         )
         final_image = Image.alpha_composite(final_image, range_layer)
@@ -299,7 +299,7 @@ class CBDisplay:
 
                 final_image = Image.alpha_composite(final_image,
                                                     self._strobe(
-                                                        range_quality=bay_obj.range.quality,
+                                                        range_quality=bay_obj.reading.quality,
                                                         range_pct=bay_obj.range_pct))
             elif self._bottom_box.lower() == 'progress':
                 self._logger.debug("Compositing in progress for bottom box.")

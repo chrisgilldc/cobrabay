@@ -1,5 +1,5 @@
 ####
-# Cobra Bay - Main
+# Cobra Bay - Main Objects
 ####
 
 import logging
@@ -8,9 +8,9 @@ import atexit
 from pprint import pformat
 import CobraBay
 import sys
-#import yappi
 from datetime import datetime
 import pathlib
+
 
 class CBCore:
     def __init__(self, config_obj, envoptions):
@@ -45,7 +45,8 @@ class CBCore:
 
         self._logger.setLevel(logging.DEBUG)
         if envoptions.loglevel is not None:
-            self._logger.warning("Based on command line options, setting core logger to '{}'".format(envoptions.loglevel))
+            self._logger.warning(
+                "Based on command line options, setting core logger to '{}'".format(envoptions.loglevel))
             self._logger.setLevel(envoptions.loglevel)
 
         if not isinstance(config_obj, CobraBay.CBConfig):
@@ -202,7 +203,7 @@ class CBCore:
             self._logger.debug("{} ({})".format(self._bays[bay_id].vector, type(self._bays[bay_id].vector)))
             while (self._bays[bay_id].vector.direction in (CobraBay.const.DIR_STILL, CobraBay.const.GEN_UNKNOWN) and
                    self._bays[bay_id].state == CobraBay.const.BAYSTATE_UNDOCKING):
-                self._display.show(mode='message',message="UNDOCK", color="orange", icons=False)
+                self._display.show(mode='message', message="UNDOCK", color="orange", icons=False)
                 # Timeout and go back to ready if the vehicle hasn't moved by the timeout.
                 # Kids are probably running around.
                 self._bays[bay_id].check_timer()
@@ -300,7 +301,7 @@ class CBCore:
             detector_config = self._active_config.detector(detector_id, 'lateral')
             self._logger.debug("Using settings: {}".format(detector_config))
             return_dict[detector_id] = CobraBay.detectors.Lateral(**detector_config)
-        self._logger.debug("VL53LX instances: {}".format(len(CobraBay.sensors.CB_VL53L1X.instances)))
+        self._logger.debug("VL53LX instances: {}".format(len(CobraBay.sensors.CBVL53L1X.instances)))
         return return_dict
 
     def _setup_triggers(self):
@@ -354,7 +355,8 @@ class CBCore:
                     try:
                         self._bays[trigger_obj.bay_id].register_trigger(trigger_obj)
                     except KeyError:
-                        self._logger.error("Cannot register Bay Command trigger for non-existent Bay ID '{}'".format(trigger_obj.bay_id))
+                        self._logger.error("Cannot register Bay Command trigger for non-existent Bay ID '{}'".format(
+                            trigger_obj.bay_id))
                     else:
                         # Register with the network.
                         self._network.register_trigger(trigger_obj)
