@@ -14,7 +14,8 @@ from logging.handlers import WatchedFileHandler
 # from collections import namedtuple
 from pid import PidFile
 from CobraBay.datatypes import ENVOPTIONS
-
+# from Queue import Empty
+from multiprocessing import Queue, Process
 
 def main():
     print("CobraBay Parking System - {}".format(CobraBay.__version__))
@@ -58,12 +59,12 @@ def main():
             console_handler = logging.StreamHandler()
             console_handler.setLevel(logging.DEBUG)
             master_logger.addHandler(console_handler)
-
-            master_logger.info("Running as PID {}".format(p.pid))
+            master_logger.info("Main process running as PID {}".format(p.pid))
 
             # Create a CobraBay config object.
             try:
-                cbconfig = CobraBay.CBConfig(config_file=environment.configfile, environment=environment)
+                coreconfig = CobraBay.config.CBCoreConfig(config_file=environment.configfile, environment=environment)
+                sensorconfig = CobraBay.config.CBSMConfig(config_file=environment.configfile, environment=environment)
             except BaseException as e:
                 # Relying on the config module to log details on *what* the error is.
                 print("Configuration had errors. Cannot continue!")
@@ -71,7 +72,20 @@ def main():
 
             # Initialize the system
             master_logger.info("Initializing...")
-            cb = CobraBay.CBCore(config_obj=cbconfig, envoptions=environment)
+            # Create the queues.
+            # Data flow.
+            q_cbsmdata = Queue()
+            # Control
+            q_cbsmcontrol = Queue()
+
+            # Create the core system core, which will run in the main process.
+            cb = CobraBay.CBCore(config_obj=coreconfig, envoptions=environment, q_cbsmdata=q_cbsmdata,
+                                 q_cbsmcontrol=q_cbsmcontrol)
+
+            # Start the Sensor Manager process.
+            # cbsm_process = Process(target=CobraBay.sensormgr.CBSensorMgr, args=(sensorconfig, q_cbsmdata=q_cbsmdata, q_cbsmcontrol=q_cbsmcontrol))
+            # cbsm_process.start()
+            
 
             # Start.
             master_logger.info("Initialization complete. Operation start.")

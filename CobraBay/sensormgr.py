@@ -19,7 +19,7 @@ class CBSensorMgr:
     """
 
     def __init__(self, sensor_config, generous_recovery=True, name=None, parent_logger=None,
-                 log_level="WARNING"):
+                 log_level="WARNING", q_cbsmdata=None, q_cbsmcontrol=None):
         """
         Create a Sensor Manager instance.
 

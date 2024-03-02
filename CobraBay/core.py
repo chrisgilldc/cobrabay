@@ -13,7 +13,7 @@ import pathlib
 
 
 class CBCore:
-    def __init__(self, config_obj, envoptions):
+    def __init__(self, config_obj, envoptions, q_cbsmdata=None, q_cbsmcontrol=None):
         """
         Cobra Bay Core Class Initializer.
 
