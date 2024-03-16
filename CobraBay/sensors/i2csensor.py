@@ -16,9 +16,11 @@ class I2CSensor(BaseSensor):
     """
     aw9523_boards = {}
 
-    def __init__(self, i2c_address, max_retries=0, i2c_bus=1, pin_scl=None, pin_sda=None, parent_logger=None, log_level="WARNING"):
+    def __init__(self, name, i2c_address, max_retries=0, i2c_bus=1, pin_scl=None, pin_sda=None, parent_logger=None, log_level="WARNING"):
         """
 
+        :param name: Name of the sensor
+        :type name: str
         :param i2c_address: Address of the sensor.
         :type i2c_address: int or str(hex)
         :param i2c_bus: I2C bus on the Pi to use. If you wish to specify SCL and SDA pins, set this to None.
@@ -33,11 +35,11 @@ class I2CSensor(BaseSensor):
         :type log_level: str
         """
         # Define our own name based on class name, bus and address.
-        self._name = "{}-{}-{}".format(type(self).__name__, i2c_bus, hex(i2c_address))
+        id = "{}-{}-{}".format(type(self).__name__, i2c_bus, hex(i2c_address))
         # Do base sensor initialization
 
         try:
-            super().__init__(name=self._name, max_retries=max_retries, parent_logger=parent_logger, log_level=log_level)
+            super().__init__(name=name, id=id, max_retries=max_retries, parent_logger=parent_logger, log_level=log_level)
         except ValueError:
             raise
 

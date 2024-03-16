@@ -2,9 +2,11 @@
 CobraBay - Configuration Handling
 """
 
-from .configs import CBCoreConfig, CBSMConfig
+from .validator import CBValidator
+from .configs import CBCoreConfig
+
 
 all = [
     'CBCoreConfig',
-    'CBSMConfig'
+    'CBValidator'
 ]

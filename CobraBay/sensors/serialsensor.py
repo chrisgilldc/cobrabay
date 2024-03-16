@@ -15,8 +15,9 @@ class SerialSensor(BaseSensor):
     Class for all common elements of Serial-based sensors.
     """
 
-    def __init__(self, port, baud, parent_logger=None, log_level="WARNING"):
+    def __init__(self, name, port, baud, parent_logger=None, log_level="WARNING"):
         """
+        :type name: str
         :type port: str
         :type baud: int
         :type parent_logger: str
@@ -25,11 +26,11 @@ class SerialSensor(BaseSensor):
         :param log_level: If no parent logger provided, log level of the new logger to create.
         :type log_level: str
         """
-        # Define our own name, based on type name and port.
-        self._name = "{}-{}".format(type(self).__name__, port)
+        # Define ID based on port. Pass to BaseSensor to set.
+        id = "{}-{}".format(type(self).__name__, port)
         # To base sensor initialization.
         try:
-            super().__init__(name=self._name, parent_logger=parent_logger, log_level=log_level)
+            super().__init__(name=name, id=id, parent_logger=parent_logger, log_level=log_level)
         except ValueError:
             raise
         self._logger.info("Initializing sensor...")

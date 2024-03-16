@@ -29,10 +29,12 @@ class CBVL53L1X(I2CSensor):
 
     instances = WeakSet()
 
-    def __init__(self, i2c_address, enable_board, enable_pin, i2c_bus=1, pin_scl=None, pin_sda=None,
+    def __init__(self, name, i2c_address, enable_board, enable_pin, i2c_bus=1, pin_scl=None, pin_sda=None,
                  timing=200, always_range=False, distance_mode='long', max_retries=0,
                  parent_logger=None, log_level="WARNING"):
         """
+        :param name: Name of this sensor.
+        :type name: str
         :type i2c_address: int
         :type enable_board: int
         :type enable_pin: int
@@ -51,8 +53,9 @@ class CBVL53L1X(I2CSensor):
         :param log_level: If no parent logger provided, log level of the new logger to create.
         :type log_level: str
         """
+
         try:
-            super().__init__(i2c_address=i2c_address, i2c_bus=i2c_bus, pin_scl=pin_scl, pin_sda=pin_sda,
+            super().__init__(name=name, i2c_address=i2c_address, i2c_bus=i2c_bus, pin_scl=pin_scl, pin_sda=pin_sda,
                              max_retries=max_retries, parent_logger=parent_logger, log_level=log_level)
         except ValueError:
             raise
@@ -62,10 +65,12 @@ class CBVL53L1X(I2CSensor):
         self._ranging = False  # Ranging flag. The library doesn't actually store this!
         self._fault = False  # Sensor fault state.
         self._status = 'disabled'  # Requested state of the sensor externally.
-        self._distance_mode = distance_mode  # Distance mode.
+
+
 
         # Save the input parameters.
         self.timing_budget = timing  # Timing budget
+        self._distance_mode = distance_mode  # Distance mode.
         self.enable_board = enable_board  # Board where the enable pin is.
         self.enable_pin = enable_pin  # Pin for enabling.
         self._enable_attempt_counter = 1
@@ -308,7 +313,9 @@ class CBVL53L1X(I2CSensor):
         """
 
         if not isinstance(timing_input, Quantity):
-            timing_input = timing_input * self._ureg.milliseconds
+            print("Timing input is '{}', converting to quantity.".format(timing_input))
+            timing_input = Quantity(timing_input)
+            print("Timing is now '{}' ({})".format(timing_input, type(timing_input)))
         if timing_input.magnitude not in (20, 33, 50, 100, 200, 500):
             raise ValueError("Requested timing budget {} not valid. "
                              "Must be one of: 20, 33, 50, 100, 200 or 500 ms".format(input))

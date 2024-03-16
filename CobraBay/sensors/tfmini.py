@@ -17,12 +17,16 @@ import CobraBay.const
 from numpy import datetime64
 
 class TFMini(SerialSensor):
-    def __init__(self, port, baud, parent_logger=None, clustering=1, log_level="WARNING"):
+    def __init__(self, name, port, baud, error_margin=None, parent_logger=None, clustering=1, log_level="WARNING"):
         """
         Sensor for TFMini
 
+        :param name: Name of this sensor. Should be unique.
+        :type name: str
         :param port: Serial port
         :type port: str OR Path
+        :param error_margin: Known variability for the sensor reading-to-reading.
+        :type error_margin: Quantity
         :param baud: Bitrate for the sensor.
         :type baud: int
         :param parent_logger: Parent logger to attach to.
@@ -33,7 +37,7 @@ class TFMini(SerialSensor):
         :type log_level: str
         """
         try:
-            super().__init__(port=port, baud=baud, parent_logger=parent_logger, log_level=log_level)
+            super().__init__(name=name, port=port, baud=baud, parent_logger=parent_logger, log_level=log_level)
         except ValueError:
             raise
 
@@ -41,6 +45,11 @@ class TFMini(SerialSensor):
             'max_range': Quantity('12m'),
             'min_range': Quantity('0.3m')
         }
+
+        if error_margin is None:
+            self._error_margin = Quantity("2cm")
+        else:
+            self._error_margin = error_margin
 
         # Cluster reading setting.
         self._clustering = clustering
