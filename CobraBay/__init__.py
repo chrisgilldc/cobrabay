@@ -2,18 +2,21 @@
 Cobra Bay
 """
 
-# Import constants
+# Configuration processors
+import CobraBay.config
+# Constants
 import CobraBay.const
-# Import datatypes
+# Datatypes
 import CobraBay.datatypes
-# import CobraBay.sensors
+# Sensor objects
+import CobraBay.sensors
+# Triggers
 import CobraBay.triggers
 
 # Unitary Classes
 from .bay import CBBay
 from .display import CBDisplay
 from .core import CBCore
-# from .config import CBConfig
 from .network import CBNetwork
 from .sensormgr import CBSensorMgr
 from .systemhw import CBPiStatus

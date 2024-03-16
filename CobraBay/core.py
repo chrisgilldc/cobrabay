@@ -49,7 +49,7 @@ class CBCore:
                 "Based on command line options, setting core logger to '{}'".format(envoptions.loglevel))
             self._logger.setLevel(envoptions.loglevel)
 
-        if not isinstance(config_obj, CobraBay.CBConfig):
+        if not isinstance(config_obj, CobraBay.config.CBCoreConfig):
             raise TypeError("CobraBay core must be passed a CobraBay Config object (CBConfig).")
         else:
             # Save the passed CBConfig object.
@@ -81,7 +81,7 @@ class CBCore:
 
         self._logger.info("Creating detectors...")
         # Create the detectors.
-        self._detectors = self._setup_detectors()
+        self._detectors = self._setup_sensors()
         self._logger.debug("Detectors created: {}".format(pformat(self._detectors)))
 
         # Create master bay object for defined docking bay
@@ -184,21 +184,10 @@ class CBCore:
 
     # Start sensors and display to guide parking.
     def _motion(self, bay_id):
-        # Convert command to a state. Should have planned this better, but didn't.
-        # if cmd == 'dock':
-        #     direction = "docking"
-        # elif cmd == 'undock':
-        #     direction = "undocking"
-        # else:
-        #     raise ValueError("Motion command '{}' not valid.".format(cmd))
-        #
         self._logger.info('Beginning {} on bay {}.'.format(self._bays[bay_id].state, bay_id))
 
-        # # Set the bay to the proper state.
-        # self._bays[bay_id].state = direction
-        #
-        # Holding loop for undocking. While motion isn't detected, show the ready message. For docking, we go straight
-        # to motion.
+        # If the bay is in UNDOCKING, show 'UNDOCKING' on the display until there is motion. If there is no motion by
+        # the undock timeout, return to READY.
         if self._bays[bay_id].state == CobraBay.const.BAYSTATE_UNDOCKING:
             self._logger.debug("{} ({})".format(self._bays[bay_id].vector, type(self._bays[bay_id].vector)))
             while (self._bays[bay_id].vector.direction in (CobraBay.const.DIR_STILL, CobraBay.const.GEN_UNKNOWN) and
@@ -227,58 +216,41 @@ class CBCore:
             self._trigger_check()
         self._logger.info("Bay state changed to {}. Returning to idle.".format(self._bays[bay_id].state))
 
-    def undock(self):
-        self._logger.info('CobraBay: Undock not yet implemented.')
-        return
-
     def system_exit(self, unexpected=True):
-        self.system_state = 'shutdown'
+        """
+        Perform system shutdown. Clean up sensors, send status to MQTT.
+        :param unexpected:
+        """
+        # Set system state to offline. Network module will pull this and send it to MQTT.
+        self.system_state = 'offline'
         if unexpected:
             self._logger.critical("Shutting down due to unexpected error.")
         else:
             self._logger.critical("Performing requested shutdown.")
-        # Wipe any previous messages. They don't matter now, we're going away!
-        self._outbound_messages = []
         # Stop the ranging and close all the open sensors.
         try:
             for bay in self._bays:
-                self._logger.info("Shutting down bay {}".format(bay))
-                self._bays[bay].shutdown()
-            for detector in self._detectors:
-                self._logger.info("Disabling detector: {}".format(detector))
-                self._detectors[detector].status = 'disabled'
+                try:
+                    self._logger.info("Shutting down bay {}".format(bay))
+                    self._bays[bay].shutdown()
+                except:
+                    self._logger.critical("Could not shutdown bay '{}'".format(bay))
         except AttributeError:
             # Must be exiting before bays were defined. That's okay.
             pass
-        # Queue up outbound messages for shutdown.
-        # Marking the system as offline *should* make everything else unavailable as well, unless availability
-        # was set up incorrectly.
-        self._outbound_messages.append(
-            dict(
-                topic_type='system',
-                topic='device_connectivity',
-                message='Offline',
-                repeat=True
-            )
-        )
-        # Have the display show 'offline', then grab that and send it to the MQTT broker. This will be the image
-        # remaining when we go offline.
+        # Have the display show 'offline'. This will put it in the buffer for the network module to grab and send to
+        # MQTT as well.
         try:
             self._display.show(system_status={'network': False, 'mqtt': False}, mode='message', message="OFFLINE",
                                icons=False)
-            # Add image to the queue.
-            self._outbound_messages.append(
-                {'topic_type': 'system',
-                 'topic': 'display',
-                 'message': self._display.current, 'repeat': True})
         except AttributeError:
-            pass
-        # Call the network once. We'll ignore any commands we get.
+            self._logger.error("Could not set final display image.")
+        # Poll the network module which will send the last messages. We don't care about the final inbound messages.
         try:
             self._logger.info("Sending offline MQTT message.")
-            self._network_handler()
+            inbound_commands = self._network.poll()
         except AttributeError:
-            pass
+            self._logger.error("Could not send final MQTT messages.")
         self._logger.critical("Terminated.")
         if unexpected:
             sys.exit(1)
@@ -286,22 +258,35 @@ class CBCore:
             sys.exit(0)
 
     # Method to set up the detectors based on the configuration.
-    def _setup_detectors(self):
+    def _setup_sensors(self):
         return_dict = {}
-        # Create detectors with the right type.
-        self._logger.debug("Creating longitudinal detectors.")
-        for detector_id in self._active_config.detectors_longitudinal:
-            self._logger.info("Creating longitudinal detector: {}".format(detector_id))
-            detector_config = self._active_config.detector(detector_id, 'longitudinal')
-            self._logger.debug("Using settings: {}".format(detector_config))
-            return_dict[detector_id] = CobraBay.detectors.Longitudinal(**detector_config)
+        # Create the correct sensors.
+        self._logger.debug("Creating sensors.")
+        for sensor_id  in self._active_config.sensors:
+            self._logger.debug("Creating sensor: {}".format(sensor_id))
+            sensor_config = self._active_config.sensor(sensor_id)
+            self._logger.debug("Using settings: {}".format(sensor_config))
+            # Create the correct type of sensor object based on defined type.
+            if sensor_config['hw_type'] == 'VL53L1X':
+                # return_dict[sensor_id] = CobraBay.sensors.CBVL53L1X(
+                #     name=sensor_config['name'], i2c_address=sensor_config['hw_settings']['i2c_address'],
+                #     i2c_bus=sensor_config['hw_settings']['i2c_bus'],
+                #     enable_board=sensor_config['hw_settings']['enable_board'],
+                #     enable_pin=sensor_config['hw_settings']['enable_pin'],
+                #     timing=sensor_config['hw_settings']['timing'], always_range=sensor_config['always_range'],
+                #     distance_mode=sensor_config['hw_settings']['distance_mode'],
+                #     parent_logger=self._logger,
+                #     log_level=sensor_config['log_level'])
+                return_dict[sensor_id] = CobraBay.sensors.CBVL53L1X(name=sensor_config['name'],
+                                                                    **sensor_config['hw_settings'])
+            elif sensor_config['hw_type'] == 'TFMini':
+                return_dict[sensor_id] = CobraBay.sensors.TFMini(name=sensor_config['name'],
+                                                                 **sensor_config['hw_settings'])
 
-        for detector_id in self._active_config.detectors_lateral:
-            self._logger.info("Creating lateral detector: {}".format(detector_id))
-            detector_config = self._active_config.detector(detector_id, 'lateral')
-            self._logger.debug("Using settings: {}".format(detector_config))
-            return_dict[detector_id] = CobraBay.detectors.Lateral(**detector_config)
-        self._logger.debug("VL53LX instances: {}".format(len(CobraBay.sensors.CBVL53L1X.instances)))
+            else:
+                self._logger.error("Sensor '{}' has unknown type '{}'. Cannot configure!".
+                                   format(sensor_id, sensor_config['hw_type']))
+        # self._logger.debug("VL53LX instances: {}".format(len(CobraBay.sensors.CBVL53L1X.instances)))
         return return_dict
 
     def _setup_triggers(self):
