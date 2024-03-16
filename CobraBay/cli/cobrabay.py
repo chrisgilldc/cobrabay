@@ -64,7 +64,6 @@ def main():
             # Create a CobraBay config object.
             try:
                 coreconfig = CobraBay.config.CBCoreConfig(config_file=environment.configfile, environment=environment)
-                sensorconfig = CobraBay.config.CBSMConfig(config_file=environment.configfile, environment=environment)
             except BaseException as e:
                 # Relying on the config module to log details on *what* the error is.
                 print("Configuration had errors. Cannot continue!")
