@@ -263,7 +263,7 @@ class CBNetwork:
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
-    def poll(self):
+    def poll(self, status=None):
         # Set up the return data.
         return_data = {
             'online': self._iface_up(),  # Is the interface up.
