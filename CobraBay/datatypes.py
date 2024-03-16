@@ -10,8 +10,8 @@ from numpy import datetime64
 # Config Validation
 # CBValidation = namedtuple_untyped("CBValidation", ['valid', 'result'])
 class CBValidation(namedtuple_typed):
-    valid: str
-    result: bool
+    valid: bool
+    result: str
 
 
 # Define the environment options named tuple.
