@@ -11,10 +11,8 @@ pint~=0.23
 psutil~=5.9.8
 pyserial~=3.5
 PyYAML~=6.0.1
-rpi_bad_power~=0.1.0
+rpi_bad_power
 smbus2~=0.4.3
-
 rgbmatrix~=0.0.1
-
 numpy~=1.19.5
 setuptools~=52.0.0
