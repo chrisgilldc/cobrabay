@@ -15,13 +15,15 @@ class CBConfig:
     Configuration management for CobraBay.
     """
 
-    def __init__(self, config_file=None, auto_load=True, log_level="WARNING",
+    def __init__(self, config_file=None, schema=None, auto_load=False, log_level="WARNING",
                  environment=ENVOPTIONS_EMPTY):
         """
         Create a new config object.
 
         :param config_file: Config file to be attached to this object.
         :type: string *OR* Path object.
+        :param schema: Schema to use for validation
+        :type: schema object
         :param auto_load: Load and validate config file on init
         :type: bool
         :param log_level: Logging level for Configuration processing
@@ -30,7 +32,10 @@ class CBConfig:
         :type: ENVOPTIONS named tuple.
         """
         self._config = None
-        self._schema = None
+        if schema is None:
+            raise ValueError("Schema must be set!")
+        else:
+            self._schema = schema
         self._environment = environment
         self._logger = logging.getLogger("CobraBay").getChild("Config")
         if environment.loglevel is not None:
@@ -64,7 +69,7 @@ class CBConfig:
         try:
             validator_result = self._validator(staging_yaml)
         except BaseException as e:
-            self._logger.error("Could not validate config. Received error '{}'".format(e))
+            self._logger.error("Config processor '{}' could not validate. Received error '{}'".format(self.__class__, e))
             raise e
         else:
             # Possible for the config to be validate*able*, but not validate.
@@ -134,12 +139,12 @@ class CBConfig:
         # If a loglevel was set at the command line, that overrides everything else, return it.
         if self._environment.loglevel is not None:
             return self._environment.loglevel
-        if item_type == 'detector':
+        if item_type == 'sensor':
             try:
-                return self._config['system']['logging']['detector'][item_id]
+                return self._config['system']['logging']['sensor'][item_id]
             except KeyError:
                 # If no specific level, use the general detectors level.
-                return self._config['system']['logging']['detectors']
+                return self._config['system']['logging']['sensors']
         elif item_type == 'bay':
             try:
                 return self._config['system']['logging']['bay'][item_id]
@@ -200,6 +205,7 @@ class CBConfig:
         """
 
         # Create the main validator
+        self._logger.debug("Creating validator with schema '{}'".format(self._schema))
         mv = CBValidator(self._schema)
 
         try:
@@ -231,32 +237,31 @@ class CBConfig:
 
             # Because the 'oneof' options in the schema don't normalize, we need to go back in and normalize those.
             # Subvalidate detectors.
-            # sv = CBValidator()
-            # for direction in ('longitudinal', 'lateral'):
-            #     for detector_id in returnval['detectors'][direction]:
-            #         # Select the correct target schema based on the sensor type.
-            #         if returnval['detectors'][direction][detector_id]['sensor_type'] == 'VL53L1X':
-            #             target_schema = self.SCHEMA_SENSOR_VL53L1X
-            #         elif returnval['detectors'][direction][detector_id]['sensor_type'] == 'TFMini':
-            #             target_schema = self.SCHEMA_SENSOR_TFMINI
-            #         else:
-            #             # Trap unknown sensor types. This should never happen!
-            #             return CBValidation(False, "Incorrect sensor type during detector normalization '{}'".format(
-            #                 detector_id))
-            #
-            #         # Do it.
-            #         try:
-            #             validated_ds = sv.validated(
-            #                 returnval['detectors'][direction][detector_id]['sensor_settings'], target_schema)
-            #         except BaseException as e:
-            #             self._logger.error("Could not validate. '{}'".format(e))
-            #             return CBValidation(False, sv.errors)
-            #         if validated_ds is None:
-            #             return CBValidation(False, "During subvalidation of detector '{}', received errors '{}".
-            #                                 format(detector_id, sv.errors))
-            #         else:
-            #             # Merge the validated/normalized sensor settings into the main config.
-            #             returnval['detectors'][direction][detector_id]['sensor_settings'] = validated_ds
+            sv = CBValidator()
+            for sensor_name in returnval['sensors']:
+                # Select the correct target schema based on the sensor type.
+                if returnval['sensors'][sensor_name]['hw_type'] == 'VL53L1X':
+                    target_schema = CobraBay.config.schemas.SCHEMA_SENSOR_VL53L1X
+                elif returnval['sensors'][sensor_name]['hw_type'] == 'TFMini':
+                    target_schema = CobraBay.config.schemas.SCHEMA_SENSOR_TFMINI
+                else:
+                    # Trap unknown sensor types. This should never happen!
+                    return CBValidation(False, "Incorrect sensor type during detector normalization '{}'".format(
+                        sensor_name))
+
+                # Do it.
+                try:
+                    validated_ds = sv.validated(
+                        returnval['sensors'][sensor_name]['hw_settings'], target_schema)
+                except BaseException as e:
+                    self._logger.error("Could not validate. '{}'".format(e))
+                    return CBValidation(False, sv.errors)
+                if validated_ds is None:
+                    return CBValidation(False, "During subvalidation of detector '{}', received errors '{}".
+                                        format(sensor_name, sv.errors))
+                else:
+                    # Merge the validated/normalized sensor settings into the main config.
+                    returnval['sensors'][sensor_name]['hw_settings'] = validated_ds
 
             return CBValidation(True, returnval)
 
@@ -293,10 +298,8 @@ class CBConfig:
 
 class CBCoreConfig(CBConfig):
     def __init__(self, config_file=None, auto_load=True, log_level="WARNING", environment=ENVOPTIONS_EMPTY):
-        # Call the super init.
-        super().__init__(config_file, auto_load, log_level, environment)
-        # Set the schema based on our class.
-        self._schema = CobraBay.config.schemas.CB_CORE
+        # Call the super init with the schema set.
+        super().__init__(config_file, CobraBay.config.schemas.CB_CORE, auto_load, log_level, environment)
 
 
 
@@ -310,6 +313,14 @@ class CBCoreConfig(CBConfig):
         return list(self._config['bays'].keys())
 
     @property
+    def sensors(self):
+        """
+        All defined sensors
+        :return: list
+        """
+        return list(self._config['sensors'].keys())
+
+    @property
     def triggers(self):
         """
         All defined triggers
@@ -321,8 +332,6 @@ class CBCoreConfig(CBConfig):
     @property
     def config(self):
         return self._config
-
-
 
     def bay(self, bay_id):
         """
@@ -362,6 +371,19 @@ class CBCoreConfig(CBConfig):
             'mqtt_log_level': self._config['system']['logging']['mqtt']}
         return the_return
 
+    def sensor(self, sensor_name):
+        """
+        Retrieve configuration for a specific detector
+
+        :param sensor_name: ID of the requested detector.
+        :type sensor_name: str
+        :return: dict
+        """
+        return {'name': sensor_name,
+                **self._config['sensors'][sensor_name],
+                'log_level': self.get_loglevel(item_id=sensor_name, item_type='sensor')
+                }
+
     def trigger(self, trigger_id):
         """
         Retrieve configuration for a specific trigger.
@@ -387,9 +409,3 @@ class CBCoreConfig(CBConfig):
             'log_level': self.get_loglevel(item_id=trigger_id, item_type='trigger')
         }
 
-class CBSMConfig(CBConfig):
-    def __init__(self, config_file=None, auto_load=True, log_level="WARNING", environment=ENVOPTIONS_EMPTY):
-        # Call the super init.
-        super().__init__(config_file, auto_load, log_level, environment)
-        # Set the schema based on our class.
-        self._schema = CobraBay.config.schemas.SENSOR_MGR

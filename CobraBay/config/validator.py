@@ -29,10 +29,14 @@ class CBValidator(cerberus.Validator):
         if str(value.dimensionality) != constraint:
             self._error(field, "Not in proper dimension {}".format(constraint))
 
-    # Coercers. Apparently you can't pass parameters, so each unit needs it sown.
+    # Coercers. Apparently you can't pass parameters, so each unit needs its own.
     @staticmethod
     def _normalize_coerce_pint_seconds(value):
         return pint.Quantity(value).to('seconds')
+
+    @staticmethod
+    def _normalize_coerce_pint_ms(value):
+        return pint.Quantity(value).to('milliseconds')
 
     @staticmethod
     def _normalize_coerce_pint_cm(value):
