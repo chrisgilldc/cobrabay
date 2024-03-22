@@ -216,15 +216,15 @@ CB_CORE = {
                     }
                 },
                 'depth': {'type': 'quantity', 'coerce': 'pint_cm'},
+                'report_adjusted': {'type': 'boolean', 'default': True},
                 'longitudinal': {
                     'type': 'dict',
-                    'allow_unknown': True,
                     'schema': {
                         'defaults': {
                             'type': 'dict',
                             'schema': {
                                 'spread_park': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '2 in'},
-                                'offset': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '0 in'},
+                                'zero_point': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '0 in'},
                                 'pct_warn': {'type': 'number', 'min': 0, 'max': 100, 'default': 30},
                                 'pct_crit': {'type': 'number', 'min': 0, 'max': 100, 'default': 10}
                             }
@@ -234,8 +234,9 @@ CB_CORE = {
                             'schema': {
                                 'type': 'dict',
                                 'schema': {
+                                    'name': {'type': 'string', 'required': True},
                                     'spread_park': {'type': 'quantity', 'coerce': 'pint_cm'},
-                                    'offset': {'type': 'quantity', 'coerce': 'pint_cm'},
+                                    'zero_point': {'type': 'quantity', 'coerce': 'pint_cm'},
                                     'pct_warn': {'type': 'number', 'min': 0, 'max': 100},
                                     'pct_crit': {'type': 'number', 'min': 0, 'max': 100}
                                 }
@@ -250,7 +251,7 @@ CB_CORE = {
                         'defaults': {
                             'type': 'dict',
                             'schema': {
-                                'offset': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '0 in'},
+                                'zero_point': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '0 in'},
                                 'spread_ok': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '1 in'},
                                 'spread_warn': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '3 in'},
                                 'limit': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '96 in'},
@@ -262,19 +263,18 @@ CB_CORE = {
                             'schema': {
                                 'type': 'dict',
                                 'schema': {
-                                    'sensor': {'type': 'string', 'required': True},
-                                    'offset': {'type': 'quantity', 'coerce': 'pint_cm'},
+                                    'name': {'type': 'string', 'required': True},
+                                    'zero_point': {'type': 'quantity', 'coerce': 'pint_cm'},
                                     'spread_ok': {'type': 'quantity', 'coerce': 'pint_cm'},
                                     'spread_warn': {'type': 'quantity', 'coerce': 'pint_cm'},
                                     'limit': {'type': 'quantity', 'coerce': 'pint_cm'},
                                     'intercept': {'type': 'quantity', 'required': True, 'coerce': 'pint_cm'},
                                     'side': {'type': 'string', 'allowed': ['L', 'R']}
-                                },
-                                'default': {}
-                            }
+                                }
+                            },
+                            'default': {}
                         }
-                    },
-                    'default': {'defaults': {}, 'sensors': []}
+                    }
                 }
             }
         }
