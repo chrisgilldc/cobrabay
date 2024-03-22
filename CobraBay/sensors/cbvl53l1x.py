@@ -4,8 +4,9 @@
 #
 # VL53L1X range sensor, accessed via I2C. All sensors of this type default to address 0x28. When using multiple, they
 # must be enabled one at a time and configured to their correct address.
-
-
+import board
+import busio
+import digitalio
 # The I2CSensor class
 from CobraBay.sensors import I2CSensor
 # Required CobraBay datatypes
@@ -13,10 +14,10 @@ from CobraBay.datatypes import SensorResponse, SensorReading
 import CobraBay.util
 # Import WeakSet so we can track other instances.
 from weakref import WeakSet
-# AW9523 support for remote enable/disable support.
-from adafruit_aw9523 import AW9523
 # Core sensor library.
-from adafruit_vl53l1x import VL53L1X as AF_VL53L1X
+import adafruit_vl53l1x
+# IO Expander
+import adafruit_aw9523
 # General libraries
 from pint import Quantity
 from time import monotonic, monotonic_ns, sleep
@@ -29,21 +30,19 @@ class CBVL53L1X(I2CSensor):
 
     instances = WeakSet()
 
-    def __init__(self, name, i2c_address, enable_board, enable_pin, i2c_bus=1, pin_scl=None, pin_sda=None,
+    def __init__(self, name, i2c_address, enable_board, enable_pin, i2c_bus,
                  timing=200, always_range=False, distance_mode='long', max_retries=0,
                  parent_logger=None, log_level="WARNING"):
         """
         :param name: Name of this sensor.
         :type name: str
         :type i2c_address: int
-        :type enable_board: int
-        :type enable_pin: int
-        :param i2c_bus: I2C bus on the Pi to use. If you wish to specify SCL and SDA pins, set this to None.
-        :type i2c_bus: int
-        :param pin_scl: I2C Clock pin. Will be ignored if i2c_bus is anything other than None.
-        :type pin_scl: int
-        :param pin_sda: I2C Data pin. Will be ignored if i2c_bus is anything other than None.
-        :type pin_sda: int
+        :param enable_board: Board to use for enabling the sensor.
+        :type enable_board: int or adafruit_aw9523.AW9523
+        :param enable_pin: Pin to turn the sensor on and off.
+        :type enable_pin: int or str
+        :param i2c_bus: I2C bus object
+        :type i2c_bus: busio.I2C
         :param timing: Initial timing of the sensor.
         :type timing: int or Quantity('ms')
         :param max_retries: Maximum number of retries before the sensor is marked as in fault.
@@ -55,8 +54,8 @@ class CBVL53L1X(I2CSensor):
         """
 
         try:
-            super().__init__(name=name, i2c_address=i2c_address, i2c_bus=i2c_bus, pin_scl=pin_scl, pin_sda=pin_sda,
-                             max_retries=max_retries, parent_logger=parent_logger, log_level=log_level)
+            super().__init__(name=name, i2c_address=i2c_address, i2c_bus=i2c_bus, max_retries=max_retries,
+                             parent_logger=parent_logger, log_level=log_level)
         except ValueError:
             raise
 
@@ -65,30 +64,31 @@ class CBVL53L1X(I2CSensor):
         self._ranging = False  # Ranging flag. The library doesn't actually store this!
         self._fault = False  # Sensor fault state.
         self._status = 'disabled'  # Requested state of the sensor externally.
-
-
+        self._board = board
 
         # Save the input parameters.
         self.timing_budget = timing  # Timing budget
         self._distance_mode = distance_mode  # Distance mode.
-        self.enable_board = enable_board  # Board where the enable pin is.
+        self.enable_board = enable_board
         self.enable_pin = enable_pin  # Pin for enabling.
+        self._logger.debug("Saved enable pin: {}".format(self._enable_pin._pin))
         self._enable_attempt_counter = 1
 
         # Add self to instance list.
         CBVL53L1X.instances.add(self)
+
         # In principle, will use this in the future.
-        self._performance = {
-            'max_range': Quantity('4000mm'),
-            'min_range': Quantity('30mm')
-        }
+        # self._performance = {
+        #     'max_range': Quantity('4000mm'),
+        #     'min_range': Quantity('30mm')
+        # }
 
         # Enable the sensor.
         self.status = 'enabled'
         # Get a test reading.
         self.status = 'ranging'  # Start ranging.
         self.distance_mode = 'long'
-        test_range = self.reading()
+        test_range = self.reading(wait=True)
         self._logger.debug("Test reading: {} ({})".format(test_range, type(test_range)))
         if not always_range:
             self._logger.debug("Setting status back to enabled, stopping ranging.")
@@ -218,7 +218,6 @@ class CBVL53L1X(I2CSensor):
 
     @enable_pin.setter
     def enable_pin(self, enable_pin):
-        from digitalio import DigitalInOut
         # If enable_board is set to 0, then we try this on the Pi itself.
         if self.enable_board == 0:
             # Check to see if this is just a pin number.
@@ -227,40 +226,43 @@ class CBVL53L1X(I2CSensor):
             else:
                 pin_name = enable_pin
             try:
-                enable_pin_obj = DigitalInOut(getattr(self._board, pin_name))
+                enable_pin_obj = digitalio.DigitalInOut(getattr(self._board, pin_name))
             except:
                 raise
             else:
                 self._enable_pin = enable_pin_obj
-        else:
-            # Check to see if the AW9523 object has already been created.
-            # Use the key format "bus-addr"
-            awkey = str(self.i2c_bus) + "-" + str(self.enable_board)
-            if awkey not in self.__class__.aw9523_boards.keys():
-                self._logger.info("Establishing access to AW9523 board on bus {}, address 0x{:x}".
-                                  format(self.i2c_bus, self.enable_board))
-                # Need to create the board.
-                try:
-                    self.__class__.aw9523_boards[awkey] = AW9523(self._i2c, self.enable_board, reset=True)
-                except BaseException as e:
-                    self._logger.critical("Could not access AW9523 on bus {}, address 0x{:x}".
-                                          format(self.i2c_bus, self.enable_board))
-                    raise e
-                else:
-                    self._logger.debug("Waiting 1s for I2C bus to settle.")
-                    sleep(1)
-                    self._logger.debug("Setting all to outputs with value off.")
-                    try:
-                        CobraBay.util.aw9523_reset(self.__class__.aw9523_boards[awkey])
-                    except OSError as e:
-                        self._logger.error("Error while resetting pins on AW9523 board on bus '{}', address "
-                                           "'0x{:x}'. Base error was: '{} - {}'".
-                                           format(self.i2c_bus, self.enable_board, e.__class__.__name__, str(e)))
-                        self._logger.critical("Cannot continue!")
-                        raise SystemExit
+        elif isinstance(self.enable_board, adafruit_aw9523.AW9523):
+            self._enable_pin = self.enable_board.get_pin(enable_pin)
 
-            # Can now create the pin
-            self._enable_pin = self.__class__.aw9523_boards[awkey].get_pin(enable_pin)
+        # else:
+        #     # Check to see if the AW9523 object has already been created.
+        #     # Use the key format "bus-addr"
+        #     awkey = str(self.i2c_bus) + "-" + str(self.enable_board)
+        #     if awkey not in self.__class__.aw9523_boards.keys():
+        #         self._logger.info("Establishing access to AW9523 board on bus {}, address 0x{:x}".
+        #                           format(self.i2c_bus, self.enable_board))
+        #         # Need to create the board.
+        #         try:
+        #             self.__class__.aw9523_boards[awkey] = AW9523(self._i2c_bus, self.enable_board, reset=True)
+        #         except BaseException as e:
+        #             self._logger.critical("Could not access AW9523 on bus {}, address 0x{:x}".
+        #                                   format(self.i2c_bus, self.enable_board))
+        #             raise e
+        #         else:
+        #             self._logger.debug("Waiting 1s for I2C bus to settle.")
+        #             sleep(1)
+        #             self._logger.debug("Setting all to outputs with value off.")
+        #             try:
+        #                 CobraBay.util.aw9523_reset(self.__class__.aw9523_boards[awkey])
+        #             except OSError as e:
+        #                 self._logger.error("Error while resetting pins on AW9523 board on bus '{}', address "
+        #                                    "'0x{:x}'. Base error was: '{} - {}'".
+        #                                    format(self.i2c_bus, self.enable_board, e.__class__.__name__, str(e)))
+        #                 self._logger.critical("Cannot continue!")
+        #                 raise SystemExit
+        #
+        #     # Can now create the pin
+        #     self._enable_pin = self.__class__.aw9523_boards[awkey].get_pin(enable_pin)
 
         # Make sure this is an 'output' type pin.
         self._enable_pin.switch_to_output()
@@ -277,7 +279,7 @@ class CBVL53L1X(I2CSensor):
             # Fault while enabling.
             self._logger.debug("Fault found.")
             return CobraBay.const.SENSTATE_FAULT
-        elif self.enable_pin.value is True:
+        elif self._enable_pin.value is True:
             self._logger.debug("Enable pin is on.")
             if self._ranging is True:
                 self._logger.debug("Sensor has been recorded as ranging.")
@@ -285,12 +287,12 @@ class CBVL53L1X(I2CSensor):
             else:
                 self._logger.debug("Enabled, not ranging.")
                 return CobraBay.const.SENSTATE_ENABLED
-        elif self.enable_pin.value is False:
+        elif self._enable_pin.value is False:
             self._logger.debug("Enable pin is off.")
             return CobraBay.const.SENSTATE_DISABLED
         else:
             self._logger.critical("Unknown sensor fault state '{}', Enable pin '{}'".
-                                  format(self._fault, self.enable_pin.value))
+                                  format(self._fault, self._enable_pin.value))
             return CobraBay.const.SENSTATE_FAULT
 
     @property
@@ -313,9 +315,7 @@ class CBVL53L1X(I2CSensor):
         """
 
         if not isinstance(timing_input, Quantity):
-            print("Timing input is '{}', converting to quantity.".format(timing_input))
             timing_input = Quantity(timing_input)
-            print("Timing is now '{}' ({})".format(timing_input, type(timing_input)))
         if timing_input.magnitude not in (20, 33, 50, 100, 200, 500):
             raise ValueError("Requested timing budget {} not valid. "
                              "Must be one of: 20, 33, 50, 100, 200 or 500 ms".format(input))
@@ -329,6 +329,7 @@ class CBVL53L1X(I2CSensor):
     def __del__(self):
         """Destructor, disables the sensor when the object is destroyed."""
         self._logger.debug("Disabling sensor on object deletion.")
+        self._logger.debug("Enable pin object: {}".format(self._enable_pin))
         self.status = 'disabled'
 
     def _disable(self):
@@ -338,7 +339,7 @@ class CBVL53L1X(I2CSensor):
         :param self:
         """
 
-        self.enable_pin.value = False
+        self._enable_pin.value = False
         # Also set the internal ranging variable to false, since by definition, when the board gets killed,
         # we stop ranging.
         self._ranging = False
@@ -346,11 +347,11 @@ class CBVL53L1X(I2CSensor):
     def _enable(self):
         """ Enable the sensor. This puts the sensor on the I2C Bus, ready to range, but not ranging yet. """
 
-        self.enable_pin.value = False
+        self._enable_pin.value = False
         devices_prior = CobraBay.util.scan_i2c()
         self._logger.debug("I2C devices before enable: {}".format(devices_prior))
         # Turn the sensor back on.
-        self.enable_pin.value = True
+        self._enable_pin.value = True
         # Wait one second for the bus to stabilize
         sleep(1)
         devices_subsequent = CobraBay.util.scan_i2c()
@@ -358,7 +359,7 @@ class CBVL53L1X(I2CSensor):
         if len(devices_subsequent) > len(devices_prior):
             # Create the sensor at the default address.
             try:
-                self._sensor_obj = AF_VL53L1X(self._i2c, address=0x29)
+                self._sensor_obj = adafruit_vl53l1x.VL53L1X(self.i2c_bus, address=0x29)
             except ValueError:
                 self._logger.error("Sensor not found at default address '0x29'. Check configuration!")
             except OSError as e:
@@ -367,7 +368,7 @@ class CBVL53L1X(I2CSensor):
                 self._fault = True
             else:
                 # Change the I2C address to the target address.
-                self._sensor_obj.set_address(new_address=self._i2c_address)
+                self._sensor_obj.set_address(new_address=self.i2c_address)
                 # Make sure fault isn't set, if we're recovering from failure.
                 self._fault = False
                 return

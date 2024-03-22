@@ -42,7 +42,8 @@ Unfortunately, the rgbmatrix library is not packaged. It needs to be installed m
   * Select "Y" to Continue
   * Select "2", Matrix HAT + RTC
   * Select "1" for Quality
-
+  * The library will compile. When complete and asked to reboot, select "y"
+  
 ### Install CobraBay
 
 * Install a few extra packages (if you used Lite)

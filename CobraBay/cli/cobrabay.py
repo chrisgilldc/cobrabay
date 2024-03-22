@@ -8,8 +8,9 @@ import sys
 import pid.base
 import CobraBay
 import logging
-import pwd
 import os
+import pwd
+import socket
 from logging.handlers import WatchedFileHandler
 # from collections import namedtuple
 from pid import PidFile
@@ -17,9 +18,11 @@ from CobraBay.datatypes import ENVOPTIONS
 # from Queue import Empty
 from multiprocessing import Queue, Process
 
+
 def main():
     print("CobraBay Parking System - {}".format(CobraBay.__version__))
     print("Running as '{}'".format(pwd.getpwuid(os.getuid()).pw_name))
+    print("Host: {}\tIP: {}".format(socket.getfqdn(), socket.gethostbyname(socket.gethostname())))
     # Parse command line options.
     parser = argparse.ArgumentParser(
         description="CobraBay Parking System"

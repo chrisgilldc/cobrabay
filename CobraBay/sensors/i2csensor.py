@@ -16,19 +16,17 @@ class I2CSensor(BaseSensor):
     """
     aw9523_boards = {}
 
-    def __init__(self, name, i2c_address, max_retries=0, i2c_bus=1, pin_scl=None, pin_sda=None, parent_logger=None, log_level="WARNING"):
+    def __init__(self, name, i2c_address, i2c_bus, max_retries=0, parent_logger=None, log_level="WARNING"):
         """
 
         :param name: Name of the sensor
         :type name: str
         :param i2c_address: Address of the sensor.
         :type i2c_address: int or str(hex)
-        :param i2c_bus: I2C bus on the Pi to use. If you wish to specify SCL and SDA pins, set this to None.
-        :type i2c_bus: int
-        :param pin_scl: I2C Clock pin. Will be ignored if i2c_bus is anything other than None.
-        :type pin_scl: int
-        :param pin_sda: I2C Data pin. Will be ignored if i2c_bus is anything other than None.
-        :type pin_sda: int
+        :param i2c_bus: Instantiated object for the I2C Bus.
+        :type i2c_bus: busio.I2C
+        :param max_retries: How many times to try resetting a sensor before declaring it in fault.
+        :type max_retries: int
         :param parent_logger: Parent logger to attach to.
         :type parent_logger: logger
         :param log_level: If no parent logger provided, log level of the new logger to create.
@@ -49,10 +47,8 @@ class I2CSensor(BaseSensor):
         # Set the I2C bus and I2C Address
         self.i2c_bus = i2c_bus
         self.i2c_address = i2c_address
-        self._logger.debug("Configured for I2C Bus {} and Address {}".format(self.i2c_bus, hex(self.i2c_address)))
-
-        # Create the I2C Object.
-        self._create_i2c_obj(i2c_bus, pin_scl, pin_sda)
+        self._logger.debug("Configured for I2C device '{}' and Address '{}'".
+                           format(self.i2c_bus._i2c._i2c_bus._device.name,hex(self.i2c_address)))
 
         # How many times, in the lifetime of the sensor, have we hit a fault.
         self._lifetime_faults = 0
@@ -78,10 +74,10 @@ class I2CSensor(BaseSensor):
         :param the_input: int
         :return: None
         """
-        if the_input not in (1, 2):
-            raise ValueError("I2C Bus ID for Raspberry Pi must be 1 or 2, not {}".format(the_input))
-        else:
+        if isinstance(the_input,busio.I2C):
             self._i2c_bus = the_input
+        else:
+            raise ValueError("I2C Bus must be a busio.I2C object. Instead is '{}'".format(type(the_input)))
 
     @property
     def i2c_address(self):
@@ -107,30 +103,7 @@ class I2CSensor(BaseSensor):
             self._i2c_address = i2c_address
 
     ## Private Methods
-    def _create_i2c_obj(self, i2c_bus, pin_scl, pin_sda):
-        # Create the board object.
-        self._board = board
-
-        # Determine what to do for I2C creation.
-        if i2c_bus is not None:
-            self._logger.debug("I2C Bus set to {}. Determining correct pins.".format(i2c_bus))
-            if i2c_bus == 1:
-                pin_scl = self._board.SCL
-                pin_sda = self._board.SDA
-            elif i2c_bus == 0:
-                pin_scl = self._board.SCL0
-                pin_sda = self._board.SDA0
-            self._logger.debug("Selected SCL pin '{}', SDA pin '{}'".format(pin_scl, pin_sda))
-        else:
-            self._logger.debug("Pins set directly. Using SCL pin '{}', SDA pin '{}'".format(pin_scl, pin_sda))
-        try:
-            self._i2c = busio.I2C(pin_scl, pin_sda)
-        except PermissionError as e:
-            self._logger.warning("No access to I2C Bus.")
-            raise e
-        except BaseException as e:
-            self._logger.critical("Unknown exception in accessing I2C bus!")
-            raise e
+    # None in this class
 
     ## Private Properties
     # None in this class

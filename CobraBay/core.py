@@ -79,10 +79,15 @@ class CBCore:
         # Queue the startup message.
         self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'Online'})
 
-        self._logger.info("Creating detectors...")
-        # Create the detectors.
-        self._detectors = self._setup_sensors()
-        self._logger.debug("Detectors created: {}".format(pformat(self._detectors)))
+        self._logger.info("Creating sensor manager...")
+        # Create the Sensor Manager
+        sensor_config = self._active_config.sensors_config()
+        self._logger.debug("Using Sensor config:\n{}".format(pformat(sensor_config)))
+        self._logger.debug("Using I2C config:\n{}".format(pformat(self._active_config.i2c_config())))
+        self._sensormgr = CobraBay.CBSensorMgr(sensor_config=sensor_config, i2c_config=self._active_config.i2c_config(),
+                                               log_level=self._active_config.get_loglevel('sensors'))
+        # Activate the sensors.
+        self._sensormgr.sensors_activate()
 
         # Create master bay object for defined docking bay
         # Master list to store all the bays.

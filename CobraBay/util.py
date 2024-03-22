@@ -9,7 +9,8 @@ from time import sleep
 from datetime import timedelta
 import logging
 import CobraBay.const
-
+from CobraBay.datatypes import ENVOPTIONS
+import pathlib
 
 # General purpose converter.
 class Convertomatic:
@@ -171,3 +172,113 @@ def default_logger(name, parent_logger=None, log_level="WARNING"):
         the_logger.setLevel(log_level)
 
     return the_logger
+
+def _validate_environment(input_base,
+                          input_rundir,
+                          input_configdir,
+                          input_configfile,
+                          input_logdir,
+                          input_logfile,
+                          input_loglevel):
+    # Check the base directory.
+    try:
+        base = pathlib.Path(input_base)
+    except TypeError as e:
+        print("Cannot make a valid path for base directory from option '{}'.".format(input_base))
+        raise e
+    else:
+        # Make the base absolute.
+        basedir = base.absolute()
+        if not basedir.is_dir():
+            raise TypeError("Base directory '{}' is not a directory.".format(basedir))
+        print("Base directory: {}".format(basedir))
+
+    # Run directory, for the PID file.
+    try:
+        rundir = pathlib.Path(input_rundir)
+    except TypeError as e:
+        print("Cannot make a valid path for run directory from option '{}'.".format(input_rundir))
+        raise e
+    else:
+        if not rundir.is_absolute():
+            rundir = basedir / rundir
+        if not rundir.is_dir():
+            raise ValueError("Run directory '{}' not a directory. Cannot continue!".format(rundir))
+        print("Run directory: {}".format(rundir))
+
+    # Config directory, to allow versioned configs.
+    try:
+        configdir = pathlib.Path(input_configdir)
+    except TypeError as e:
+        print("Cannot make a valid path for config directory from option '{}'.".format(input_configdir))
+        raise e
+    else:
+        if not configdir.is_absolute():
+            configdir = basedir / configdir
+        if not configdir.is_dir():
+            raise ValueError("Config directory '{}' not a directory. Cannot continue!".format(configdir))
+        if configdir != basedir:
+            print("Config directory: {}".format(configdir))
+
+    try:
+        configfile = pathlib.Path(input_configfile)
+    except TypeError:
+        configfile = None
+        print("No config file specified on command line. Will search default locations.")
+    else:
+        # If config isn't absolute, make it relative to the base.
+        if not configfile.is_absolute():
+            configfile = configdir / configfile
+        if not configfile.exists():
+            raise ValueError("Config file '{}' does not exist. Cannot continue!".format(configfile))
+        if not configfile.is_file():
+            raise ValueError("Config file '{}' is not a file. Cannot continue!".format(configfile))
+        print("Config file: {}".format(configfile))
+
+    # Logging directory.
+    try:
+        logdir = pathlib.Path(input_logdir)
+    except TypeError as e:
+        print("Cannot make a valid path for log directory from option '{}'.".format(input_configdir))
+        raise e
+    else:
+        if not logdir.is_absolute():
+            logdir = basedir / logdir
+        if not logdir.is_dir():
+            raise ValueError("Log directory '{}' not a directory.".format(logdir))
+        if logdir != basedir:
+            print("Log directory: {}".format(logdir))
+
+    # Log file
+    try:
+        logfile = pathlib.Path(input_logfile)
+    except TypeError as e:
+        print("Cannot make a valid path for run directory from option '{}'.".format(input_logdir))
+        raise e
+    else:
+        # If config isn't absolute, make it relative to the base.
+        if not logfile.is_absolute():
+            logfile = logdir / logfile
+        # Don't need to check if the file exists, will create on start.
+        print("Log file: {}".format(logfile))
+
+    # Log level.
+    if input_loglevel is not None:
+        if input_loglevel.upper() in ('DEBUG,INFO,WARNING,ERROR,CRITICAL'):
+            loglevel = input_loglevel.upper()
+        else:
+            raise ValueError('{} is not a valid log level.'.format(input_loglevel))
+    else:
+        loglevel = None
+
+    valid_environment = ENVOPTIONS(
+        base=basedir,
+        rundir=rundir,
+        configdir=configdir,
+        configfile=configfile,
+        logdir=logdir,
+        logfile=logfile,
+        loglevel=loglevel
+    )
+
+    return valid_environment

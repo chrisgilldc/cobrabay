@@ -65,6 +65,8 @@ class CBConfig:
         # Pulls in the YAML
         staging_yaml = self._read_yaml(self._config_path)
 
+        self._logger.debug("Loaded contents: {}".format(pformat(staging_yaml)))
+
         # Run the validator on the config. This will raise an exception if the validator cannot run.
         try:
             validator_result = self._validator(staging_yaml)
@@ -205,7 +207,7 @@ class CBConfig:
         """
 
         # Create the main validator
-        self._logger.debug("Creating validator with schema '{}'".format(self._schema))
+        # self._logger.debug("Creating validator with schema: {}".format(pformat(self._schema)))
         mv = CBValidator(self._schema)
 
         try:
@@ -237,31 +239,31 @@ class CBConfig:
 
             # Because the 'oneof' options in the schema don't normalize, we need to go back in and normalize those.
             # Subvalidate detectors.
-            sv = CBValidator()
-            for sensor_name in returnval['sensors']:
-                # Select the correct target schema based on the sensor type.
-                if returnval['sensors'][sensor_name]['hw_type'] == 'VL53L1X':
-                    target_schema = CobraBay.config.schemas.SCHEMA_SENSOR_VL53L1X
-                elif returnval['sensors'][sensor_name]['hw_type'] == 'TFMini':
-                    target_schema = CobraBay.config.schemas.SCHEMA_SENSOR_TFMINI
-                else:
-                    # Trap unknown sensor types. This should never happen!
-                    return CBValidation(False, "Incorrect sensor type during detector normalization '{}'".format(
-                        sensor_name))
-
-                # Do it.
-                try:
-                    validated_ds = sv.validated(
-                        returnval['sensors'][sensor_name]['hw_settings'], target_schema)
-                except BaseException as e:
-                    self._logger.error("Could not validate. '{}'".format(e))
-                    return CBValidation(False, sv.errors)
-                if validated_ds is None:
-                    return CBValidation(False, "During subvalidation of detector '{}', received errors '{}".
-                                        format(sensor_name, sv.errors))
-                else:
-                    # Merge the validated/normalized sensor settings into the main config.
-                    returnval['sensors'][sensor_name]['hw_settings'] = validated_ds
+            # sv = CBValidator()
+            # for sensor_name in returnval['sensors']:
+            #     # Select the correct target schema based on the sensor type.
+            #     if returnval['sensors'][sensor_name]['hw_type'] == 'VL53L1X':
+            #         target_schema = CobraBay.config.schemas.SCHEMA_SENSOR_VL53L1X
+            #     elif returnval['sensors'][sensor_name]['hw_type'] == 'TFMini':
+            #         target_schema = CobraBay.config.schemas.SCHEMA_SENSOR_TFMINI
+            #     else:
+            #         # Trap unknown sensor types. This should never happen!
+            #         return CBValidation(False, "Incorrect sensor type during detector normalization '{}'".format(
+            #             sensor_name))
+            #
+            #     # Do it.
+            #     try:
+            #         validated_ds = sv.validated(
+            #             returnval['sensors'][sensor_name], target_schema)
+            #     except BaseException as e:
+            #         self._logger.error("Could not validate. '{}'".format(e))
+            #         return CBValidation(False, sv.errors)
+            #     if validated_ds is None:
+            #         return CBValidation(False, "During subvalidation of detector '{}', received errors '{}".
+            #                             format(sensor_name, sv.errors))
+            #     else:
+            #         # Merge the validated/normalized sensor settings into the main config.
+            #         returnval['sensors'][sensor_name]['hw_settings'] = validated_ds
 
             return CBValidation(True, returnval)
 
@@ -300,8 +302,6 @@ class CBCoreConfig(CBConfig):
     def __init__(self, config_file=None, auto_load=True, log_level="WARNING", environment=ENVOPTIONS_EMPTY):
         # Call the super init with the schema set.
         super().__init__(config_file, CobraBay.config.schemas.CB_CORE, auto_load, log_level, environment)
-
-
 
     # Enumeration methods.
     @property
@@ -352,6 +352,13 @@ class CBCoreConfig(CBConfig):
                 'unit_system': self._config['system']['unit_system'],
                 'log_level': self.get_loglevel(item_id='display')}
 
+    def i2c_config(self):
+        """
+        Retrieve configuration for I2C bus
+        :return: dict
+        """
+        return self._config['system']['i2c']
+
     def log_handlers(self):
         include_items = ['console', 'file', 'file_path', 'log_format']
         return dict(
@@ -370,6 +377,14 @@ class CBCoreConfig(CBConfig):
             'log_level': self.get_loglevel(item_id='network'),
             'mqtt_log_level': self._config['system']['logging']['mqtt']}
         return the_return
+
+    def sensors_config(self):
+        """
+        Retrieve all sensors.
+
+        :return:
+        """
+        return self._config['sensors']
 
     def sensor(self, sensor_name):
         """
@@ -408,4 +423,3 @@ class CBCoreConfig(CBConfig):
             **self._config['triggers'][trigger_id],
             'log_level': self.get_loglevel(item_id=trigger_id, item_type='trigger')
         }
-

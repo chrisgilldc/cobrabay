@@ -4,9 +4,22 @@ CobraBay Config Schemas
 
 from pathlib import Path
 import importlib
+import pint
 
-SCHEMA_SENSOR_VL53L1X = {
+SCHEMA_SENSOR_COMMON = {
+    'name': {'type': 'string'},
+    # 'error_margin': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '2 cm'},
+    'error_margin': {'type': 'string', 'default': '2 cm'},
+    'always_range': {'type': 'boolean', 'default': False},
+    'max_retries': {'type': 'integer', 'default': 3}
+}
+
+SCHEMA_SENSOR_VL53L1X = {**SCHEMA_SENSOR_COMMON,
+    'hw_type': {'type': 'string', 'required': True, 'allowed': ['VL53L1X']},
     'i2c_bus': {'type': 'integer', 'default': 1},
+    #TODO: Get this to validate correctly as none.
+    # 'pin_scl': {'type': 'string', 'default': None},
+    # 'pin_sda': {'type': 'string', 'default': None},
     'i2c_address': {'type': 'integer', 'required': True},
     'enable_board': {'type': 'integer', 'required': True},
     'enable_pin': {'type': 'integer', 'required': True},
@@ -18,11 +31,14 @@ SCHEMA_SENSOR_VL53L1X = {
 
 # Sub-schema for the TFMini Sensor
 SCHEMA_SENSOR_TFMINI = {
+    **SCHEMA_SENSOR_COMMON,
+    'hw_type': {'type': 'string', 'required': True, 'allowed': ['TFMini']},
     'port': {'type': 'string', 'required': True},
     'baud': {'type': 'integer', 'default': 115200,
              'allowed': [9600, 14400, 19200, 56000, 115200, 460800, 921600]},
     'clustering': {'type': 'integer', 'default': 1, 'min': 1, 'max': 5}
 }
+
 
 CB_CORE = {
     'system': {
@@ -43,6 +59,16 @@ CB_CORE = {
                 }
             },
             'interface': {'type': 'string'},  # Define a method to determine default.
+            'i2c': {
+                'type': 'dict',
+                'schema': {
+                    'bus': {'type': 'integer', 'required': True},
+                    'enable': {'type': 'string', 'required': True},
+                    'ready': {'type': 'string', 'required': True},
+                    'wait_ready': {'type': 'integer', 'default': 10},
+                    'wait_reset': {'type': 'integer', 'default': 10}
+                }
+            },
             'logging': {
                 'type': 'dict',
                 'required': True,
@@ -63,7 +89,7 @@ CB_CORE = {
                                'coerce': str.upper, 'default_setter': lambda doc: doc['default_level']},
                     'core': {'type': 'string', 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                              'coerce': str.upper, 'default_setter': lambda doc: doc['default_level']},
-                    'detectors': {'type': 'string', 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                    'sensors': {'type': 'string', 'allowed': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                                   'coerce': str.upper, 'default_setter': lambda doc: doc['default_level']},
                     'detector': {
                         'type': 'dict',
@@ -126,6 +152,32 @@ CB_CORE = {
             # 'mqtt_update_interval': {'type': 'quantity', 'coerce': 'pint_seconds', 'default': '5s'}
         }
     },
+    # 'sensors': {
+    #     'type': 'dict',
+    #     'keysrules': {
+    #         'type': 'string',
+    #         'regex': '[\w]+'
+    #     },
+    #     'valuesrules': {
+    #         'type': 'dict',
+    #         'schema': {
+    #             'name': {'type': 'string'},
+    #             'error_margin': {'type': 'quantity', 'coerce': 'pint_cm'},
+    #             'always_range': {'type': 'boolean', 'default': False},
+    #             'hw_type': {'type': 'string', 'required': True, 'allowed': ['TFMini', 'VL53L1X']},
+    #             # 'timing': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
+    #             'hw_settings': {
+    #                 'type': 'dict',
+    #                 'required': True,
+    #                 'oneof': [
+    #                     {'dependencies': {'hw_type': 'TFMini'}, 'schema': SCHEMA_SENSOR_TFMINI},
+    #                     {'dependencies': {'hw_type': 'VL53L1X'}, 'schema': SCHEMA_SENSOR_VL53L1X}
+    #                 ]
+    #             }
+    #         }
+    #     },
+    #     'default': {}
+    # },
     'sensors': {
         'type': 'dict',
         'keysrules': {
@@ -134,21 +186,7 @@ CB_CORE = {
         },
         'valuesrules': {
             'type': 'dict',
-            'schema': {
-                'name': {'type': 'string'},
-                'error_margin': {'type': 'quantity', 'coerce': 'pint_cm'},
-                'always_range': {'type': 'boolean', 'default': False},
-                'hw_type': {'type': 'string', 'required': True, 'allowed': ['TFMini', 'VL53L1X']},
-                # 'timing': {'type': 'quantity', 'dimensionality': '[time]', 'coerce': pint.Quantity},
-                'hw_settings': {
-                    'type': 'dict',
-                    'required': True,
-                    'oneof': [
-                        {'dependencies': {'hw_type': 'TFMini'}, 'schema': SCHEMA_SENSOR_TFMINI},
-                        {'dependencies': {'hw_type': 'VL53L1X'}, 'schema': SCHEMA_SENSOR_VL53L1X}
-                    ]
-                }
-            }
+            'oneof_schema': [SCHEMA_SENSOR_TFMINI, SCHEMA_SENSOR_VL53L1X ]
         },
         'default': {}
     },
@@ -191,7 +229,7 @@ CB_CORE = {
                                 'pct_crit': {'type': 'number', 'min': 0, 'max': 100, 'default': 10}
                             }
                         },
-                        'detectors': {
+                        'sensors': {
                             'type': 'list',
                             'schema': {
                                 'type': 'dict',
@@ -219,12 +257,12 @@ CB_CORE = {
                                 'side': {'type': 'string', 'allowed': ['L', 'R']}
                             }
                         },
-                        'detectors': {
+                        'sensors': {
                             'type': 'list',
                             'schema': {
                                 'type': 'dict',
                                 'schema': {
-                                    'detector': {'type': 'string', 'required': True},
+                                    'sensor': {'type': 'string', 'required': True},
                                     'offset': {'type': 'quantity', 'coerce': 'pint_cm'},
                                     'spread_ok': {'type': 'quantity', 'coerce': 'pint_cm'},
                                     'spread_warn': {'type': 'quantity', 'coerce': 'pint_cm'},
@@ -236,7 +274,7 @@ CB_CORE = {
                             }
                         }
                     },
-                    'default': {'defaults': {}, 'detectors': []}
+                    'default': {'defaults': {}, 'sensors': []}
                 }
             }
         }
