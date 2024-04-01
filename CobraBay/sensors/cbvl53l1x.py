@@ -10,7 +10,7 @@ import digitalio
 # The I2CSensor class
 from CobraBay.sensors import I2CSensor
 # Required CobraBay datatypes
-from CobraBay.datatypes import SensorResponse, SensorReading
+from CobraBay.datatypes import SensorReading
 import CobraBay.util
 # Import WeakSet so we can track other instances.
 from weakref import WeakSet
@@ -121,10 +121,13 @@ class CBVL53L1X(I2CSensor):
                 sleep(0.001)
             else:
                 # If waiting for the sensor, return Interrupt Not Ready immediately.
-                return CobraBay.datatypes.SensorResponse(
-                    timestamp=datetime64('now'),
+                return CobraBay.datatypes.SensorReading(
+                    state=self.state,
+                    status=self.status,
+                    fault=self._fault,
                     response_type=CobraBay.const.SENSOR_VALUE_INR,
-                    reading=None,
+                    range=None,
+                    temp=None,
                     fault_reason=None
                 )
         # We get here once the interrupt is ready.
@@ -133,25 +136,31 @@ class CBVL53L1X(I2CSensor):
         if sensor_response is None:
             # The Adafruit VL53L1X wraps up all invalid statuses with a 'None' return. See
             # https://github.com/adafruit/Adafruit_CircuitPython_VL53L1X/pull/8 for details.
-            response = SensorResponse(
-                timestamp=datetime64('now'),
+            response = SensorReading(
+                state=self.state,
+                status=self.status,
+                fault=self._fault,
                 response_type=CobraBay.const.SENSOR_VALUE_OK,
-                reading= SensorReading(range=None, temp=None),
+                range=None, temp=None,
                 fault_reason=None
             )
         # Check for minimum and maximum ranges.
         elif sensor_response <= 4:
-            response = SensorResponse(
-                timestamp=datetime64('now'),
+            response = SensorReading(
+                state=self.state,
+                status=self.status,
+                fault=self._fault,
                 response_type=CobraBay.const.SENSOR_VALUE_TOOCLOSE,
-                reading= SensorReading(range=None, temp=None),
+                range=None, temp=None,
                 fault_reason=None
             )
         else:
-            response = SensorResponse(
-                timestamp=datetime64('now'),
+            response = SensorReading(
+                state=self.state,
+                status=self.status,
+                fault=self._fault,
                 response_type=CobraBay.const.SENSOR_VALUE_OK,
-                reading=SensorReading(range=Quantity(sensor_response, 'cm'), temp=None),
+                range=Quantity(sensor_response, 'cm'), temp=None,
                 fault_reason=None
             )
         # Clear the interrupt.
@@ -339,6 +348,7 @@ class CBVL53L1X(I2CSensor):
         :param self:
         """
 
+        self._sensor_obj.stop_ranging()
         self._enable_pin.value = False
         # Also set the internal ranging variable to false, since by definition, when the board gets killed,
         # we stop ranging.

@@ -21,8 +21,7 @@ from multiprocessing import Queue, Process
 
 def main():
     print("CobraBay Parking System - {}".format(CobraBay.__version__))
-    print("Running as '{}'".format(pwd.getpwuid(os.getuid()).pw_name))
-    print("Host: {}\tIP: {}".format(socket.getfqdn(), socket.gethostbyname(socket.gethostname())))
+    print("User: {}'\tHost: {}\tIP: {}".format(pwd.getpwuid(os.getuid()).pw_name, socket.getfqdn(), socket.gethostbyname(socket.gethostname())))
     # Parse command line options.
     parser = argparse.ArgumentParser(
         description="CobraBay Parking System"

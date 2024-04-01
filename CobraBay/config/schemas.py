@@ -55,7 +55,13 @@ CB_CORE = {
                     'username': {'type': 'string'},
                     'password': {'type': 'string'},
                     'accept_commands': {'type': 'boolean', 'default': True},
-                    'ha_discover': {'type': 'boolean', 'default': True}
+                    'ha_discover': {'type': 'boolean', 'default': True},
+                    'chattiness': {'type': 'dict',
+                                   'schema': {
+                                       'sensors_raw': {'type': 'boolean', 'default': False},
+                                       'sensors_always_send': {'type': 'boolean', 'default': False}
+                                   }
+                    }
                 }
             },
             'interface': {'type': 'string'},  # Define a method to determine default.
@@ -225,8 +231,8 @@ CB_CORE = {
                             'schema': {
                                 'spread_park': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '2 in'},
                                 'zero_point': {'type': 'quantity', 'coerce': 'pint_cm', 'default': '0 in'},
-                                'pct_warn': {'type': 'number', 'min': 0, 'max': 100, 'default': 30},
-                                'pct_crit': {'type': 'number', 'min': 0, 'max': 100, 'default': 10}
+                                'pct_warn': {'type': 'number', 'coerce': 'percent', 'min': 0, 'max': 100, 'default': 30},
+                                'pct_crit': {'type': 'number', 'coerce': 'percent', 'min': 0, 'max': 100, 'default': 10}
                             }
                         },
                         'sensors': {

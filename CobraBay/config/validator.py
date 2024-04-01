@@ -42,3 +42,8 @@ class CBValidator(cerberus.Validator):
     def _normalize_coerce_pint_cm(value):
         return pint.Quantity(value).to('cm')
 
+    @staticmethod
+    def _normalize_coerce_percent(value):
+        if value > 1:
+            return value / 100
+

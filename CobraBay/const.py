@@ -1,3 +1,5 @@
+from numpy import timedelta64
+
 # Various constants
 
 ## General constants. Multiple types of objects need these.
@@ -41,21 +43,24 @@ SENSOR_VALUE_FLOOD = 'flood'
 SENSOR_VALUE_TOOCLOSE = 'tooclose'
 
 # Detector quality values.
-DETECTOR_QUALITY_OK = 'ok'
-DETECTOR_QUALITY_WARN = 'warning'
-DETECTOR_QUALITY_CRIT = 'critical'
-DETECTOR_QUALITY_BASE = 'base'
-DETECTOR_QUALITY_FINAL = 'final'
-DETECTOR_QUALITY_PARK = 'park'
-DETECTOR_QUALITY_BACKUP = 'backup'
-DETECTOR_QUALITY_NOOBJ = 'no_object'
-DETECTOR_QUALITY_EMERG = 'emergency'
-DETECTOR_QUALITY_DOOROPEN = 'door_open'
-DETECTOR_QUALITY_BEYOND = 'beyond_range'
-DETECTOR_NOREADING = 'no_reading'
-DETECTOR_NOINTERCEPT = 'not_intercepted'
+SENSOR_QUALITY_OK = 'ok'
+SENSOR_QUALITY_WARN = 'warning'
+SENSOR_QUALITY_CRIT = 'critical'
+SENSOR_QUALITY_BASE = 'base'
+SENSOR_QUALITY_FINAL = 'final'
+SENSOR_QUALITY_PARK = 'park'
+SENSOR_QUALITY_BACKUP = 'backup'
+SENSOR_QUALITY_NOOBJ = 'no_object'
+SENSOR_QUALITY_EMERG = 'emergency'
+SENSOR_QUALITY_DOOROPEN = 'door_open'
+SENSOR_QUALITY_BEYOND = 'beyond_range'
+SENSOR_NOREADING = 'no_reading'
+SENSOR_NOINTERCEPT = 'not_intercepted'
 
 # Directional values
 DIR_FWD = 'forward'
 DIR_REV = 'reverse'
 DIR_STILL = 'still'
+
+# Time intervals
+TIME_MOTION_EVAL = timedelta64(250,'ms')

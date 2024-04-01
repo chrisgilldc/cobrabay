@@ -46,6 +46,8 @@ class TFMini(SerialSensor):
             'min_range': Quantity('0.3m')
         }
 
+        self._fault = False # Currently don't fault out the TFMinin.
+
         if error_margin is None:
             self._error_margin = Quantity("2cm")
         else:
@@ -83,15 +85,21 @@ class TFMini(SerialSensor):
         pass
 
     def reading(self):
+        """Reading from the sensor."""
+        #TODO: Update to include temperature.
         try:
             reading = self._clustered_read(self._clustering)
         except BaseException as e:
             self._logger.error("Reading received exception - '{}: {}'".format(type(e).__name__, e))
             self._state = CobraBay.const.SENSTATE_DISABLED
-            return SensorResponse(
-                timestamp=datetime64('now'),
+            return SensorReading(
+                state=self.state,
+                status=self.status,
+                fault=self._fault,
+
                 response_type=CobraBay.const.SENSTATE_FAULT,
-                reading=None,
+                range=None,
+                temp=None,
                 fault_reason=e
             )
         else:
@@ -100,38 +108,53 @@ class TFMini(SerialSensor):
             self._logger.debug("TFmini read values: {}".format(reading))
             # Check the status to see if we got a value, or some kind of non-OK state.
             if reading.status == "OK":
-                return SensorResponse(
-                    timestamp=datetime64('now'),
+                return SensorReading(
+                    state=self.state,
+                    status=self.status,
+                    fault=self._fault,
                     response_type=CobraBay.const.SENSOR_VALUE_OK,
-                    reading=reading.distance,
+                    range=reading.distance,
+                    temp=reading.temperature,
                     fault_reason=None
                 )
             elif reading.status == "Weak":
-                return SensorResponse(
-                    timestamp=datetime64('now'),
+                return SensorReading(
+                    state=self.state,
+                    status=self.status,
+                    fault=self._fault,
                     response_type=CobraBay.const.SENSOR_VALUE_WEAK,
-                    reading=None,
+                    range=None,
+                    temp=None,
                     fault_reason=None
                 )
             elif reading.status in ("Flood", "Saturation"):
-                return SensorResponse(
-                    timestamp=datetime64('now'),
+                return SensorReading(
+                    state=self.state,
+                    status=self.status,
+                    fault=self._fault,
                     response_type=CobraBay.const.SENSOR_VALUE_FLOOD,
-                    reading=None,
+                    range=None,
+                    temp=None,
                     fault_reason=None
                 )
             elif reading.status == 'Strong':
-                return SensorResponse(
-                    timestamp=datetime64('now'),
+                return SensorReading(
+                    state=self.state,
+                    status=self.status,
+                    fault=self._fault,
                     response_type=CobraBay.const.SENSOR_VALUE_STRONG,
-                    reading=None,
+                    range=None,
+                    temp=None,
                     fault_reason=None
                 )
             else:
-                return SensorResponse(
-                    timestamp=datetime64('now'),
+                return SensorReading(
+                    state=self.state,
+                    status=self.status,
+                    fault=self._fault,
                     response_type=CobraBay.const.SENSTATE_FAULT,
-                    reading=reading.distance,
+                    range=None,
+                    temp=None,
                     fault_reason="Unknown reading '{}'".format(reading)
                 )
 
@@ -159,7 +182,7 @@ class TFMini(SerialSensor):
         State of the sensor.
         :return: str
         """
-        return self._state
+        return CobraBay.const.SENSTATE_RANGING
 
     @property
     def status(self):

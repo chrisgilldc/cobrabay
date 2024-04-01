@@ -143,10 +143,10 @@ class CBDisplay:
 
         # Eventually replace this with the _status_color method.
         status_lookup = (
-            {'status': DETECTOR_QUALITY_OK, 'border': (0, 128, 0, 255), 'fill': (0, 128, 0, 255)},
-            {'status': DETECTOR_QUALITY_WARN, 'border': (255, 255, 0, 255), 'fill': (255, 255, 0, 255)},
-            {'status': DETECTOR_QUALITY_CRIT, 'border': (255, 0, 0, 255), 'fill': (255, 0, 0, 255)},
-            {'status': DETECTOR_QUALITY_NOOBJ, 'border': (255, 255, 255, 255), 'fill': (0, 0, 0, 0)}
+            {'status': SENSOR_QUALITY_OK, 'border': (0, 128, 0, 255), 'fill': (0, 128, 0, 255)},
+            {'status': SENSOR_QUALITY_WARN, 'border': (255, 255, 0, 255), 'fill': (255, 255, 0, 255)},
+            {'status': SENSOR_QUALITY_CRIT, 'border': (255, 0, 0, 255), 'fill': (255, 0, 0, 255)},
+            {'status': SENSOR_QUALITY_NOOBJ, 'border': (255, 255, 255, 255), 'fill': (0, 0, 0, 0)}
         )
 
         i = 0
@@ -188,7 +188,7 @@ class CBDisplay:
                 draw.line(
                     [nointercept_x, 1 + accumulated_height, nointercept_x, 1 + accumulated_height + pixel_lengths[i]],
                     fill='white', width=1)
-                self._layers[bay_obj.id][lateral][side][DETECTOR_NOINTERCEPT] = img
+                self._layers[bay_obj.id][lateral][side][SENSOR_NOINTERCEPT] = img
                 del (img)
 
                 for item in status_lookup:
@@ -296,7 +296,6 @@ class CBDisplay:
         self._logger.debug("Compositing strobe...")
         try:
             if self._bottom_box.lower() == 'strobe':
-
                 final_image = Image.alpha_composite(final_image,
                                                     self._strobe(
                                                         range_quality=bay_obj.reading.quality,
@@ -316,14 +315,14 @@ class CBDisplay:
             # lead to wonky results.
             dq = detector.quality
             dv = detector.value
-            if dq in (DETECTOR_NOINTERCEPT, DETECTOR_QUALITY_NOOBJ):
+            if dq in (SENSOR_NOINTERCEPT, SENSOR_QUALITY_NOOBJ):
                 # No intercept shows on both sides.
                 combined_layers = Image.alpha_composite(
                     self._layers[bay_obj.id][detector.id]['L'][dq],
                     self._layers[bay_obj.id][detector.id]['R'][dq]
                 )
                 final_image = Image.alpha_composite(final_image, combined_layers)
-            elif dq in (DETECTOR_QUALITY_OK, DETECTOR_QUALITY_WARN, DETECTOR_QUALITY_CRIT):
+            elif dq in (SENSOR_QUALITY_OK, SENSOR_QUALITY_WARN, SENSOR_QUALITY_CRIT):
                 # Pick which side the vehicle is offset towards.
                 if detector.value == 0:
                     skew = ('L', 'R')  # In the rare case the value is exactly zero, show both sides.
@@ -560,7 +559,7 @@ class CBDisplay:
         draw.rectangle([x_input + 2, y_input, x_input + 4, y_input - 5], outline='green', fill='green')
         # Lateral sensor. Presuming one!
         draw.line([x_input + 3, y_input - 7, x_input + 3, y_input - 7],
-                  fill=self._status_color(DETECTOR_QUALITY_WARN)['fill'])
+                  fill=self._status_color(SENSOR_QUALITY_WARN)['fill'])
         # Lateral sensors.
         return img
 
@@ -628,9 +627,9 @@ class CBDisplay:
 
         # Override string states. If the range quality has these values, we go ahead and show the string rather than the
         # measurement.
-        if range_quality == DETECTOR_QUALITY_BACKUP:
+        if range_quality == SENSOR_QUALITY_BACKUP:
             return self._layers['backup']
-        elif range_quality in (DETECTOR_QUALITY_DOOROPEN, DETECTOR_QUALITY_BEYOND):
+        elif range_quality in (SENSOR_QUALITY_DOOROPEN, SENSOR_QUALITY_BEYOND):
             # DOOROPEN is when the detector cannot get a reflection, ie: the door is open.
             # BEYOND is when a reading is found but it's beyond the defined length of the bay.
             # Either way, this indicates either no vehicle is present yet, or a vehicle is present but past the garage
@@ -813,10 +812,10 @@ class CBDisplay:
         """
         # Pre-defined quality-color mappings.
         color_table = {
-            DETECTOR_QUALITY_OK: {'border': (0, 128, 0, 255), 'fill': (0, 128, 0, 255)},
-            DETECTOR_QUALITY_WARN: {'border': (255, 255, 0, 255), 'fill': (255, 255, 0, 255)},
-            DETECTOR_QUALITY_CRIT: {'border': (255, 0, 0, 255), 'fill': (255, 0, 0, 255)},
-            DETECTOR_QUALITY_NOOBJ: {'border': (255, 255, 255, 255), 'fill': (0, 0, 0, 0)}
+            SENSOR_QUALITY_OK: {'border': (0, 128, 0, 255), 'fill': (0, 128, 0, 255)},
+            SENSOR_QUALITY_WARN: {'border': (255, 255, 0, 255), 'fill': (255, 255, 0, 255)},
+            SENSOR_QUALITY_CRIT: {'border': (255, 0, 0, 255), 'fill': (255, 0, 0, 255)},
+            SENSOR_QUALITY_NOOBJ: {'border': (255, 255, 255, 255), 'fill': (0, 0, 0, 0)}
         }
         try:
             return color_table[status]

@@ -8,16 +8,17 @@ import board
 import busio
 import logging
 import time
-
 import digitalio
-
 import CobraBay.sensors
-from CobraBay.datatypes import SensorResponse
+from CobraBay.const import *
+from CobraBay.datatypes import SensorResponse, SensorReading
 from numpy import datetime64
 import threading
+import multiprocessing
 import queue
 
 #TODO: Try with asyncio or threading, eventually.
+#TODO: Expose sensor state queue
 
 class CBSensorMgr:
     """
@@ -26,7 +27,7 @@ class CBSensorMgr:
     """
 
     def __init__(self, sensor_config, i2c_config=None, generous_recovery=True, name=None, parent_logger=None,
-                 log_level="WARNING", q_cbsmdata=None, q_cbsmcontrol=None):
+                 log_level="WARNING", q_cbsmdata=None, q_cbsmstatus=None, q_cbsmcontrol=None):
         """
         Create a Sensor Manager instance.
 
@@ -42,12 +43,21 @@ class CBSensorMgr:
         :param parent_logger:
         :param log_level: Logging level. Any valid python logging level is allowed. Defaults to WARNING.
         :type log_level: str
+        :param q_cbsmdata: Allows other threads/processes to fetch sensor readings.
+        :type q_cbsmdata: queue.Queue or multiprocessing.Queue
+        :param q_cbsmstatus: Allows other threads/processes to fetch sensor operating statuses.
+        :type q_cbsmstatus: queue.Queue or multiprocessing.Queue
+        :param q_cbsmcontrol: Takes incoming commands from parent thread/process.
+        :type q_cbsmcontrol:queue.Queue or multiprocessing.Queue
+
         """
         # Initialize variables.
         self._sensors = {}  # Dictionary for sensor objects.
         self._latest_state = {}  # Rolling current state of the sensors.
         self._scan_speed_log = []  # List to store scan performance data.
         self._scan_avg_speed = 0
+        self._wait_ready = 30
+        self._wait_reset = 30
         self._i2c_bus = None
         self._ioexpanders = {}
 
@@ -59,6 +69,11 @@ class CBSensorMgr:
         self._sensor_config = sensor_config
         self._i2c_config = i2c_config
         self._gr = generous_recovery
+
+        # Save the queues.
+        self._q_cbsmdata = q_cbsmdata
+        self._q_cbsmstatus = q_cbsmstatus
+        self._q_cbsmcontrol = q_cbsmcontrol
 
         # Set up the logger.
         if parent_logger is None:
@@ -82,6 +97,7 @@ class CBSensorMgr:
             except BaseException:
                 pass
             else:
+                self.reset_i2cbus()
                 for addr in self._scan_aw9523s():
                     self._logger.info("Configuring AW9523 at address '{}'".format(hex(addr)))
                     self._ioexpanders[str(addr)] = AW9523(self._i2c_bus, addr, reset=True)
@@ -91,26 +107,54 @@ class CBSensorMgr:
         # Pass the sensor config to the setup method to see if it works!
         self._sensors = self._create_sensor_multiple(sensor_config)
 
-        # Queue to share data with threads.
-        # Old way of doing it.
-        # self.data = deque(maxlen=len(self._sensors))
-        self.data = queue.Queue(maxsize=1)
+        # self._q_cbsmdata = queue.Queue(maxsize=1)
+
+    # Destructor!
+    def __del__(self):
+        # Disable all sensors when shutting down.
+        self._logger.debug("Disabling all sensors before deletion.")
+        for sensor_id in self._sensors:
+            self._logger.debug("Disabling '{}'".format(sensor_id))
+            self._sensors[sensor_id].state = SENSTATE_DISABLED
 
     # Public Methods
+    def get_sensor(self, sensor_id):
+        """
+        Return a given sensor object by ID. Should only be used in rare cases, usually let the manager do it's thing.
+
+        :param sensor_id:
+        :return: CobraBay.sensors.basesensor
+        """
+        return self._sensors[sensor_id]
+
     def loop(self):
         """
         Check the status of sensors.
         :return:
         """
+        # Check for commands in the command queue.
+
+        while not self._q_cbsmcontrol.empty():
+            # Get the command from the queue.
+            try:
+                command = self._q_cbsmcontrol.get_nowait()
+            except queue.Empty:
+                continue
+            try:
+                self.set_sensor_state(target_state=command[0], target_sensor=command[1])
+            except BaseException as e:
+                self._logger.error("Could not process command '{}".format(command))
+                self._logger.exception(e)
+            self._q_cbsmcontrol.task_done()
+
         # If data is still in the queue from the previous loop, junk it.
         self._logger.debug("Beginning sensor scan loop.")
-        try:
-            self._logger.debug("Queue still has data. Flushing.")
-            while self.data.full():
-                self.data.get(block=False)
-                self.data.task_done()
-        except queue.Empty:
-            pass
+
+        # Flush the Data and Status queues.
+        self._flush_queue(self._q_cbsmdata)
+        self._flush_queue(self._q_cbsmstatus)
+
+        # Scan the sensors and collect data.
         self._logger.debug("Scanning sensors.")
         start_time = time.monotonic_ns()
         for sensor_id in self._sensors.keys():
@@ -119,15 +163,17 @@ class CBSensorMgr:
                 self._latest_state[sensor_id] = self._sensors[sensor_id].reading()
             elif self._sensors[sensor_id] == CobraBay.const.SENSTATE_FAULT:
                 # If the sensor faulted on creation, it doesn't have a reading method, construct a fault response.
-                self._latest_state[sensor_id] = SensorResponse(timestamp=datetime64('now'),
-                                                               response_type=CobraBay.const.SENSTATE_FAULT,
-                                                               reading=None, fault_reason="Did not initialize.")
+                self._latest_state[sensor_id] = SensorReading(response_type=CobraBay.const.SENSTATE_FAULT,
+                                                              range=None, temp=None, fault_reason="Did not initialize.")
         # Calculate the run_time.
         run_time = time.monotonic_ns() - start_time
         self._scan_speed_log.append(run_time)
         self._scan_speed_log = self._scan_speed_log[:100]
         self._logger.debug("Enqueing scan data.")
-        self.data.put(self._latest_state, timeout=1)
+        # Enqueue a SensorResponse.
+        self._q_cbsmdata.put(
+            SensorResponse(timestamp=datetime64('now','ns'), sensors=self._latest_state, scan_time = run_time),
+            timeout=1)
         self._logger.debug("Loop complete.")
 
     def loop_forever(self):
@@ -199,6 +245,7 @@ class CBSensorMgr:
             del self._sensors[sensor_obj]
 
     def reset_i2cbus(self):
+
         self._logger.info("Resetting I2C bus on request.")
         self._ctrl_enable.value = False
         self._logger.info("Bus is now disabled. Waiting {}s before enablement.".format(self._wait_reset))
@@ -218,7 +265,28 @@ class CBSensorMgr:
             if isinstance(self._sensors[sensor_id], CobraBay.sensors.BaseSensor):
                 self._sensors[sensor_id].status = 'ranging'
 
+    def set_sensor_state(self, target_state, target_sensor=None):
+        """
+        Set state for one or many sensors.
+        :param target_state: State to set the sensor(s) to.
+        :param target_sensor: Sensors to set. Defaults to all.
+        :return: None
+        """
+        self._logger.info("{} - Starting detector state set.".format(time.monotonic()))
+        if target_state in (SENSTATE_DISABLED, SENSTATE_ENABLED, SENSTATE_RANGING):
+            # self._logger.debug("Traversing detectors to set status to '{}'".format(target_state))
+            # Traverse the dict looking for detectors that need activation.
+            for sensor in self._sensors:
+                if target_sensor is None or sensor == target_sensor:
+                    self._logger.info("{} - Setting sensor {}".format(time.monotonic(), sensor))
+                    self._logger.debug("Changing sensor {}".format(sensor))
+                    self._sensors[sensor].status = target_state
+                    self._logger.info("{} - Set complete.".format(time.monotonic()))
+        else:
+            raise ValueError("'{}' not a valid state for sensors.".format(target_state))
+
     # Public Properties
+    # None defined
 
     # Private Methods
     def _create_sensor_multiple(self, all_configs):
@@ -265,24 +333,6 @@ class CBSensorMgr:
         elif sensor_config['hw_type'] == 'VL53L1X':
             if self._i2c_bus is None:
                 raise ValueError("Using I2C Sensor without I2C bus defined!")
-            # Create an enablement pin in the appropriate place.
-            # if sensor_config['enable_board'] == 0:
-            #     try:
-            #         target_pin = getattr(board, sensor_config['enable_pin'])
-            #         enable_obj = digitalio.DigitalInOut(target_pin)
-            #     except AttributeError:
-            #         self._logger.error("Cannot configure sensor '{}'. Pin '{}' does not exist on the Pi.".
-            #                            format(sensor_config['name'],sensor_config['enable_pin']))
-            #         return
-            # else:
-            #     try:
-            #         target_board = self._ioexpanders[str(sensor_config['enable_board'])]
-            #     except KeyError:
-            #         self._logger.error("Cannot configure sensor '{}', I/O board at address '{}' is not configured.".
-            #                            format(sensor_config['name'],hex(sensor_config['enable_board'])))
-            #         return
-            #     else:
-            #         enable_obj = target_board.get_pin(sensor_config['enable_pin'])
             if sensor_config['enable_board'] == 0:
                 enable_board = 0
             else:
@@ -349,6 +399,15 @@ class CBSensorMgr:
         except BaseException as e:
             self._logger.critical("Unknown exception in accessing I2C bus!")
             raise e
+
+    def _flush_queue(self, q):
+        """ Flush a given queue """
+        while not q.empty():
+            try:
+                q.get(block=False)
+            except Empty:
+                continue
+            q.task_done()
 
     def _scan_aw9523s(self):
         """

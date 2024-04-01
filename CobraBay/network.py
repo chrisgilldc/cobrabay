@@ -29,12 +29,52 @@ class CBNetwork:
                  password,
                  cbcore,
                  ha_discover=True,
+                 chattiness=None,
                  accept_commands=True,
                  log_level="WARNING",
                  mqtt_log_level="DISABLED"):
+        """
+
+        :param unit_system: Unit system for sending messages. May be 'metric' or 'imperial'.
+        :param unit_system: str
+        :param system_name:
+        :param interface:
+        :param broker: IP or hostname of the MQTT broker.
+        :param port: Port of the MQTT broker. Defaults to 1883.
+        :param username:
+        :param password:
+        :param cbcore:
+        :param ha_discover:
+        :param raw_sensors:
+        :param accept_commands:
+        :param log_level:
+        :param mqtt_log_level:
+        """
+
+        # Set up logger.
+        self._logger = logging.getLogger("CobraBay").getChild("Network")
+        self._logger.setLevel(log_level.upper())
+        self._logger.info("Network initializing...")
+
+
         # Save parameters.
-        self._pistatus = None
-        self._display_obj = None
+        # Reference to the CobraBay Core.
+        self._cbcore = cbcore
+        # How chatty sending should be
+        if chattiness is None:
+            # Make sure this defaults out. Should be covered by the config handler, but you never know!
+            self._chattiness = {
+                'sensors_raw': False,
+                'sensors_always_send': False
+            }
+        else:
+            self._chattiness = chattiness
+            if self._chattiness['sensors_raw']:
+                self._logger.info("Raw sensor chattiness enabled!")
+            if self._chattiness['sensors_always_send']:
+                self._logger.info("Sensors always send enabled! Prepare to be deluged!")
+        # Interface to use.
+        self._interface = interface
         self._mqtt_broker = broker
         self._mqtt_port = port
         self._mqtt_username = username
@@ -45,15 +85,15 @@ class CBNetwork:
             'override': False,
             'start': time.monotonic()
         }
-        self._unit_system = unit_system
         self._system_name = system_name
-        self._interface = interface
-        self._cbcore = cbcore
+        self._unit_system = unit_system
 
-        # Set up logger.
-        self._logger = logging.getLogger("CobraBay").getChild("Network")
-        self._logger.setLevel(log_level.upper())
-        self._logger.info("Network initializing...")
+        # Initialize variables.
+        # Reference to the CBDisplay object.
+        self._display_obj = None
+        # Reference to the Hardware Monitor
+        self._pistatus = None
+
 
         # Create a sublogger for the MQTT client.
         self._logger_mqtt = logging.getLogger("CobraBay").getChild("MQTT")
@@ -71,7 +111,7 @@ class CBNetwork:
         # Initialize variables
         self._reconnect_timestamp = None
         self._mqtt_connected = False
-        self._discovery_log = {'system': False}
+        self._discovery_log = {'system': False, 'sensors': False}
         self._pistatus_timestamp = 0
 
         # Current device state. Will get updated every time we're polled.
@@ -140,6 +180,10 @@ class CBNetwork:
             self._logger.error("Asked to deregister Bay ID '{}' but bay with that ID does not exist.".format(bay_id))
         else:
             self._logger.debug("Bay ID '{}' deregistered.".format(bay_id))
+
+    def register_sensormgr(self, sensormgr_obj):
+        """Register the Sensor Manager with the Network handler"""
+        self._sensormgr = sensormgr_obj
 
     def register_trigger(self, trigger_obj):
         self._logger.debug("Received trigger registration for {}".format(trigger_obj.id))
@@ -353,8 +397,11 @@ class CBNetwork:
         self._mqtt_connected = True
         return True
 
-    # Convenience method to start everything network related at once.
     def connect(self):
+        """
+        Convenience method to connect to MQTT.
+        :return:
+        """
         try:
             self._connect_mqtt()
         except Exception as e:
@@ -362,6 +409,10 @@ class CBNetwork:
         return None
 
     def disconnect(self, message=None):
+        """
+        Convenience method to perform planned disconnects. Will log with specific 'message' if provided.
+        :param message:
+        """
         self._logger.info('Planned disconnect with message "' + str(message) + '"')
         # If we have a disconnect message, send it to the device topic.
         # if message is not None:
@@ -427,6 +478,10 @@ class CBNetwork:
         # Add the display. System can't seem to validly compare, so we should always send.
         outbound_messages.append(
             {'topic': 'CobraBay/' + self._client_id + '/display', 'payload': self.display.current, 'repeat': True})
+        # Add the direct sensor readings if requested.
+        if self._chattiness['sensors_raw']:
+            outbound_messages.extend(self._mqtt_messages_sensors(force_publish=self._chattiness['sensors_always_send']))
+
         # Add in all bays.
         self._logger.debug("Generating messages for bays: {}".format(self._bay_registry))
         for bay in self._bay_registry:
@@ -438,6 +493,14 @@ class CBNetwork:
             for i in range(0, len(outbound_messages)):
                 outbound_messages[i]['repeat'] = True
         return outbound_messages
+
+    def _mqtt_messages_sensors(self, force_publish=False):
+        outbound_messages = []
+        for sensor_id in self._cbcore.configured_sensors:
+            outbound_messages.extend(self._mqtt_messages_sensor(sensor_id, force_publish=force_publish))
+        self._logger.debug("Compiled sensor messages: {}".format(outbound_messages))
+        return outbound_messages
+
 
     def _mqtt_messages_pistatus(self, input_obj):
         outbound_messages = [
@@ -453,80 +516,112 @@ class CBNetwork:
         return outbound_messages
 
     def _mqtt_messages_bay(self, input_obj):
+        """
+
+        :param input_obj:
+        :type input_obj: CobraBay.CBBay
+        :return:
+        """
         outbound_messages = []
         # Topic base for convenience.
         topic_base = 'CobraBay/' + self._client_id + '/' + input_obj.id + '/'
         # Bay state
         outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
 
-#        if self._ha_info['override']:
-#            outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
+        # if self._ha_info['override']:
+        #     outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
 
-        # Only create sensor-based messages if the sensors are active, which happens when the bay is running.
-        if input_obj.state in (BAYSTATE_DOCKING, BAYSTATE_UNDOCKING, BAYSTATE_VERIFY) or self._ha_info['override']:
-            # Bay Occupancy
-            outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
-            # Bay vector
-            outbound_messages.append(
-                {'topic': topic_base + 'vector', 'payload': input_obj.vector._asdict(), 'repeat': False})
-            # Bay motion timer
-            outbound_messages.append(
-                {'topic': topic_base + 'motion_timer', 'payload': input_obj.motion_timer, 'repeat': False})
-            # Bay occupancy. This value can get wonky as detectors are shutting down, so don't update during shutdown.
-            if self._cbcore.system_state != 'shutdown':
-                outbound_messages.append(
-                    {'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
-            outbound_messages.extend(self.publish_bay_detectors(input_obj.id))
+        # # Only create sensor-based messages if the sensors are active, which happens when the bay is running.
+        # if input_obj.state in (BAYSTATE_DOCKING, BAYSTATE_UNDOCKING, BAYSTATE_VERIFY) or self._ha_info['override']:
+        # Bay Occupancy
+        outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
+        # Bay vector
+        outbound_messages.append(
+            {'topic': topic_base + 'vector', 'payload': input_obj.vector._asdict(), 'repeat': False})
+        # Bay motion timer
+        outbound_messages.append(
+            {'topic': topic_base + 'motion_timer', 'payload': input_obj.motion_timer, 'repeat': False})
+        # Sensors. They can get wonky during shutdown, so skip them then.
+        self._logger.debug("Bay sensor info has: {}".format(input_obj.sensor_info))
+        if self._cbcore.system_state != 'shutdown':
+            for sensor_id in input_obj.configured_sensors['long'] + input_obj.configured_sensors['lat']:
+                # Only send if the sensor actually has a value. This will usually be right at startup.
+                # Quality
+                if sensor_id in input_obj.sensor_info['quality']:
+                    outbound_messages.append(
+                        {'topic': topic_base + 'sensors/' + sensor_id + '/quality',
+                         'payload': input_obj.sensor_info['quality'][sensor_id],
+                         'repeat': self._chattiness['sensors_always_send']})
+                # Adjusted Range
+                if sensor_id in input_obj.sensor_info['reading']:
+                    outbound_messages.append(
+                        {'topic': topic_base + 'sensors/' + sensor_id + '/reading',
+                         'payload': input_obj.sensor_info['reading'][sensor_id],
+                         'repeat': self._chattiness['sensors_always_send']})
+        # outbound_messages.extend(self.publish_bay_detectors(input_obj.id))
 
         # If performing a VERIFY on the bay, we now have all the messages, set bay back to ready.
         if input_obj.state == BAYSTATE_VERIFY:
             input_obj.state = BAYSTATE_READY
         return outbound_messages
 
-    def publish_bay_detectors(self, bay_id, publish=False):
-        try:
-            bay_obj = self._bay_registry[bay_id]
-        except KeyError:
-            self._logger.error("Asked to publish detectors for non-existent Bay ID '{}'. Cannot do!".format(bay_id))
-            return
+    # def publish_bay_detectors(self, bay_id, publish=False):
+    #     try:
+    #         bay_obj = self._bay_registry[bay_id]
+    #     except KeyError:
+    #         self._logger.error("Asked to publish detectors for non-existent Bay ID '{}'. Cannot do!".format(bay_id))
+    #         return
+    #
+    #     sensor_messages = []
+    #     topic_base = 'CobraBay/' + self._client_id + '/' + bay_obj.id + '/'
+    #     #TODO: Update this to handle bay-adjusted sensor values.
+    #     # for sensor in bay_obj.detectors:
+    #     #     sensor_messages.extend(
+    #     #         self._mqtt_messages_sensor(bay_obj.detectors[detector], topic_base + 'sensors/'))
+    #
+    #
+    #     if publish:
+    #         for message in sensor_messages:
+    #             self._pub_message(**message)
+    #     else:
+    #         return sensor_messages
 
-        detector_messages = []
-        topic_base = 'CobraBay/' + self._client_id + '/' + bay_obj.id + '/'
-        for detector in bay_obj.detectors:
-            detector_messages.extend(
-                self._mqtt_messages_detector(bay_obj.detectors[detector], topic_base + 'detectors/'))
-
-        if publish:
-            for message in detector_messages:
-                self._pub_message(**message)
-        else:
-            return detector_messages
-
-    def _mqtt_messages_detector(self, input_obj, topic_base=None):
-        self._logger_mqtt.debug("Building MQTT messages for detector: {}".format(input_obj.id))
+    def _mqtt_messages_sensor(self, sensor_id, topic_base=None, force_publish=False):
+        self._logger_mqtt.debug("Building MQTT messages for sensor: {}".format(sensor_id))
         if topic_base is None:
-            topic_base = 'CobraBay/' + self._client_id + '/independent_detectors'
-        topic_base = topic_base + input_obj.id + '/'
-        outbound_messages = []
-        # Detector State, the assigned state of the detector by the system.
-        outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
-        # Detector status, its actual current state.
-        outbound_messages.append({'topic': topic_base + 'status', 'payload': input_obj.status, 'repeat': False})
-        # Is the detector in fault?
-        outbound_messages.append({'topic': topic_base + 'fault', 'payload': input_obj.fault, 'repeat': False})
-        # The detector's current offset
-        outbound_messages.append({'topic': topic_base + 'offset', 'payload': input_obj.offset, 'repeat': False})
-        # Send value, raw value and quality if detector is ranging.
-        if input_obj.status == SENSTATE_RANGING:
-            # Detector Value.
-            outbound_messages.append({'topic': topic_base + 'reading', 'payload': input_obj.value, 'repeat': False})
-            # Detector reading unadjusted by depth.
-            outbound_messages.append(
-                {'topic': topic_base + 'raw_reading', 'payload': input_obj.value_raw, 'repeat': False})
-            # Detector Quality
-            outbound_messages.append({'topic': topic_base + 'quality', 'payload': input_obj.quality, 'repeat': False})
-        self._logger_mqtt.debug("Have detector messages: {}".format(outbound_messages))
-        return outbound_messages
+            topic_base = 'CobraBay/' + self._client_id + '/sensors/'
+        topic_base = topic_base + sensor_id + '/'
+        try:
+            sensor_latest_data = self._cbcore.sensor_latest_data[sensor_id]
+        except KeyError:
+            self._logger.debug("No data available for sensor id '{}'. Nothing to send.".format(sensor_id))
+            # Must return an empty list, None isn't iterable, duh.
+            return []
+        else:
+            self._logger.debug("Latest sensor data: {}".format(sensor_latest_data))
+            outbound_messages = [
+                # Sensor State - The requested state for the sensor.
+                {'topic': topic_base + 'state', 'payload': sensor_latest_data.state, 'repeat': force_publish},
+                # Sensor Status - What the sensor is actually doing. Should be the same!
+                {'topic': topic_base + 'status', 'payload': sensor_latest_data.status, 'repeat': force_publish},
+                # Fault - If Status != State -> Fault. This is a boolean for easy conversion to an HA binary_sensor.
+                {'topic': topic_base + 'fault', 'payload': sensor_latest_data.fault, 'repeat': force_publish},
+            ]
+            # Send value, raw value and quality if detector is ranging.
+            if sensor_latest_data.response_type == SENSOR_VALUE_OK:
+                # Detector Range.
+                outbound_messages.append(
+                    {'topic': topic_base + 'range',
+                     'payload': sensor_latest_data.range,
+                     'repeat': force_publish})
+                # Detector Temperature
+                outbound_messages.append(
+                    {'topic': topic_base + 'temp',
+                     'payload': sensor_latest_data.temp,
+                     'repeat': force_publish})
+
+            self._logger_mqtt.debug("Have detector messages: {}".format(outbound_messages))
+            return outbound_messages
 
     def _ha_discovery(self, force=False):
         for item in self._discovery_log:
@@ -537,6 +632,9 @@ class CBNetwork:
                 if item == 'system':
                     self._logger.info("Sending Home Assistant discovery for '{}'.".format(item))
                     self._ha_discovery_system()
+                elif item == 'sensors':
+                    self._logger.info("Sending Home Assistant discovery for '{}'.".format(item))
+                    self._ha_discovery_sensors()
                 else:
                     self._logger.info("Sending home assistant discovery for bay ID: {}".format(item))
                     self._ha_discovery_bay(item)
@@ -591,7 +689,7 @@ class CBNetwork:
             optional_parameters = ['icon', 'value_template']
         elif entity_type == 'sensor':
             required_parameters = []
-            nullable_parameters = []
+            nullable_parameters = ['device_class']
             optional_parameters = ['icon', 'unit_of_measurement', 'value_template']
         elif entity_type == 'select':
             required_parameters = ['options']
@@ -600,18 +698,21 @@ class CBNetwork:
         else:
             raise ValueError('Discovery is of unknown type {}'.format(entity_type))
 
+        # Requirement parameters *must* be passed, raise an exception if they aren't set.
         for param in required_parameters:
             try:
                 discovery_dict[param] = kwargs[param]
             except KeyError as e:
                 raise e
 
+        # Nullable parameters must exist when we send discovery, if not included set to None.
         for param in nullable_parameters:
             try:
                 discovery_dict[param] = kwargs[param]
             except KeyError:
                 discovery_dict[param] = None
 
+        # Optional parameters don't need to be included at all.
         for param in optional_parameters:
             try:
                 discovery_dict[param] = kwargs[param]
@@ -770,6 +871,7 @@ class CBNetwork:
             entity_type='sensor',
             entity="{}_{}_speed".format(self._system_name.lower(), bay_obj.id),
             value_template="{{ value_json.speed }}",
+            device_type="speed",
             unit_of_measurement=self._uom('speed')
         )
         # Bay Direction
@@ -800,58 +902,54 @@ class CBNetwork:
             payload_not_available="error"
         )
 
-        # Discover the detectors....
+        # Bay sensors.
+        #TODO: Send filtered sensor values.
 
-        for detector in bay_obj.detectors:
-            det_obj = bay_obj.detectors[detector]
-            detector_base = topic_base + "detectors/" + det_obj.id + "/"
+
+    def _ha_discovery_sensors(self):
+        """
+        Send Home Assistant messages for sensors.
+        :return:
+        """
+        #TODO: Update discovery for new data layout.
+        # Discover the sensors....
+        topic_base = "CobraBay/" + self._client_id + '/'
+        for sensor_id in self._cbcore.configured_sensors:
+            sen_obj = self._sensormgr.get_sensor(sensor_id)
+            sensor_base = topic_base + "sensors/" + sensor_id + "/"
 
             # Current state of the detector.
             self._ha_discover(
-                name="Detector - {} State".format(det_obj.name),
-                topic=detector_base + "state",
+                name="Sensor - {} State".format(sen_obj.name),
+                topic=sensor_base + "state",
                 entity_type="sensor",
-                entity="{}_{}_{}_state".format(self._system_name.lower(), bay_obj.id, det_obj.id),
+                entity="{}_{}_state".format(self._system_name.lower(), sensor_id),
                 value_template="{{ value|capitalize }}"
             )
             self._ha_discover(
-                name="Detector - {} Status".format(det_obj.name),
-                topic=detector_base + "status",
+                name="Sensor - {} Status".format(sen_obj.name),
+                topic=sensor_base + "status",
                 entity_type="sensor",
-                entity="{}_{}_{}_status".format(self._system_name.lower(), bay_obj.id, det_obj.id),
+                entity="{}_{}_status".format(self._system_name.lower(), sensor_id),
                 value_template="{{ value|capitalize }}"
             )
 
             # Is the detector in fault?
             self._ha_discover(
-                name="Detector - {} Fault".format(det_obj.name),
-                topic=detector_base + "fault",
+                name="Sensor - {} Fault".format(sen_obj.name),
+                topic=sensor_base + "fault",
                 entity_type="binary_sensor",
-                entity="{}_{}_{}_fault".format(self._system_name.lower(), bay_obj.id, det_obj.id),
+                entity="{}_{}_fault".format(self._system_name.lower(), sensor_id),
                 payload_on="true",
                 payload_off="false"
             )
 
-            # Reading. Modified by offset.
+            # Reading direct from the sensor.
             self._ha_discover(
-                name="Detector - {} Reading".format(det_obj.name),
-                topic=detector_base + "reading",
+                name="Sensor - {} Direct Reading".format(sen_obj.name),
+                topic=sensor_base + "range",
                 entity_type="sensor",
-                entity="{}_{}_{}_reading".format(self._system_name.lower(), bay_obj.id, det_obj.id),
-            )
-
-            # Raw reading, unmodified by offset.
-            self._ha_discover(
-                name="Detector - {} Raw Reading".format(det_obj.name),
-                topic=detector_base + "raw_reading",
-                entity_type="sensor",
-                entity="{}_{}_{}_raw_reading".format(self._system_name.lower(), bay_obj.id, det_obj.id),
-            )
-
-            # Quality of the detector.
-            self._ha_discover(
-                name="Detector - {} Quality".format(det_obj.name),
-                topic=detector_base + "quality",
-                entity_type="sensor",
-                entity="{}_{}_{}_quality".format(self._system_name.lower(), bay_obj.id, det_obj.id),
+                entity="{}_{}_reading".format(self._system_name.lower(), sensor_id),
+                device_class="distance",
+                unit_of_measurement="in"
             )
