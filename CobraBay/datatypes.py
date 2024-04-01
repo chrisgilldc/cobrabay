@@ -7,6 +7,7 @@ from typing import NamedTuple as namedtuple_typed
 from pint import Quantity
 from numpy import datetime64
 
+
 # Config Validation
 # CBValidation = namedtuple_untyped("CBValidation", ['valid', 'result'])
 class CBValidation(namedtuple_typed):
@@ -41,23 +42,29 @@ class TFMPData(namedtuple_typed):
 
 class SensorReading(namedtuple_typed):
     """
-    Holds sensor readings. This covers all fields for currently supported sensors.
-    """
-    range: Quantity or None
-    temp: Quantity or None
-
-
-class SensorResponse(namedtuple_typed):
-    """
     General purpose sensor response, used to carry sensor values from sensor objects to elsewhere.
     response_type will be as defined in const.SENOR_VALUE_*. Only SENOR_VALUE_OK should be considered readable.
     All other response codes can be considered failures to read. They may be lumped together or parsed out as
     appropriate.
     """
-    timestamp: datetime64
+    state: str
+    status: str
+    fault: bool
     response_type: str
-    reading: SensorReading or None
+    range: Quantity or None
+    temp: Quantity or None
     fault_reason: str or None
+
+
+class SensorResponse(namedtuple_typed):
+    """
+    Contains a single set of sensor responses from the sensor manager at a given moment in time. Every sensor should
+    always have a SensorReading returned. Those without a new reading ready should use the most recent values with the
+    SENSOR_VALUE_INR (Interrupt Not Ready) response type.
+    """
+    timestamp: datetime64
+    sensors: dict
+    scan_time: float
 
 
 # Vector = namedtuple_untyped('Vector', ['speed', 'direction'])
