@@ -115,7 +115,7 @@ class CBSensorMgr:
         self._logger.debug("Disabling all sensors before deletion.")
         for sensor_id in self._sensors:
             self._logger.debug("Disabling '{}'".format(sensor_id))
-            self._sensors[sensor_id].state = SENSTATE_DISABLED
+            self._sensors[sensor_id].status = SENSTATE_DISABLED
 
     # Public Methods
     def get_sensor(self, sensor_id):

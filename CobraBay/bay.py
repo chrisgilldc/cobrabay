@@ -58,6 +58,7 @@ class CBBay:
         # Save the parameters.
         self._cbcore = cbcore
         self._config = {'long': longitudinal, 'lat': lateral}
+        self._config_merged = self._merge_config()
         self.depth_abs = depth
         self._name = name
         self._q_cbsmcontrol = q_cbsmcontrol
@@ -145,7 +146,7 @@ class CBBay:
         self.state = "ready"
 
     def check_timer(self):
-        #TODO: Fix this so it works.
+        # TODO: Fix this so it works.
         self._logger.debug("Evaluating for timer expiration.")
         # Update the dock timer.
         self._logger.debug("Selected range sensor is: {} ({})".format(self._selected_range,
@@ -223,33 +224,54 @@ class CBBay:
             #     self._sensor_log = [copy.deepcopy(self._cbcore.sensor_latest_data)] + self._sensor_log[0:9]
             #     self._logger.debug("Sensor log now has '{}' entries.".format(len(self._sensor_log)))
             #     self._logger.debug("Latest entry is: {}".format(self._sensor_log[0]))
-            for sensor_id in self._configured_sensors['long'] + self._configured_sensors['lat']:
-                self._logger.debug("Updating values for '{}'".format(sensor_id))
+
+            # Update all the Longitudinal sensors.
+            for sensor_id in self._configured_sensors['long']:
+                self._logger.debug("Updating values for '{}' (Long)".format(sensor_id))
                 # State
                 self._sensor_info['status'][sensor_id] = self._cbcore.sensor_log[0].sensors[sensor_id].response_type
 
                 # Reading
                 if self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_VALUE_OK:
                     # If the sensor actually reported a value, go with it.
-                    self._sensor_info['reading'][sensor_id] = self._cbcore.sensor_log[0].sensors[sensor_id].range
+                    self._sensor_info['reading'][sensor_id] = (
+                            self._cbcore.sensor_log[0].sensors[sensor_id].range - self._config_merged[sensor_id][
+                        'zero_point']
+                    )
                 elif self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_VALUE_INR:
                     # This means we're waiting for the interrupt. Continue to use the most recent value.
                     self._sensor_info['reading'][sensor_id] = self._most_recent_reading(sensor_id)
                 else:
                     self._sensor_info['reading'][sensor_id] = GEN_UNKNOWN
 
-            # Update longitudinal-only values.
-            for sensor_id in self._configured_sensors['long']:
-                self._sensor_info['quality'][sensor_id] = self._sensor_quality(sensor_id)
+                # Quality
+                self._sensor_info['quality'][sensor_id] = self._sensor_quality_long(sensor_id)
+
+                # Motion
                 self._sensor_info['motion'][sensor_id] = self._sensor_motion(sensor_id)
-                # TODO: vector
 
-            # Update lateral-only values.
+            # Update the Lateral sensors.
             for sensor_id in self._configured_sensors['lat']:
-                # TODO: Intercepted
-                pass
+                self._logger.debug("Updating values for '{}' (Lat)".format(sensor_id))
 
+                # Update the readings.
+                if self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_VALUE_OK:
+                    # If the sensor actually reported a value, update it with the offset and store.
+                    self._sensor_info['reading'][sensor_id] = (
+                            self._cbcore.sensor_log[0].sensors[sensor_id].range - self._config_merged[sensor_id][
+                        'zero_point']
+                    )
+                elif self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_VALUE_INR:
+                    # This means we're waiting for the interrupt. Continue to use the most recent value.
+                    self._sensor_info['reading'][sensor_id] = self._most_recent_reading(sensor_id)
+                else:
+                    self._sensor_info['reading'][sensor_id] = GEN_UNKNOWN
 
+                # Intercept status.
+                self._sensor_info['intercepted'][sensor_id] = self._sensor_intercepted(sensor_id)
+
+                # Quality
+                self._sensor_info['quality'][sensor_id] = self._sensor_quality_lat(sensor_id)
 
     ## Public Properties
 
@@ -359,49 +381,54 @@ class CBBay:
         :rtype: bool
         """
         # TODO: Rework all this logic. Should probably be a rolling monitor of values?
-        return False
-        # self._logger.debug("Checking for occupancy.")
-        # # Status variable for occupancy. Start at unknown.
-        # occ = 'unknown'
-        # # Range detector is required to determine occupancy. If it's not ranging, return immediately.
-        # # Rely on other methods to have enabled sensors appropriately.
-        # if self._sensors[self._selected_range].state != SENSTATE_RANGING:
-        #     self._logger.debug("Selected longitudinal sensor not ranging. Occupancy 'unknown'")
-        #     occ = 'unknown'
-        #
-        # # Only hit the range quality once.
-        # range_quality = self._sensors[self._selected_range].quality
-        # if range_quality in (SENSOR_QUALITY_NOOBJ, SENSOR_QUALITY_DOOROPEN, SENSOR_QUALITY_BEYOND):
-        #     # Cases where there's no vehicle longitudinally means we jump straight to unoccupied.
-        #     self._logger.debug("Longitudinal quality is '{}', not occupied.".format(range_quality))
-        #     occ = "false"
-        # elif range_quality in (SENSOR_QUALITY_EMERG, SENSOR_QUALITY_BACKUP, SENSOR_QUALITY_PARK,
-        #                        SENSOR_QUALITY_FINAL, SENSOR_QUALITY_BASE, DETECTOR_QUALITY_OK):
-        #     self._logger.debug("Matched longitudinal quality: {}".format(range_quality))
-        #     # If the detector is giving us any of the 'close enough' qualities, there's something being found that
-        #     # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
-        #     # the sensors or whatnot
-        #     occ_score = 1
-        #     for intercept in self.lateral_sorted:
-        #         self._logger.debug("Checking quality for lateral detector '{}'.".format(intercept))
-        #         if self._sensors[intercept.lateral].quality in (DETECTOR_QUALITY_OK, SENSOR_QUALITY_WARN,
-        #                                                         SENSOR_QUALITY_CRIT):
-        #             # No matter how badly parked the vehicle is, it's still *there*
-        #             occ_score += 1
-        #     self._logger.debug("Achieved lateral score {} of {}".format(occ_score, self._occupancy_score))
-        #     if occ_score >= self._occupancy_score:
-        #         # All sensors have found something more or less in the right place, so yes, we're occupied!
-        #         occ = 'true'
-        #     else:
-        #         occ = 'false'
-        # else:
-        #     self._logger.warning(
-        #         "Occupancy cannot be calculated, longitudinal sensor had quality '{}'".format(range_quality))
-        #     occ = 'error'
-        # if occ != self._occupancy:
-        #     self._logger.info("Occupancy has changed from '{}' to '{}'".format(self._occupancy, occ))
-        # self._occupancy = occ
-        # return occ
+
+        self._logger.debug("Checking for occupancy.")
+        # Status variable for occupancy. Start at unknown.
+        occ = GEN_UNKNOWN
+
+        # Must be actively ranging to determine occupancy. Check for that, return unknown otherwise.
+        if self._selected_range not in self._sensor_info['status']:
+            self._logger.info("Cannot calculate occupancy, selected longitudinal sensor does not have a known status. "
+                              "This is fine on startup.")
+            self._logger.info("Current sensor_info: {}".format(self._sensor_info))
+            return GEN_UNKNOWN
+
+        if self._sensor_info['status'][self._selected_range] != SENSOR_VALUE_OK:
+            self._logger.debug("Selected longitudinal sensor not ranging. Occupancy 'unknown'")
+            return GEN_UNKNOWN
+
+        range_quality = self._sensor_info['quality'][self._selected_range]
+        if range_quality in (SENSOR_QUALITY_NOOBJ, SENSOR_QUALITY_DOOROPEN, SENSOR_QUALITY_BEYOND):
+            # Cases where there's no vehicle longitudinally means we jump straight to unoccupied.
+            self._logger.debug("Longitudinal quality is '{}', not occupied.".format(range_quality))
+            occ = "false"
+        elif range_quality in (SENSOR_QUALITY_EMERG, SENSOR_QUALITY_BACKUP, SENSOR_QUALITY_PARK,
+                               SENSOR_QUALITY_FINAL, SENSOR_QUALITY_BASE, SENSOR_QUALITY_OK):
+            self._logger.debug("Matched longitudinal quality: {}".format(range_quality))
+            # If the detector is giving us any of the 'close enough' qualities, there's something being found that
+            # could be a vehicle. Check the lateral sensors to be sure that's what it is, rather than somebody blocking
+            # the sensors or whatnot
+            occ_score = 1
+            for sensor_id in self._configured_sensors['lat']:
+                self._logger.debug("Checking quality for lateral sensor '{}'.".format(sensor_id))
+                if self._sensor_info['quality'][sensor_id] in (SENSOR_QUALITY_OK, SENSOR_QUALITY_WARN,
+                                                                SENSOR_QUALITY_CRIT):
+                    # No matter how badly parked the vehicle is, it's still *there*
+                    occ_score += 1
+            self._logger.debug("Achieved lateral score {} of {}".format(occ_score, self._occupancy_score))
+            if occ_score >= self._occupancy_score:
+                # All sensors have found something more or less in the right place, so yes, we're occupied!
+                occ = 'true'
+            else:
+                occ = 'false'
+        else:
+            self._logger.warning(
+                "Occupancy cannot be calculated, longitudinal sensor had quality '{}'".format(range_quality))
+            occ = 'error'
+        if occ != self._occupancy:
+            self._logger.info("Occupancy has changed from '{}' to '{}'".format(self._occupancy, occ))
+        self._occupancy = occ
+        return occ
 
     @property
     def range_pct(self):
@@ -421,6 +448,11 @@ class CBBay:
             return range_pct
         else:
             return 0
+
+    @property
+    def selected_range(self):
+        """ The range sensor selected to be controlling for longitudinal readings."""
+        return self._selected_range
 
     @property
     def sensor_info(self):
@@ -461,7 +493,7 @@ class CBBay:
             # self._sensor_log = []  # Reset the sensor log to flush stale data.
             self._logger.info("Start time: {}".format(self._current_motion['mark']))
             self._logger.info("Setting all sensors to ranging.")
-            #TODO: Convert to queue command.
+            # TODO: Convert to queue command.
             self._q_cbsmcontrol.put((SENSTATE_RANGING, None))
         # When requesting to leave a motion state.
         elif m_input not in SYSSTATE_MOTION and self.state in SYSSTATE_MOTION:
@@ -492,14 +524,28 @@ class CBBay:
 
     ## Private Methods
 
+    def _merge_config(self):
+        merged_config = {}
+        for sensor_config in self._config['long']['sensors']:
+            merged = {**self._config['long']['defaults'], **sensor_config}
+            merged_config[merged['name']] = merged
+        for sensor_config in self._config['lat']['sensors']:
+            merged = {**self._config['lat']['defaults'], **sensor_config}
+            merged_config[merged['name']] = merged
+        self._logger.debug("Merged sensor config by name: {}".format(merged_config))
+        return merged_config
+
     def _most_recent_reading(self, sensor_id):
         """Get the most recent reading from the sensor log for a given sensor_id"""
         # TODO: Make this more robust or with more options to deal with edge cases.
         for entry in self._cbcore.sensor_log:
-            if entry.sensors[sensor_id].response_type == SENSOR_VALUE_OK:
-                return entry
-            elif entry.sensors[sensor_id].response_type == SENSOR_VALUE_INR:
-                continue
+            try:
+                if entry.sensors[sensor_id].response_type == SENSOR_VALUE_OK:
+                    return entry.sensors[sensor_id].range
+                elif entry.sensors[sensor_id].response_type == SENSOR_VALUE_INR:
+                    continue
+            except KeyError:
+                pass
 
     # Old _make_range implementation...
 
@@ -566,7 +612,7 @@ class CBBay:
             warn_distance = sensor_config['zero_point'] + (adjusted_depth * sensor_config['pct_warn'])
             self._logger.debug("Warning distance: {}".format(warn_distance))
 
-            #TODO: Actually implement error_margins.
+            # TODO: Actually implement error_margins.
             error_margin = 0
 
             # Set the quality ranges.
@@ -606,6 +652,9 @@ class CBBay:
                 [sensor_config['zero_point'] - sensor_config['spread_warn'],
                  sensor_config['zero_point'] + sensor_config['spread_warn']
                  ]
+            # This hard-wires a critical range that should always match.
+            self._quality_ranges[sensor_config['name']][SENSOR_QUALITY_CRIT] = \
+                [Quantity('-1 km'), Quantity('1 km')]
 
             self._logger.debug("Calculated quality ranges --")
             self._logger.debug(pformat(self._quality_ranges[sensor_config['name']]))
@@ -632,6 +681,18 @@ class CBBay:
     #                 self._sensor_info['reading'][sensor_id])
     #             ))
 
+    def _sensor_intercepted(self, sensor_id):
+        self._logger.debug("Checking interception status for '{}'".format(sensor_id))
+
+        intercept = next(item for item in self.lateral_sorted if item.lateral == sensor_id)
+        self._logger.debug("Using intercept {}".format(intercept))
+        if self._sensor_info['reading'][self.selected_range] <= intercept.intercept:
+            self._logger.info("Lateral '{}' is intercepted.".format(sensor_id))
+            return True
+        else:
+            self._logger.info("Lateral '{}' is not intercepted.".format(sensor_id))
+            return False
+
     def _sensor_motion(self, sensor_id):
         """
         Calculate motion for a given Sensor ID
@@ -643,7 +704,7 @@ class CBBay:
         if sensor_id not in self._configured_sensors['long']:
             raise ValueError("Sensor ID '{}' is not a configure Longitudinal sensor. Cannot compute motion.".
                              format(sensor_id))
-        #TODO: Finish the motion logic.
+        # TODO: Finish the motion logic.
         filtered_log = []
         self._logger.debug("Sensor log: {} ({})".format(self._cbcore.sensor_log, type(self._cbcore.sensor_log)))
         for response in self._cbcore.sensor_log:
@@ -656,12 +717,13 @@ class CBBay:
         if len(filtered_log) < 2:
             return GEN_UNKNOWN
         # Calculate the time difference in seconds.
-        timediff = ( filtered_log[0].timestamp - filtered_log[-1].timestamp )
+        timediff = (filtered_log[0].timestamp - filtered_log[-1].timestamp)
         self._logger.debug("Timediff is: {} ({})".format(timediff, type(timediff)))
 
         # Only take entries at least 250ms apart.
         if timediff < TIME_MOTION_EVAL:
-            self._logger.debug("First and last readings are {} ns apart. Less than 250ms, can't calculate.".format(timediff))
+            self._logger.debug(
+                "First and last readings are {} ns apart. Less than 250ms, can't calculate.".format(timediff))
             return GEN_UNKNOWN
 
         self._logger.debug("First log: {}".format(filtered_log[0]))
@@ -671,28 +733,34 @@ class CBBay:
         net_time = filtered_log[0].timestamp - filtered_log[-1].timestamp
         self._logger.info("Traveled '{}' in '{}'".format(net_dist, net_time))
 
+    def _sensor_quality_lat(self, sensor_id):
+        """
+        Determine quality for lateral sensors.
 
-    def _sensor_quality(self, sensor_id):
-        self._logger.debug("Evaluating longitudinal raw value '{}' for quality".format(self._sensor_info['reading'][sensor_id]))
-        self._logger.debug("Available qualities: {}".format(self._quality_ranges[sensor_id].keys()))
+        :param sensor_id:
+        :return:
+        """
+        sensor_reading = self._most_recent_reading(sensor_id)
+        self._logger.debug(
+            "Evaluating lateral raw value '{}' for quality".format(sensor_reading))
+        self._logger.debug("Sensor quality definitions: {}".format(self._quality_ranges[sensor_id]))
         # Is this a longitudinal or lateral sensor? We can tell by which sensor list it's on.
-        if sensor_id in self._configured_sensors['long']:
-            quality_ranges = (SENSOR_QUALITY_EMERG, SENSOR_QUALITY_BACKUP, SENSOR_QUALITY_PARK, SENSOR_QUALITY_FINAL,
-                      SENSOR_QUALITY_BASE, SENSOR_QUALITY_OK, SENSOR_QUALITY_BEYOND)
-        elif sensor_id in self._configured_sensors['lat']:
-            quality_ranges = (SENSOR_QUALITY_OK, SENSOR_QUALITY_WARN)
-        else:
-            raise ValueError("Cannot determine quality for non-existent sensor id '{}'!".format(sensor_id))
+        quality_ranges = (SENSOR_QUALITY_OK, SENSOR_QUALITY_WARN, SENSOR_QUALITY_CRIT)
+
+        # Is the sensor intercepted? If not, nothing else to do.
+        if not self._sensor_info['intercepted'][sensor_id]:
+            return SENSOR_NOINTERCEPT
 
         for quality in quality_ranges:
             self._logger.debug("Checking quality '{}'".format(quality))
             try:
                 if (self._quality_ranges[sensor_id][quality][0] <=
-                        self._sensor_info['reading'][sensor_id] <
-                        self._quality_ranges[sensor_id][quality][1]):
-                    self._logger.debug("In quality range '{}' ({} <= {} < {})".format(quality,
-                        self._quality_ranges[sensor_id][quality][0], self._sensor_info['reading'][sensor_id],
-                        self._quality_ranges[sensor_id][quality][1]))
+                        sensor_reading < self._quality_ranges[sensor_id][quality][1]):
+                    self._logger.debug("In quality range '{}' ({} <= {} < {})".
+                                       format(quality,
+                                              self._quality_ranges[sensor_id][quality][0],
+                                              sensor_reading,
+                                              self._quality_ranges[sensor_id][quality][1]))
                     return quality
             except ValueError:
                 self._logger.error(
@@ -702,6 +770,46 @@ class CBBay:
                         self._quality_ranges[sensor_id][quality][1], type(self._quality_ranges[sensor_id][quality][1]),
                         self._sensor_info['reading'][sensor_id]
                     ))
+
+        self._logger.debug("Did not otherwise match quality, marking 'unknown'")
+        # In case of a strange failure, return Unknown.
+        return GEN_UNKNOWN
+
+    def _sensor_quality_long(self, sensor_id):
+        """
+        Determine quality for longitudinal sensors.
+
+        :param sensor_id:
+        :return:
+        """
+        sensor_reading = self._most_recent_reading(sensor_id)
+        self._logger.debug(
+            "Evaluating longitudinal raw value '{}' for quality".format(sensor_reading))
+        self._logger.debug("Available qualities: {}".format(self._quality_ranges[sensor_id].keys()))
+        quality_ranges = (SENSOR_QUALITY_EMERG, SENSOR_QUALITY_BACKUP, SENSOR_QUALITY_PARK, SENSOR_QUALITY_FINAL,
+                          SENSOR_QUALITY_BASE, SENSOR_QUALITY_OK, SENSOR_QUALITY_BEYOND)
+
+        for quality in quality_ranges:
+            self._logger.debug("Checking quality '{}'".format(quality))
+            try:
+                if (self._quality_ranges[sensor_id][quality][0] <=
+                        sensor_reading < self._quality_ranges[sensor_id][quality][1]):
+                    self._logger.debug("In quality range '{}' ({} <= {} < {})".
+                                       format(quality,
+                                              self._quality_ranges[sensor_id][quality][0],
+                                              self._sensor_info['reading'][sensor_id],
+                                              self._quality_ranges[sensor_id][quality][1]))
+                    return quality
+            except ValueError:
+                self._logger.error(
+                    "Received ValueError when finding quality. Range start {} ({}), end {} ({}), read "
+                    "value {}".format(
+                        self._quality_ranges[sensor_id][quality][0], type(self._quality_ranges[sensor_id][quality][0]),
+                        self._quality_ranges[sensor_id][quality][1], type(self._quality_ranges[sensor_id][quality][1]),
+                        self._sensor_info['reading'][sensor_id]
+                    ))
+        # If we get here, quality is unknown.
+        return GEN_UNKNOWN
 
     def _select_range(self, longitudinal):
         """

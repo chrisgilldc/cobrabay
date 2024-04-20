@@ -34,7 +34,7 @@ SENSTATE_ENABLED = 'enabled'
 SENSTATE_RANGING = 'ranging'
 SENSTATE_NOTRANGING = 'not_ranging'
 
-# Non-Quantity values the sensor can be in without
+# Non-Quantity values the sensor can be in.
 SENSOR_VALUE_OK = 'ok'
 SENSOR_VALUE_INR = 'inr'  ## Interrupt Not Ready. IE: sensor wasn't ready to read.
 SENSOR_VALUE_WEAK = 'weak'

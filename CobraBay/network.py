@@ -543,21 +543,50 @@ class CBNetwork:
             {'topic': topic_base + 'motion_timer', 'payload': input_obj.motion_timer, 'repeat': False})
         # Sensors. They can get wonky during shutdown, so skip them then.
         self._logger.debug("Bay sensor info has: {}".format(input_obj.sensor_info))
+
         if self._cbcore.system_state != 'shutdown':
+            # Values which exist for both longitudinal and lateral sensors.
             for sensor_id in input_obj.configured_sensors['long'] + input_obj.configured_sensors['lat']:
                 # Only send if the sensor actually has a value. This will usually be right at startup.
                 # Quality
-                if sensor_id in input_obj.sensor_info['quality']:
+                #TODO: Streamline this logic once the underlying Bay issues are fixed.
+                try:
                     outbound_messages.append(
                         {'topic': topic_base + 'sensors/' + sensor_id + '/quality',
                          'payload': input_obj.sensor_info['quality'][sensor_id],
                          'repeat': self._chattiness['sensors_always_send']})
+                except KeyError:
+                    outbound_messages.append(
+                        {'topic': topic_base + 'sensors/' + sensor_id + '/quality',
+                         'payload': GEN_UNKNOWN,
+                         'repeat': self._chattiness['sensors_always_send']})
+
                 # Adjusted Range
-                if sensor_id in input_obj.sensor_info['reading']:
+                try:
                     outbound_messages.append(
                         {'topic': topic_base + 'sensors/' + sensor_id + '/reading',
                          'payload': input_obj.sensor_info['reading'][sensor_id],
                          'repeat': self._chattiness['sensors_always_send']})
+                except KeyError:
+                    outbound_messages.append(
+                        {'topic': topic_base + 'sensors/' + sensor_id + '/reading',
+                         'payload': GEN_UNKNOWN, 'repeat': self._chattiness['sensors_always_send']})
+
+            # Lateral-Only values.
+            for sensor_id in input_obj.configured_sensors['lat']:
+                # Intercepted status.
+                try:
+                    outbound_messages.append(
+                        {'topic': topic_base + 'sensors/' + sensor_id + '/intercepted',
+                        'payload': input_obj.sensor_info['intercepted'][sensor_id],
+                        'repeat': self._chattiness['sensors_always_send']})
+                except KeyError:
+                    outbound_messages.append(
+                        {'topic': topic_base + 'sensors/' + sensor_id + '/intercepted',
+                        'payload': GEN_UNKNOWN,
+                        'repeat': self._chattiness['sensors_always_send']})
+
+
         # outbound_messages.extend(self.publish_bay_detectors(input_obj.id))
 
         # If performing a VERIFY on the bay, we now have all the messages, set bay back to ready.
@@ -862,7 +891,7 @@ class CBNetwork:
                 topic=baycmd_trigger.topic,
                 entity_type='select',
                 entity="{}_{}_cmd".format(self._system_name.lower(), bay_obj.id),
-                options=["-", "Dock", "Undock", "Verify", "Abort"]
+                options=["-", "Dock", "Undock", "Verify", "Abort", "Save Position"]
             )
         # Bay Vector
         self._ha_discover(

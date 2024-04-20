@@ -86,7 +86,8 @@ class TFMini(SerialSensor):
 
     def reading(self):
         """Reading from the sensor."""
-        #TODO: Update to include temperature.
+        #TODO: Determine source of frequent (every few second) checksum errors.
+        # "OSError: Sensor checksum error"
         try:
             reading = self._clustered_read(self._clustering)
         except BaseException as e:
@@ -96,7 +97,6 @@ class TFMini(SerialSensor):
                 state=self.state,
                 status=self.status,
                 fault=self._fault,
-
                 response_type=CobraBay.const.SENSTATE_FAULT,
                 range=None,
                 temp=None,

@@ -270,6 +270,12 @@ class CBDisplay:
         self.current = img
 
     def show_motion(self, direction, bay_obj):
+        """Show motion placard based on bay object's sensor info.
+
+        :param bay_obj: Bay object to display.
+        :type bay_obj: CBBay
+        """
+        #TODO: Finish conversion from detector objects.
         self._logger.debug("Show Motion received bay '{}'".format(bay_obj.name))
 
         # Don't do motion display if the bay isn't in a motion state.
@@ -277,17 +283,24 @@ class CBDisplay:
             self._logger.error("Asked to show motion for bay that isn't performing a motion. Will not do!")
             return
 
+        self._logger.debug("Bay has sensor info: {}".format(bay_obj.sensor_info))
+
         # For easy reference.
         w = self._matrix_width
         h = self._matrix_height
         # Make a base image, black background.
-        final_image = Image.new("RGBA", (w, h), (0, 0, 0, 255))
+        final_image = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0, 0, 0, 255))
 
         ## Center area, the range number.
         self._logger.debug("Compositing range placard...")
+
+        # Get the range value from the bay.
+        range_reading = bay_obj.sensor_info['reading'][bay_obj.selected_range]
+        range_quality = bay_obj.sensor_info['quality'][bay_obj.selected_range]
+
         range_layer = self._placard_range(
-            bay_obj.reading.value,
-            bay_obj.reading.quality,
+            range_reading,
+            range_quality,
             bay_obj.state
         )
         final_image = Image.alpha_composite(final_image, range_layer)
@@ -298,7 +311,7 @@ class CBDisplay:
             if self._bottom_box.lower() == 'strobe':
                 final_image = Image.alpha_composite(final_image,
                                                     self._strobe(
-                                                        range_quality=bay_obj.reading.quality,
+                                                        range_quality=range_quality,
                                                         range_pct=bay_obj.range_pct))
             elif self._bottom_box.lower() == 'progress':
                 self._logger.debug("Compositing in progress for bottom box.")
@@ -310,40 +323,39 @@ class CBDisplay:
 
         self._logger.debug("Compositing laterals.")
         for intercept in bay_obj.lateral_sorted:
-            detector = bay_obj.detectors[intercept.lateral]
-            # Hit the detector quality once. There's a slim chance this could change during the course of evaluation and
-            # lead to wonky results.
-            dq = detector.quality
-            dv = detector.value
-            if dq in (SENSOR_NOINTERCEPT, SENSOR_QUALITY_NOOBJ):
+            self._logger.debug("Lateral: {}".format(intercept.lateral))
+            sensor_quality = bay_obj.sensor_info['quality'][intercept.lateral]
+            sensor_reading = bay_obj.sensor_info['reading'][intercept.lateral]
+
+            if sensor_quality in (SENSOR_NOINTERCEPT, SENSOR_QUALITY_NOOBJ):
                 # No intercept shows on both sides.
                 combined_layers = Image.alpha_composite(
-                    self._layers[bay_obj.id][detector.id]['L'][dq],
-                    self._layers[bay_obj.id][detector.id]['R'][dq]
+                    self._layers[bay_obj.id][intercept.lateral]['L'][sensor_quality],
+                    self._layers[bay_obj.id][intercept.lateral]['R'][sensor_quality]
                 )
                 final_image = Image.alpha_composite(final_image, combined_layers)
-            elif dq in (SENSOR_QUALITY_OK, SENSOR_QUALITY_WARN, SENSOR_QUALITY_CRIT):
+            elif sensor_quality in (SENSOR_QUALITY_OK, SENSOR_QUALITY_WARN, SENSOR_QUALITY_CRIT):
                 # Pick which side the vehicle is offset towards.
-                if detector.value == 0:
+                if sensor_reading == 0:
                     skew = ('L', 'R')  # In the rare case the value is exactly zero, show both sides.
-                elif detector.side == 'R' and dv > 0:
+                elif detector.side == 'R' and sensor_reading > 0:
                     skew = ('R')
-                elif detector.side == 'R' and dv < 0:
+                elif detector.side == 'R' and sensor_reading < 0:
                     skew = ('L')
-                elif detector.side == 'L' and dv > 0:
+                elif detector.side == 'L' and sensor_reading > 0:
                     skew = ('L')
-                elif detector.side == 'L' and dv < 0:
+                elif detector.side == 'L' and sensor_reading < 0:
                     skew = ('R')
 
                 self._logger.debug(
-                    "Compositing in lateral indicator layer for {} {} {}".format(detector.name, skew, dq))
+                    "Compositing in lateral indicator layer for {} {} {}".format(detector.name, skew, sensor_quality))
                 for item in skew:
-                    selected_layer = self._layers[bay_obj.id][detector.id][item][dq]
+                    selected_layer = self._layers[bay_obj.id][intercept.lateral][item][sensor_quality]
                     final_image = Image.alpha_composite(final_image, selected_layer)
             else:
                 combined_layers = Image.alpha_composite(
-                    self._layers[bay_obj.id][detector.id]['L']['fault'],
-                    self._layers[bay_obj.id][detector.id]['R']['fault']
+                    self._layers[bay_obj.id][intercept.lateral]['L']['fault'],
+                    self._layers[bay_obj.id][intercept.lateral]['R']['fault']
                 )
                 final_image = Image.alpha_composite(final_image, combined_layers)
         self._logger.debug("Returning final image.")
