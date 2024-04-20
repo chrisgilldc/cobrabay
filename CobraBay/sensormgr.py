@@ -449,7 +449,7 @@ class CBSensorMgr:
     #     enqueue = False
     #     for sensor_id in self._sensors:
     #         sensor_data = self._data_internal[sensor_id]
-    #         if sensor_data.response_type is not CobraBay.const.SENSOR_VALUE_INR:
+    #         if sensor_data.response_type is not CobraBay.const.SENSOR_RESP_INR:
     #             outbound_data[sensor_id] = sensor_data
     #             enqueue = True
     #     if enqueue:

@@ -112,7 +112,7 @@ class TFMini(SerialSensor):
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSOR_VALUE_OK,
+                    response_type=CobraBay.const.SENSOR_RESP_OK,
                     range=reading.distance,
                     temp=reading.temperature,
                     fault_reason=None
@@ -122,7 +122,7 @@ class TFMini(SerialSensor):
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSOR_VALUE_WEAK,
+                    response_type=CobraBay.const.SENSOR_RESP_WEAK,
                     range=None,
                     temp=None,
                     fault_reason=None
@@ -132,7 +132,7 @@ class TFMini(SerialSensor):
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSOR_VALUE_FLOOD,
+                    response_type=CobraBay.const.SENSOR_RESP_FLOOD,
                     range=None,
                     temp=None,
                     fault_reason=None
@@ -142,7 +142,7 @@ class TFMini(SerialSensor):
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSOR_VALUE_STRONG,
+                    response_type=CobraBay.const.SENSOR_RESP_STRONG,
                     range=None,
                     temp=None,
                     fault_reason=None

@@ -334,7 +334,7 @@ class CBCore:
                 # Pull out the most recent data and put it in the sensor_most_recent dict.
                 for sensor_id in self.sensor_log[0].sensors:
                     # Don't update when waiting for an interrupt.
-                    if self.sensor_log[0].sensors[sensor_id].response_type == CobraBay.const.SENSOR_VALUE_INR:
+                    if self.sensor_log[0].sensors[sensor_id].response_type == CobraBay.const.SENSOR_RESP_INR:
                         self._logger.debug("Sensor '{}' is waiting for interrupt. Keeping previous latest value.")
                     else:
                         self._sensor_latest_data[sensor_id] = self.sensor_log[0].sensors[sensor_id]

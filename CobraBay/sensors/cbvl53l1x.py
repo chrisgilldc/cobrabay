@@ -125,7 +125,7 @@ class CBVL53L1X(I2CSensor):
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSOR_VALUE_INR,
+                    response_type=CobraBay.const.SENSOR_RESP_INR,
                     range=None,
                     temp=None,
                     fault_reason=None
@@ -140,7 +140,7 @@ class CBVL53L1X(I2CSensor):
                 state=self.state,
                 status=self.status,
                 fault=self._fault,
-                response_type=CobraBay.const.SENSOR_VALUE_OK,
+                response_type=CobraBay.const.SENSOR_RESP_NOTOK,
                 range=None, temp=None,
                 fault_reason=None
             )
@@ -150,7 +150,7 @@ class CBVL53L1X(I2CSensor):
                 state=self.state,
                 status=self.status,
                 fault=self._fault,
-                response_type=CobraBay.const.SENSOR_VALUE_TOOCLOSE,
+                response_type=CobraBay.const.SENSOR_RESP_TOOCLOSE,
                 range=None, temp=None,
                 fault_reason=None
             )
@@ -159,7 +159,7 @@ class CBVL53L1X(I2CSensor):
                 state=self.state,
                 status=self.status,
                 fault=self._fault,
-                response_type=CobraBay.const.SENSOR_VALUE_OK,
+                response_type=CobraBay.const.SENSOR_RESP_OK,
                 range=Quantity(sensor_response, 'cm'), temp=None,
                 fault_reason=None
             )

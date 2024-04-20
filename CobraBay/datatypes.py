@@ -60,7 +60,7 @@ class SensorResponse(namedtuple_typed):
     """
     Contains a single set of sensor responses from the sensor manager at a given moment in time. Every sensor should
     always have a SensorReading returned. Those without a new reading ready should use the most recent values with the
-    SENSOR_VALUE_INR (Interrupt Not Ready) response type.
+    SENSOR_RESP_INR (Interrupt Not Ready) response type.
     """
     timestamp: datetime64
     sensors: dict

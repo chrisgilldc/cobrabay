@@ -232,13 +232,13 @@ class CBBay:
                 self._sensor_info['status'][sensor_id] = self._cbcore.sensor_log[0].sensors[sensor_id].response_type
 
                 # Reading
-                if self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_VALUE_OK:
+                if self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_RESP_OK:
                     # If the sensor actually reported a value, go with it.
                     self._sensor_info['reading'][sensor_id] = (
                             self._cbcore.sensor_log[0].sensors[sensor_id].range - self._config_merged[sensor_id][
                         'zero_point']
                     )
-                elif self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_VALUE_INR:
+                elif self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_RESP_INR:
                     # This means we're waiting for the interrupt. Continue to use the most recent value.
                     self._sensor_info['reading'][sensor_id] = self._most_recent_reading(sensor_id)
                 else:
@@ -255,13 +255,13 @@ class CBBay:
                 self._logger.debug("Updating values for '{}' (Lat)".format(sensor_id))
 
                 # Update the readings.
-                if self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_VALUE_OK:
+                if self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_RESP_OK:
                     # If the sensor actually reported a value, update it with the offset and store.
                     self._sensor_info['reading'][sensor_id] = (
                             self._cbcore.sensor_log[0].sensors[sensor_id].range - self._config_merged[sensor_id][
                         'zero_point']
                     )
-                elif self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_VALUE_INR:
+                elif self._cbcore.sensor_log[0].sensors[sensor_id].response_type == SENSOR_RESP_INR:
                     # This means we're waiting for the interrupt. Continue to use the most recent value.
                     self._sensor_info['reading'][sensor_id] = self._most_recent_reading(sensor_id)
                 else:
@@ -393,7 +393,7 @@ class CBBay:
             self._logger.info("Current sensor_info: {}".format(self._sensor_info))
             return GEN_UNKNOWN
 
-        if self._sensor_info['status'][self._selected_range] != SENSOR_VALUE_OK:
+        if self._sensor_info['status'][self._selected_range] != SENSOR_RESP_OK:
             self._logger.debug("Selected longitudinal sensor not ranging. Occupancy 'unknown'")
             return GEN_UNKNOWN
 
@@ -540,9 +540,9 @@ class CBBay:
         # TODO: Make this more robust or with more options to deal with edge cases.
         for entry in self._cbcore.sensor_log:
             try:
-                if entry.sensors[sensor_id].response_type == SENSOR_VALUE_OK:
+                if entry.sensors[sensor_id].response_type == SENSOR_RESP_OK:
                     return entry.sensors[sensor_id].range
-                elif entry.sensors[sensor_id].response_type == SENSOR_VALUE_INR:
+                elif entry.sensors[sensor_id].response_type == SENSOR_RESP_INR:
                     continue
             except KeyError:
                 pass
@@ -708,7 +708,7 @@ class CBBay:
         filtered_log = []
         self._logger.debug("Sensor log: {} ({})".format(self._cbcore.sensor_log, type(self._cbcore.sensor_log)))
         for response in self._cbcore.sensor_log:
-            if response.sensors[sensor_id].response_type == SENSOR_VALUE_OK:
+            if response.sensors[sensor_id].response_type == SENSOR_RESP_OK:
                 filtered_log.append(response)
         self._logger.debug("Filtered history has {} entries, of {} available".format(len(filtered_log),
                                                                                      len(self._cbcore.sensor_log)))
@@ -749,7 +749,7 @@ class CBBay:
 
         # Is the sensor intercepted? If not, nothing else to do.
         if not self._sensor_info['intercepted'][sensor_id]:
-            return SENSOR_NOINTERCEPT
+            return SENSOR_QUALITY_NOTINTERCEPTED
 
         for quality in quality_ranges:
             self._logger.debug("Checking quality '{}'".format(quality))

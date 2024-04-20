@@ -34,13 +34,15 @@ SENSTATE_ENABLED = 'enabled'
 SENSTATE_RANGING = 'ranging'
 SENSTATE_NOTRANGING = 'not_ranging'
 
-# Non-Quantity values the sensor can be in.
-SENSOR_VALUE_OK = 'ok'
-SENSOR_VALUE_INR = 'inr'  ## Interrupt Not Ready. IE: sensor wasn't ready to read.
-SENSOR_VALUE_WEAK = 'weak'
-SENSOR_VALUE_STRONG = 'strong'
-SENSOR_VALUE_FLOOD = 'flood'
-SENSOR_VALUE_TOOCLOSE = 'tooclose'
+# Sensor response types.
+SENSOR_RESP_OK = 'ok'
+SENSOR_RESP_NOTOK = 'not_ok'
+SENSOR_RESP_INR = 'inr'  ## Interrupt Not Ready. IE: sensor wasn't ready to read.
+SENSOR_RESP_WEAK = 'weak'
+SENSOR_RESP_STRONG = 'strong'
+SENSOR_RESP_FLOOD = 'flood'
+SENSOR_RESP_TOOCLOSE = 'tooclose'
+SENSOR_RESP_TOOFAR = 'toofar'
 
 # Detector quality values.
 SENSOR_QUALITY_OK = 'ok'
@@ -54,8 +56,8 @@ SENSOR_QUALITY_NOOBJ = 'no_object'
 SENSOR_QUALITY_EMERG = 'emergency'
 SENSOR_QUALITY_DOOROPEN = 'door_open'
 SENSOR_QUALITY_BEYOND = 'beyond_range'
-SENSOR_NOREADING = 'no_reading'
-SENSOR_NOINTERCEPT = 'not_intercepted'
+SENSOR_QUALITY_NOREADING = 'no_reading'
+SENSOR_QUALITY_NOTINTERCEPTED = 'not_intercepted'
 
 # Directional values
 DIR_FWD = 'forward'

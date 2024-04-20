@@ -188,7 +188,7 @@ class CBDisplay:
                 draw.line(
                     [nointercept_x, 1 + accumulated_height, nointercept_x, 1 + accumulated_height + pixel_lengths[i]],
                     fill='white', width=1)
-                self._layers[bay_obj.id][lateral][side][SENSOR_NOINTERCEPT] = img
+                self._layers[bay_obj.id][lateral][side][SENSOR_QUALITY_NOTINTERCEPTED] = img
                 del (img)
 
                 for item in status_lookup:
@@ -327,7 +327,7 @@ class CBDisplay:
             sensor_quality = bay_obj.sensor_info['quality'][intercept.lateral]
             sensor_reading = bay_obj.sensor_info['reading'][intercept.lateral]
 
-            if sensor_quality in (SENSOR_NOINTERCEPT, SENSOR_QUALITY_NOOBJ):
+            if sensor_quality in (SENSOR_QUALITY_NOTINTERCEPTED, SENSOR_QUALITY_NOOBJ):
                 # No intercept shows on both sides.
                 combined_layers = Image.alpha_composite(
                     self._layers[bay_obj.id][intercept.lateral]['L'][sensor_quality],
