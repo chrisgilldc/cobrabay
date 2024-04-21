@@ -43,8 +43,10 @@ class Convertomatic:
             # Bytes don't have a dimensionality, so we check the unit name.
             elif str(input_value.units) == 'byte':
                 output = input_value.to("Mbyte")
+            # elif str(input_value.units) == 'second':
+            #     output = str(timedelta(seconds=round(input_value.magnitude)))
             elif str(input_value.units) == 'second':
-                output = str(timedelta(seconds=input_value.magnitude))
+                output = round(input_value.magnitude)
             # This should catch any dimensionless values.
             elif str(input_value.dimensionality) == 'dimensionless':
                 output = input_value
