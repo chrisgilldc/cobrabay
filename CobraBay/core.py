@@ -321,25 +321,39 @@ class CBCore:
             # latest_status = self._q_cbsmstatus.get_nowait()
             # self._q_cbsmstatus.task_done()
             if len(self.sensor_log) > 0:
-                if latest_data.timestamp == self.sensor_log[0].timestamp:
+                if latest_data.timestamp != self.sensor_log[0].timestamp:
+                    # If timestamps are different, sensor manager has updated the data and it's new to fetch.
+                    self._sensor_log_add(latest_data)
+                else:
                     self._logger.debug("No change to latest sensor data, nothing to update.")
                     return
             else:
-                self.sensor_log = [copy.deepcopy(latest_data)] + self.sensor_log[0:99]
-                self._logger.debug("Sensor log now has {} entries.".format(len(self.sensor_log)))
-                if len(self.sensor_log) == 0:
-                    # If we're just starting to get data, we can pull the data over directly.
-                    self._logger.debug("No data marked as latest, considering all data in sensor log as latest.")
-                    self._sensor_latest_data = self.sensor_log[0].sensors
-                # Pull out the most recent data and put it in the sensor_most_recent dict.
-                for sensor_id in self.sensor_log[0].sensors:
-                    # Don't update when waiting for an interrupt.
-                    if self.sensor_log[0].sensors[sensor_id].response_type == CobraBay.const.SENSOR_RESP_INR:
-                        self._logger.debug("Sensor '{}' is waiting for interrupt. Keeping previous latest value.")
-                    else:
-                        self._sensor_latest_data[sensor_id] = self.sensor_log[0].sensors[sensor_id]
-                        self._logger.debug("Adding to sensor data as latest. Latest data now has: {}".format(
-                            self._sensor_latest_data))
+                # If there's no data in the log, we're at startup and go ahead and add.
+                self._sensor_log_add(latest_data)
+
+    def _sensor_log_add(self, sensor_response):
+        """
+        Add a SensorResponse from the sensor manager to the log.
+
+        :param sensor_response: Sensor Response record to add
+        :type sensor_response: namedtuple
+        :return:
+        """
+        self.sensor_log = [copy.deepcopy(sensor_response)] + self.sensor_log[0:99]
+        self._logger.debug("Sensor log now has {} entries.".format(len(self.sensor_log)))
+        if len(self.sensor_log) == 0:
+            # If we're just starting to get data, we can pull the data over directly.
+            self._logger.debug("No data marked as latest, considering all data in sensor log as latest.")
+            self._sensor_latest_data = self.sensor_log[0].sensors
+        # Pull out the most recent data and put it in the sensor_most_recent dict.
+        for sensor_id in self.sensor_log[0].sensors:
+            # Don't update when waiting for an interrupt.
+            if self.sensor_log[0].sensors[sensor_id].response_type == CobraBay.const.SENSOR_RESP_INR:
+                self._logger.debug("Sensor '{}' is waiting for interrupt. Keeping previous latest value.")
+            else:
+                self._sensor_latest_data[sensor_id] = self.sensor_log[0].sensors[sensor_id]
+                self._logger.debug("Adding to sensor data as latest. Latest data now has: {}".format(
+                    self._sensor_latest_data))
 
     def _trigger_check(self):
         """

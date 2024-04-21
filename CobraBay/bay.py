@@ -273,6 +273,10 @@ class CBBay:
                 # Quality
                 self._sensor_info['quality'][sensor_id] = self._sensor_quality_lat(sensor_id)
 
+        # If bay is in a motion state, check the timer for expiration.
+        if self.state in BAYSTATE_MOTION:
+            self.check_timer()
+
     ## Public Properties
 
     @property
