@@ -543,10 +543,15 @@ class CBNetwork:
             {'topic': topic_base + 'motion_timer', 'payload': input_obj.motion_timer, 'repeat': False})
         # Sensors. They can get wonky during shutdown, so skip them then.
         self._logger.debug("Bay sensor info has: {}".format(input_obj.sensor_info))
+        self._logger.debug("Bay state is: {}".format(input_obj.state))
 
-        if self._cbcore.system_state != 'shutdown':
+        if (self._cbcore.system_state != 'shutdown' and
+                ( input_obj.state in (BAYSTATE_DOCKING, BAYSTATE_UNDOCKING, BAYSTATE_VERIFY)
+                    or self._chattiness['sensors_always_send']) ):
+            self._logger.debug("Sending bay sensor information.")
             # Values which exist for both longitudinal and lateral sensors.
             for sensor_id in input_obj.configured_sensors['long'] + input_obj.configured_sensors['lat']:
+                self._logger.debug("Sending for '{}'".format(sensor_id))
                 # Only send if the sensor actually has a value. This will usually be right at startup.
                 # Quality
                 #TODO: Streamline this logic once the underlying Bay issues are fixed.
@@ -574,6 +579,7 @@ class CBNetwork:
 
             # Lateral-Only values.
             for sensor_id in input_obj.configured_sensors['lat']:
+                self._logger.debug("Sending lateral-specific for '{}'".format(sensor_id))
                 # Intercepted status.
                 try:
                     outbound_messages.append(
@@ -585,9 +591,6 @@ class CBNetwork:
                         {'topic': topic_base + 'sensors/' + sensor_id + '/intercepted',
                         'payload': GEN_UNKNOWN,
                         'repeat': self._chattiness['sensors_always_send']})
-
-
-        # outbound_messages.extend(self.publish_bay_detectors(input_obj.id))
 
         # If performing a VERIFY on the bay, we now have all the messages, set bay back to ready.
         if input_obj.state == BAYSTATE_VERIFY:
@@ -616,6 +619,14 @@ class CBNetwork:
     #         return sensor_messages
 
     def _mqtt_messages_sensor(self, sensor_id, topic_base=None, force_publish=False):
+        """
+        Create messages for a given sensor id.
+
+        :param sensor_id: Sensor to send
+        :param topic_base: Base topic
+        :param force_publish: Public even if value hasn't changed.
+        :return:
+        """
         self._logger_mqtt.debug("Building MQTT messages for sensor: {}".format(sensor_id))
         if topic_base is None:
             topic_base = 'CobraBay/' + self._client_id + '/sensors/'
@@ -637,7 +648,7 @@ class CBNetwork:
                 {'topic': topic_base + 'fault', 'payload': sensor_latest_data.fault, 'repeat': force_publish},
             ]
             # Send value, raw value and quality if detector is ranging.
-            if sensor_latest_data.response_type == SENSOR_VALUE_OK:
+            if sensor_latest_data.response_type == SENSOR_RESP_OK:
                 # Detector Range.
                 outbound_messages.append(
                     {'topic': topic_base + 'range',
@@ -649,7 +660,7 @@ class CBNetwork:
                      'payload': sensor_latest_data.temp,
                      'repeat': force_publish})
 
-            self._logger_mqtt.debug("Have detector messages: {}".format(outbound_messages))
+            self._logger_mqtt.debug("Have sensor messages: {}".format(outbound_messages))
             return outbound_messages
 
     def _ha_discovery(self, force=False):
@@ -657,13 +668,16 @@ class CBNetwork:
             self._logger.debug("Discovery Log: {}".format(self._discovery_log))
             self._logger.debug("Checking discovery for: {}".format(item))
             # Run the discovery if we haven't before, or if force is requested.
+            #TODO: Update Discovery processing.
             if not self._discovery_log[item] or force:
                 if item == 'system':
                     self._logger.info("Sending Home Assistant discovery for '{}'.".format(item))
                     self._ha_discovery_system()
                 elif item == 'sensors':
-                    self._logger.info("Sending Home Assistant discovery for '{}'.".format(item))
-                    self._ha_discovery_sensors()
+                    if self._chattiness['sensors_raw']:
+                        # Only discover the raw sensors if we're going to be sending it.
+                        self._logger.info("Sending Home Assistant discovery for '{}'.".format(item))
+                        self._ha_discovery_sensors()
                 else:
                     self._logger.info("Sending home assistant discovery for bay ID: {}".format(item))
                     self._ha_discovery_bay(item)
@@ -918,9 +932,10 @@ class CBNetwork:
             topic=topic_base + "motion_timer",
             entity_type="sensor",
             entity="{}_{}_motion_timer".format(self._system_name.lower(), bay_obj.id),
+            unit_of_measurement="s"
         )
 
-        # # Bay Occupancy
+        # Bay Occupancy
         self._ha_discover(
             name="{} Occupied".format(bay_obj.name),
             topic=topic_base + "occupancy",
@@ -932,7 +947,42 @@ class CBNetwork:
         )
 
         # Bay sensors.
-        #TODO: Send filtered sensor values.
+        # Do common long/lat items first.
+        for sensor_id in bay_obj.configured_sensors['lat'] + bay_obj.configured_sensors['long']:
+            sen_obj = self._sensormgr.get_sensor(sensor_id)
+            sensor_base = topic_base + "sensors/" + sensor_id + "/"
+            # Bay-adjusted range reading.
+            # Reading direct from the sensor.
+            self._ha_discover(
+                name="{} Sensor - {} Reading".format(bay_obj.name, sen_obj.name),
+                topic=sensor_base + "reading",
+                entity_type="sensor",
+                entity="{}_{}_{}_reading".format(self._system_name.lower(), bay_id, sensor_id),
+                device_class="distance",
+                unit_of_measurement=self._uom('length')
+            )
+
+            # Quality
+            self._ha_discover(
+                name="{} Sensor - {} Quality".format(bay_obj.name, sen_obj.name),
+                topic=sensor_base + "quality",
+                entity_type="sensor",
+                entity="{}_{}_{}_quality".format(self._system_name.lower(), bay_id, sensor_id),
+                value_template="{{ value|capitalize }}"
+            )
+
+        # Lateral only elements.
+        for sensor_id in bay_obj.configured_sensors['lat']:
+            sen_obj = self._sensormgr.get_sensor(sensor_id)
+            sensor_base = topic_base + "sensors/" + sensor_id + "/"
+            self._ha_discover(
+                name="{} Sensor - {} Intercepted".format(bay_obj.name, sen_obj.name),
+                topic=sensor_base + "intercepted",
+                entity_type="binary_sensor",
+                entity="{}_{}_{}_intercepted".format(self._system_name.lower(), bay_id, sensor_id),
+                payload_on="true",
+                payload_off="false"
+            )
 
 
     def _ha_discovery_sensors(self):
@@ -940,7 +990,6 @@ class CBNetwork:
         Send Home Assistant messages for sensors.
         :return:
         """
-        #TODO: Update discovery for new data layout.
         # Discover the sensors....
         topic_base = "CobraBay/" + self._client_id + '/'
         for sensor_id in self._cbcore.configured_sensors:
@@ -976,9 +1025,9 @@ class CBNetwork:
             # Reading direct from the sensor.
             self._ha_discover(
                 name="Sensor - {} Direct Reading".format(sen_obj.name),
-                topic=sensor_base + "range",
+                topic=sensor_base + "reading",
                 entity_type="sensor",
                 entity="{}_{}_reading".format(self._system_name.lower(), sensor_id),
                 device_class="distance",
-                unit_of_measurement="in"
+                unit_of_measurement=self._uom('length')
             )
