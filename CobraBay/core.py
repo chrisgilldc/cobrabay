@@ -263,7 +263,7 @@ class CBCore:
                 # Update bays with sensor data.
                 for bay_id in self._bays:
                     self._bays[bay_id].update()
-                # self._display.show(mode='message', message="UNDOCK", color="orange", icons=False)
+                self._display.show(mode='message', message="UNDOCK", color="orange", icons=False)
                 # Timeout and go back to ready if the vehicle hasn't moved by the timeout.
                 # Kids are probably running around.
                 #self._bays[bay_id].check_timer()
@@ -278,7 +278,7 @@ class CBCore:
             self._logger.debug("{} motion - Displaying".format(CobraBay.const.BAYSTATE_MOTION))
             # Send the bay object reference to the display method.
             #TODO: Redo how the display gets its data.
-            # self._display.show_motion(CobraBay.const.BAYSTATE_MOTION, self._bays[bay_id])
+            self._display.show_motion(CobraBay.const.BAYSTATE_MOTION, self._bays[bay_id])
             # Update local sensor variable.
             self._logger.debug("{} motion - Updating local sensor values.".format(CobraBay.const.BAYSTATE_MOTION))
             self._sensor_update()

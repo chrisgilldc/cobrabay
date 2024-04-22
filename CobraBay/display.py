@@ -154,11 +154,11 @@ class CBDisplay:
         # just multiply.
         accumulated_height = 0
         for intercept in bay_obj.lateral_sorted:
-            lateral = intercept.lateral
-            self._logger.debug("Processing lateral zone: {}".format(lateral))
-            self._layers[bay_obj.id][lateral] = {}
+            sensor_id = intercept.sensor_id
+            self._logger.debug("Processing lateral zone: {}".format(sensor_id))
+            self._layers[bay_obj.id][sensor_id] = {}
             for side in ('L', 'R'):
-                self._layers[bay_obj.id][lateral][side] = {}
+                self._layers[bay_obj.id][sensor_id][side] = {}
                 if side == 'L':
                     line_w = 0
                     nointercept_x = 1
@@ -178,7 +178,7 @@ class CBDisplay:
                     pricolor='red',
                     seccolor='yellow'
                 )
-                self._layers[bay_obj.id][lateral][side]['fault'] = img
+                self._layers[bay_obj.id][sensor_id][side]['fault'] = img
                 del (img)
 
                 # Make an image for no_object
@@ -188,7 +188,7 @@ class CBDisplay:
                 draw.line(
                     [nointercept_x, 1 + accumulated_height, nointercept_x, 1 + accumulated_height + pixel_lengths[i]],
                     fill='white', width=1)
-                self._layers[bay_obj.id][lateral][side][SENSOR_QUALITY_NOTINTERCEPTED] = img
+                self._layers[bay_obj.id][sensor_id][side][SENSOR_QUALITY_NOTINTERCEPTED] = img
                 del (img)
 
                 for item in status_lookup:
@@ -204,7 +204,7 @@ class CBDisplay:
                         outline=item['border'],
                         width=1)
                     # Put this in the right place in the lookup.
-                    self._layers[bay_obj.id][lateral][side][item['status']] = img
+                    self._layers[bay_obj.id][sensor_id][side][item['status']] = img
                     # Write for debugging
                     # img.save("/tmp/CobraBay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
                     del (draw)
@@ -270,12 +270,12 @@ class CBDisplay:
         self.current = img
 
     def show_motion(self, direction, bay_obj):
+        #TODO: Maybe remove direction, not sure we need that anymore.
         """Show motion placard based on bay object's sensor info.
 
         :param bay_obj: Bay object to display.
         :type bay_obj: CBBay
         """
-        #TODO: Finish conversion from detector objects.
         self._logger.debug("Show Motion received bay '{}'".format(bay_obj.name))
 
         # Don't do motion display if the bay isn't in a motion state.
@@ -323,39 +323,40 @@ class CBDisplay:
 
         self._logger.debug("Compositing laterals.")
         for intercept in bay_obj.lateral_sorted:
-            self._logger.debug("Lateral: {}".format(intercept.lateral))
-            sensor_quality = bay_obj.sensor_info['quality'][intercept.lateral]
-            sensor_reading = bay_obj.sensor_info['reading'][intercept.lateral]
+            self._logger.debug("Lateral: {}".format(intercept.sensor_id))
+            sensor_quality = bay_obj.sensor_info['quality'][intercept.sensor_id]
+            sensor_reading = bay_obj.sensor_info['reading'][intercept.sensor_id]
 
             if sensor_quality in (SENSOR_QUALITY_NOTINTERCEPTED, SENSOR_QUALITY_NOOBJ):
                 # No intercept shows on both sides.
                 combined_layers = Image.alpha_composite(
-                    self._layers[bay_obj.id][intercept.lateral]['L'][sensor_quality],
-                    self._layers[bay_obj.id][intercept.lateral]['R'][sensor_quality]
+                    self._layers[bay_obj.id][intercept.sensor_id]['L'][sensor_quality],
+                    self._layers[bay_obj.id][intercept.sensor_id]['R'][sensor_quality]
                 )
                 final_image = Image.alpha_composite(final_image, combined_layers)
             elif sensor_quality in (SENSOR_QUALITY_OK, SENSOR_QUALITY_WARN, SENSOR_QUALITY_CRIT):
+                self._logger.debug("Bay's merged config is: {}".format(bay_obj.config_merged))
                 # Pick which side the vehicle is offset towards.
                 if sensor_reading == 0:
                     skew = ('L', 'R')  # In the rare case the value is exactly zero, show both sides.
-                elif detector.side == 'R' and sensor_reading > 0:
+                elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'R' and sensor_reading > 0:
                     skew = ('R')
-                elif detector.side == 'R' and sensor_reading < 0:
+                elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'R' and sensor_reading < 0:
                     skew = ('L')
-                elif detector.side == 'L' and sensor_reading > 0:
+                elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'L' and sensor_reading > 0:
                     skew = ('L')
-                elif detector.side == 'L' and sensor_reading < 0:
+                elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'L' and sensor_reading < 0:
                     skew = ('R')
 
                 self._logger.debug(
-                    "Compositing in lateral indicator layer for {} {} {}".format(detector.name, skew, sensor_quality))
+                    "Compositing in lateral indicator layer for {} {} {}".format(bay_obj.config_merged[intercept.sensor_id]['name'], skew, sensor_quality))
                 for item in skew:
-                    selected_layer = self._layers[bay_obj.id][intercept.lateral][item][sensor_quality]
+                    selected_layer = self._layers[bay_obj.id][intercept.sensor_id][item][sensor_quality]
                     final_image = Image.alpha_composite(final_image, selected_layer)
             else:
                 combined_layers = Image.alpha_composite(
-                    self._layers[bay_obj.id][intercept.lateral]['L']['fault'],
-                    self._layers[bay_obj.id][intercept.lateral]['R']['fault']
+                    self._layers[bay_obj.id][intercept.sensor_id]['L']['fault'],
+                    self._layers[bay_obj.id][intercept.sensor_id]['R']['fault']
                 )
                 final_image = Image.alpha_composite(final_image, combined_layers)
         self._logger.debug("Returning final image.")

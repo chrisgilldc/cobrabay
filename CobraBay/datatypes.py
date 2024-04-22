@@ -25,7 +25,7 @@ ENVOPTIONS_EMPTY = ENVOPTIONS(None, None, None, None, None, None, None)
 iface_info = namedtuple_untyped("iface_info", ['type', 'addr'])
 
 # Intercept for lateral detectors
-Intercept = namedtuple_untyped('Intercept', ['lateral', 'intercept'])
+Intercept = namedtuple_untyped('Intercept', ['sensor_id', 'intercept'])
 
 
 # TFMini Data

@@ -346,6 +346,10 @@ class CBBay:
     #     :return: detectors.Range
     #     '''
     #     return self._sensors[self._selected_range]
+    @property
+    def config_merged(self):
+        """ The complete configuration for sensors, including defaults."""
+        return self._config_merged
 
     @property
     def motion_timer(self):
@@ -688,14 +692,22 @@ class CBBay:
     def _sensor_intercepted(self, sensor_id):
         self._logger.debug("Checking interception status for '{}'".format(sensor_id))
 
-        intercept = next(item for item in self.lateral_sorted if item.lateral == sensor_id)
+        intercept = next(item for item in self.lateral_sorted if item.sensor_id == sensor_id)
         self._logger.debug("Using intercept {}".format(intercept))
-        if self._sensor_info['reading'][self.selected_range] <= intercept.intercept:
-            self._logger.info("Lateral '{}' is intercepted.".format(sensor_id))
-            return True
-        else:
-            self._logger.info("Lateral '{}' is not intercepted.".format(sensor_id))
+        try:
+            if self._sensor_info['reading'][self.selected_range] <= intercept.intercept:
+                self._logger.info("Lateral '{}' is intercepted.".format(sensor_id))
+                return True
+            else:
+                self._logger.info("Lateral '{}' is not intercepted.".format(sensor_id))
+                return False
+        except ValueError as e:
+            self._logger.warning("Selected range threw ValueError exception with '{}' ({})".
+                                 format(self._sensor_info['reading'][self.selected_range],
+                                 type(self._sensor_info['reading'][self.selected_range])))
+            self._logger.exception(e)
             return False
+
 
     def _sensor_motion(self, sensor_id):
         """
