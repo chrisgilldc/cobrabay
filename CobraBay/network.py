@@ -651,7 +651,7 @@ class CBNetwork:
             if sensor_latest_data.response_type == SENSOR_RESP_OK:
                 # Detector Range.
                 outbound_messages.append(
-                    {'topic': topic_base + 'range',
+                    {'topic': topic_base + 'reading',
                      'payload': sensor_latest_data.range,
                      'repeat': force_publish})
                 # Detector Temperature

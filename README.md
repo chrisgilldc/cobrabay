@@ -18,14 +18,16 @@ optimized, done better or redesigned here. Constructive feedback welcome!
 
 # Future Enhancements & Bug Fixes
 ## Enhancements:
-* Better separate undock and dock modes. Currently, undock uses too much of the dock behavior.
+* ~~Better separate undock and dock modes. Currently, undock uses too much of the dock behavior.~~
 * Range-based trigger. Start process based on range changes
 * Replace strober with progress bar - **In progress**
 * Ability to save current system settings to config file
 * Ability to soft-reload system from config file
+* Ability to set some (all?) config values via MQTT.
 * Ability to save current vehicle position as offsets
 * Even better sensor handling. Reset sensors if they go offline. - **In progress**
-
+* Consoldiate sensor access and data path
+* Additional diagnostics via MQTT. Min/max ranges seen, total faults, total non-numerical values on sensor, maybe more.
 
 ## Known Issues:
 * ~~Detector offsets sometimes don't apply.~~ Fixed (I think)
