@@ -177,7 +177,7 @@ class BayCommand(MQTTTrigger):
 
         # Check the commands and filter based on bay state.
         # Dock, undock or verify, only if bay isn't already in an active state
-        if message_text in ('dock', 'undock', 'verify') and not self._bay_obj.active:
+        if message_text in ('dock', 'undock', 'verify', 'save position') and not self._bay_obj.active:
             self._cmd_stack.append(message_text)
         # Abort the action, only if it's active.
         elif message_text in ('abort') and self._bay_obj.active:
@@ -262,21 +262,22 @@ class MQTTSensor(MQTTTrigger):
             # Always save the most-recently seen value as the 'previous value'
             self._previous_value = message_text
 
-    #TODO: Something here is slowing down triggering. Figure it out!
     def _trigger_action(self):
         # If action is supposed to be occupancy determined, check the bay.
         if self._action == 'occupancy':
-            try:
-                if self._bay_obj.occupied:
-                    # If bay is occupied, vehicle must be leaving.
-                    self._logger.debug("Appending 'undock' command.")
-                    self._cmd_stack.append('undock')
-                else:
-                    # Bay is unoccupied, so vehicle approaching.
-                    self._logger.debug("Appending 'dock' command.")
-                    self._cmd_stack.append('dock')
-            except TypeError:
-                self._logger.warning("Bay has occupancy state '{}', cannot set command.".format(self._bay_obj.occupied))
+            self._logger.debug("Trigger action is occupancy-based. Attached bay occupancy state: {}".
+                               format(self._bay_obj.occupied))
+            if self._bay_obj.occupied == 'true':
+                # If bay is occupied, vehicle must be leaving.
+                self._logger.debug("Appending 'undock' command.")
+                self._cmd_stack.append('undock')
+            elif self._bay_obj.occupied == 'false':
+                # Bay is unoccupied, so vehicle approaching.
+                self._logger.debug("Appending 'dock' command.")
+                self._cmd_stack.append('dock')
+            else:
+                self._logger.warning("Bay had occupancy state '{}'. Cannot determine action.".
+                                     format(self._bay_obj.occupied))
         else:
             # otherwise drop the action through.
             self._logger.debug("Appending '{}' command.".format(self._action))
