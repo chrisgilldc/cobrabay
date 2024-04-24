@@ -337,22 +337,26 @@ class CBDisplay:
             elif sensor_quality in (SENSOR_QUALITY_OK, SENSOR_QUALITY_WARN, SENSOR_QUALITY_CRIT):
                 self._logger.debug("Bay's merged config is: {}".format(bay_obj.config_merged))
                 # Pick which side the vehicle is offset towards.
-                if sensor_reading == 0:
-                    skew = ('L', 'R')  # In the rare case the value is exactly zero, show both sides.
-                elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'R' and sensor_reading > 0:
-                    skew = ('R')
-                elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'R' and sensor_reading < 0:
-                    skew = ('L')
-                elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'L' and sensor_reading > 0:
-                    skew = ('L')
-                elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'L' and sensor_reading < 0:
-                    skew = ('R')
-
-                self._logger.debug(
-                    "Compositing in lateral indicator layer for {} {} {}".format(bay_obj.config_merged[intercept.sensor_id]['name'], skew, sensor_quality))
-                for item in skew:
-                    selected_layer = self._layers[bay_obj.id][intercept.sensor_id][item][sensor_quality]
-                    final_image = Image.alpha_composite(final_image, selected_layer)
+                try:
+                    if sensor_reading == 0:
+                        skew = ('L', 'R')  # In the rare case the value is exactly zero, show both sides.
+                    elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'R' and sensor_reading > 0:
+                        skew = ('R')
+                    elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'R' and sensor_reading < 0:
+                        skew = ('L')
+                    elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'L' and sensor_reading > 0:
+                        skew = ('L')
+                    elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'L' and sensor_reading < 0:
+                        skew = ('R')
+                except TypeError:
+                    self._logger.warning("Sensor reading had unexpected value '{}' and type '{}'".
+                                         format(sensor_reading, type(sensor_reading)))
+                else:
+                    self._logger.debug(
+                        "Compositing in lateral indicator layer for {} {} {}".format(bay_obj.config_merged[intercept.sensor_id]['name'], skew, sensor_quality))
+                    for item in skew:
+                        selected_layer = self._layers[bay_obj.id][intercept.sensor_id][item][sensor_quality]
+                        final_image = Image.alpha_composite(final_image, selected_layer)
             else:
                 combined_layers = Image.alpha_composite(
                     self._layers[bay_obj.id][intercept.sensor_id]['L']['fault'],
