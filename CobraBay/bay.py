@@ -7,7 +7,8 @@ import time
 from pint import UnitRegistry, Quantity
 from time import monotonic
 from math import floor
-from numpy import timedelta64
+from numpy import datetime64, timedelta64
+from numpy import int32 as np_int32
 import logging
 from pprint import pformat
 from operator import attrgetter
@@ -524,11 +525,62 @@ class CBBay:
         # When performing a verify, always report no motion, since we're not collecting enough data, any
         # values will be noise.
         # TODO: Rework vector calculation. Need to bring this inboard since detectors are gone.
-        return Vector(speed=Quantity('0kph'), direction='still')
-        # if self.state == BAYSTATE_VERIFY:
-        #     return Vector(speed=Quantity('0kph'), direction='still')
-        # else:
-        #     return self._sensors[self._selected_range].vector
+        # return Vector(speed=Quantity('0kph'), direction='still')
+        # Return variable for unknown movement.
+        vector_unknown = Vector(speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
+
+        # Have to have at least two elements.
+        if len(self._cbcore.sensor_log) < 2:
+            self._logger.debug("Vector - Not enough sensor readings to calculate vector.")
+            return vector_unknown
+
+        # If we haven't had a motion reading recently enough, vector can't be determined.
+        # 100ms is 100000000ns, will make this static.
+        timediff = (datetime64('now', 'ns') - self._cbcore.sensor_log[0].timestamp).astype(np_int32)
+        self._logger.debug("Vector - Time difference is '{}' ({})".format(timediff, type(timediff)))
+
+        if (( datetime64('now','ns') - self._cbcore.sensor_log[0].timestamp ).astype(np_int32) >
+                timedelta64(100000000, 'ns').astype(np_int32)):
+            self._logger.info("Vector - Most recent longitudinal reading over 100ms ago, can't determine vector.")
+            return vector_unknown
+
+        # If we haven't returned yet, we can calculate.
+        i = 1
+        while i <= len(self._cbcore.sensor_log):
+            # 250ms (0.25s) between checks OR this is the last reading (good enough)
+            if ( (self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(np_int32)
+                 >= 250000000 ) or i == len(self._cbcore.sensor_log):
+                self._logger.debug("Vector - Comparing to reading {}".format(i))
+                #TODO: Account for a dead zone so tiny changes don't result in a motion.
+                #FIXME: Returns unknown sometimes, don't know why.
+                spread_time = (self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(np_int32)
+                self._logger.debug("Vector - Sensor reading time spread is {}".format(spread_time))
+                spread_distance = (self._cbcore.sensor_log[0].sensors[self._selected_range].range
+                               - self._cbcore.sensor_log[i].sensors[self._selected_range].range)
+                self._logger.debug("Vector - Sensor reading distance spread is {}".format(spread_distance))
+                speed = abs(spread_distance) / Quantity(spread_time,"ns")
+                if spread_distance == 0:
+                    direction = DIR_STILL
+                elif spread_distance > 0:
+                    direction = DIR_REV
+                elif spread_distance < 0:
+                    direction = DIR_FWD
+                else:
+                    self._logger.warning("Vector - Direction spread has unhandleable value '{}'".format(spread_distance))
+                    return vector_unknown
+                # Convert the value.
+                self._logger.debug("Vector - Raw speed is '{}'".format(speed))
+                speed = speed.to("kph")
+                self._logger.debug("Vector - Converted speed '{}'".format(speed))
+                return Vector(speed=speed, direction=direction)
+            # Increment
+            i += 1
+
+
+
+
+
+
 
     ## Private Methods
 

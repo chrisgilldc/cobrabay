@@ -303,7 +303,12 @@ class CBNetwork:
                 outbound_message = json_dumps(message, default=str)
             else:
                 outbound_message = message
-            self._mqtt_client.publish(topic, outbound_message)
+            try:
+                self._mqtt_client.publish(topic, outbound_message)
+            except TypeError as te:
+                self._logger.error("Received TypeError when publishing outbound message '{}' ({})"
+                                   .format(outbound_message, type(outbound_message)))
+                self._logger.exception(te)
 
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
@@ -536,8 +541,13 @@ class CBNetwork:
         # Bay Occupancy
         outbound_messages.append({'topic': topic_base + 'occupancy', 'payload': input_obj.occupied, 'repeat': False})
         # Bay vector
+        self._logger.debug("Sending vector value '{}'".format(input_obj.vector))
+        # Directly casting the Vector namedtuple to dict throws ValueErrors in some cases, so doing this manually.
         outbound_messages.append(
-            {'topic': topic_base + 'vector', 'payload': input_obj.vector._asdict(), 'repeat': False})
+            {'topic': topic_base + 'vector',
+             'payload':
+                 {'speed': input_obj.vector.speed, 'direction': input_obj.vector.direction},
+             'repeat': False})
         # Bay motion timer
         outbound_messages.append(
             {'topic': topic_base + 'motion_timer', 'payload': input_obj.motion_timer, 'repeat': False})
