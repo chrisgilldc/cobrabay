@@ -12,15 +12,15 @@ optimized, done better or redesigned here. Constructive feedback welcome!
 
 ---
 * [Building](docs/HARDWARE.md) - How to put together the hardware
-* Installing - How to install the software
+* [Installing](docs/INSTALL.md) - How to install the software
 * [Configuration](docs/CONFIG.md) - Reference to the configuration file options.
 
 
 ## Bugs
 * ~~Bay vector isn't computed, speed and direction aren't sent.~~
   * Fixed. Vector is now computed and properly sent to MQTT as well. Sensitivity needs tuning, small changes are resulting in 'unknown' results.
-* Undocking never kicks out of Undock placard.
-  * May be fixed by vector issue, needs testing.
+* ~~Undocking never kicks out of Undock placard.~~
+  * Fixed by the vector issue.
 * MQTT messages go 'unknown' in HA - review MQTT messages for retain status, should probably be more aggressive about it.
 
 ## Known Issues:
@@ -32,9 +32,10 @@ optimized, done better or redesigned here. Constructive feedback welcome!
   * Split sensors into separate thread/process. 
 * Operations
   * Range-based trigger. Start process based on range changes.
-  * Even better sensor handling. Reset sensors if they go offline. - **In progress**
+  * ~~Even better sensor handling.~~ Reset sensors if they go offline.
   * Additional diagnostics via MQTT. Min/max ranges seen, total faults, total non-numerical values on sensor, maybe more.
   * Restructure commands for cleaner HA interaction.
+  * Trigger to abort operation, ie when garage door closes.
 * Configuration
   * Ability to save current system settings to config file
   * Ability to soft-reload system with new config file.
@@ -47,6 +48,7 @@ optimized, done better or redesigned here. Constructive feedback welcome!
 * Consoldiate sensor access and data path 
 * Multiple bay support (is this needed? IDK.)
 * Documentation
+  * Review install instructions
   * Review current documentation for accuracy
   * Write hardware build guide
   * Create Sphinx documention (also: Learn Sphinx)

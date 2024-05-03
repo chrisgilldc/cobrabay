@@ -4,6 +4,8 @@
 
 import copy
 import time
+
+import pint.errors
 from pint import UnitRegistry, Quantity
 from time import monotonic
 from math import floor
@@ -421,7 +423,7 @@ class CBBay:
             for sensor_id in self._configured_sensors['lat']:
                 self._logger.debug("Checking quality for lateral sensor '{}'.".format(sensor_id))
                 if self._sensor_info['quality'][sensor_id] in (SENSOR_QUALITY_OK, SENSOR_QUALITY_WARN,
-                                                                SENSOR_QUALITY_CRIT):
+                                                               SENSOR_QUALITY_CRIT):
                     # No matter how badly parked the vehicle is, it's still *there*
                     occ_score += 1
             self._logger.debug("Achieved lateral score {} of {}".format(occ_score, self._occupancy_score))
@@ -539,26 +541,39 @@ class CBBay:
         timediff = (datetime64('now', 'ns') - self._cbcore.sensor_log[0].timestamp).astype(np_int32)
         self._logger.debug("Vector - Time difference is '{}' ({})".format(timediff, type(timediff)))
 
-        if (( datetime64('now','ns') - self._cbcore.sensor_log[0].timestamp ).astype(np_int32) >
-                timedelta64(100000000, 'ns').astype(np_int32)):
-            self._logger.info("Vector - Most recent longitudinal reading over 100ms ago, can't determine vector.")
+        if timediff < timedelta64(750000000, 'ns').astype(np_int32):
+            # TODO: Make this interval be based on the actual sensor timing interval. OR, can keep, good enough?
+            self._logger.info("Vector - Most recent longitudinal reading over 750ms ago, can't determine vector.")
             return vector_unknown
 
         # If we haven't returned yet, we can calculate.
         i = 1
         while i <= len(self._cbcore.sensor_log):
-            # 250ms (0.25s) between checks OR this is the last reading (good enough)
-            if ( (self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(np_int32)
-                 >= 250000000 ) or i == len(self._cbcore.sensor_log):
+            # Find the element in the log where the selected range sense returned a Quantity, and is either
+            # 250ms (0.25s) ago OR is the last reading (good enough)
+            if ((((self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(np_int32)
+                  >= 250000000) or i == len(self._cbcore.sensor_log))
+                    and type(self._cbcore.sensor_log[i].sensors[self._selected_range].range) is Quantity):
                 self._logger.debug("Vector - Comparing to reading {}".format(i))
-                #TODO: Account for a dead zone so tiny changes don't result in a motion.
-                #FIXME: Returns unknown sometimes, don't know why.
-                spread_time = (self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(np_int32)
+                # TODO: Account for a dead zone so tiny changes don't result in a motion.
+                # FIXME: Returns unknown sometimes, don't know why.
+                spread_time = (self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(
+                    np_int32)
                 self._logger.debug("Vector - Sensor reading time spread is {}".format(spread_time))
-                spread_distance = (self._cbcore.sensor_log[0].sensors[self._selected_range].range
-                               - self._cbcore.sensor_log[i].sensors[self._selected_range].range)
+                try:
+                    spread_distance = (self._cbcore.sensor_log[0].sensors[self._selected_range].range
+                                   - self._cbcore.sensor_log[i].sensors[self._selected_range].range)
+                except pint.errors.DimensionalityError:
+                    self._logger.warning("Dimensionality error when evaluating vector. SensorReading 0 had selected "
+                                         "range {} ({}) while {} had selected range {} ({})".format(
+                        self._cbcore.sensor_log[0].sensors[self._selected_range].range,
+                        type(self._cbcore.sensor_log[0].sensors[self._selected_range].range),
+                        i, self._cbcore.sensor_log[i].sensors[self._selected_range].range,
+                        type(self._cbcore.sensor_log[i].sensors[self._selected_range].range)
+                    ))
+                    return vector_unknown
                 self._logger.debug("Vector - Sensor reading distance spread is {}".format(spread_distance))
-                speed = abs(spread_distance) / Quantity(spread_time,"ns")
+                speed = abs(spread_distance) / Quantity(spread_time, "ns")
                 if spread_distance == 0:
                     direction = DIR_STILL
                 elif spread_distance > 0:
@@ -566,7 +581,8 @@ class CBBay:
                 elif spread_distance < 0:
                     direction = DIR_FWD
                 else:
-                    self._logger.warning("Vector - Direction spread has unhandleable value '{}'".format(spread_distance))
+                    self._logger.warning(
+                        "Vector - Direction spread has unhandleable value '{}'".format(spread_distance))
                     return vector_unknown
                 # Convert the value.
                 self._logger.debug("Vector - Raw speed is '{}'".format(speed))
@@ -575,12 +591,6 @@ class CBBay:
                 return Vector(speed=speed, direction=direction)
             # Increment
             i += 1
-
-
-
-
-
-
 
     ## Private Methods
 
@@ -742,24 +752,23 @@ class CBBay:
     #             ))
 
     def _sensor_intercepted(self, sensor_id):
-        self._logger.debug("Checking interception status for '{}'".format(sensor_id))
+        self._logger.debug("Lateral Intercept - Checking interception status for '{}'".format(sensor_id))
 
         intercept = next(item for item in self.lateral_sorted if item.sensor_id == sensor_id)
-        self._logger.debug("Using intercept {}".format(intercept))
+        self._logger.debug("Lateral Intercept - Using intercept {}".format(intercept))
         try:
             if self._sensor_info['reading'][self.selected_range] <= intercept.intercept:
-                self._logger.info("Lateral '{}' is intercepted.".format(sensor_id))
+                self._logger.info("Lateral Intercept - Lateral '{}' is intercepted.".format(sensor_id))
                 return True
             else:
-                self._logger.info("Lateral '{}' is not intercepted.".format(sensor_id))
+                self._logger.info("Lateral Intercept - Lateral '{}' is not intercepted.".format(sensor_id))
                 return False
         except ValueError as e:
-            self._logger.warning("Selected range threw ValueError exception with '{}' ({})".
+            self._logger.warning("Lateral Intercept - Selected range threw ValueError exception with '{}' ({})".
                                  format(self._sensor_info['reading'][self.selected_range],
-                                 type(self._sensor_info['reading'][self.selected_range])))
+                                        type(self._sensor_info['reading'][self.selected_range])))
             self._logger.exception(e)
             return False
-
 
     def _sensor_motion(self, sensor_id):
         """
