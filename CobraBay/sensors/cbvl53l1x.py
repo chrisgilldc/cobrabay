@@ -132,41 +132,40 @@ class CBVL53L1X(I2CSensor):
                 )
         # We get here once the interrupt is ready.
         # Fetch the data.
-        sensor_response = self._sensor_obj.distance
-        if sensor_response is None:
-            # The Adafruit VL53L1X wraps up all invalid statuses with a 'None' return. See
-            # https://github.com/adafruit/Adafruit_CircuitPython_VL53L1X/pull/8 for details.
-            response = SensorReading(
-                state=self.state,
-                status=self.status,
-                fault=self._fault,
-                response_type=CobraBay.const.SENSOR_RESP_NOTOK,
-                range=None, temp=None,
-                fault_reason=None
-            )
-        # Check for minimum and maximum ranges.
-        elif sensor_response <= 4:
-            response = SensorReading(
-                state=self.state,
-                status=self.status,
-                fault=self._fault,
-                response_type=CobraBay.const.SENSOR_RESP_TOOCLOSE,
-                range=None, temp=None,
-                fault_reason=None
-            )
+        try:
+            sensor_response = self._sensor_obj.distance
+        except OSError as oe:
+            self._fault=True
+            self._lifetime_faults += 1
+            response_type=CobraBay.const.SENSTATE_FAULT
+            range=None
+            fault_reason=oe
         else:
-            response = SensorReading(
-                state=self.state,
-                status=self.status,
-                fault=self._fault,
-                response_type=CobraBay.const.SENSOR_RESP_OK,
-                range=Quantity(sensor_response, 'cm'), temp=None,
+            if sensor_response is None:
+                # The Adafruit VL53L1X wraps up all invalid statuses with a 'None' return. See
+                # https://github.com/adafruit/Adafruit_CircuitPython_VL53L1X/pull/8 for details.
+                response_type=CobraBay.const.SENSOR_RESP_NOTOK
+                range = None
+                fault_reason = None
+            # Check for minimum and maximum ranges.
+            elif sensor_response <= 4:
+                response_type = CobraBay.const.SENSOR_RESP_TOOCLOSE
+                range=None
                 fault_reason=None
-            )
+            else:
+                response_type=CobraBay.const.SENSOR_RESP_OK
+                range=Quantity(sensor_response, 'cm')
+                fault_reason=None
         # Clear the interrupt.
         self._sensor_obj.clear_interrupt()
         # Return.
-        return response
+        return SensorReading(
+            state=self.state,
+            status=self.status,
+            fault=self._fault,
+            response_type=response_type,
+            range=range, temp=None, fault_reason=fault_reason
+        )
 
     # Public Properties
     @property
