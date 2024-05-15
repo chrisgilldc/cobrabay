@@ -59,6 +59,7 @@ class CBSensorMgr:
         self._wait_ready = 30
         self._wait_reset = 30
         self._i2c_bus = None
+        self._i2c_available = True
         self._ioexpanders = {}
 
         # self._thread: threading.Thread | None = None
@@ -97,12 +98,17 @@ class CBSensorMgr:
             except BaseException:
                 pass
             else:
-                self.reset_i2cbus()
-                for addr in self._scan_aw9523s():
-                    self._logger.info("Configuring AW9523 at address '{}'".format(hex(addr)))
-                    self._ioexpanders[str(addr)] = AW9523(self._i2c_bus, addr, reset=True)
-                    self._logger.info("Resetting all outputs on board...")
-                    self._reset_aw9523(self._ioexpanders[str(addr)])
+                # Do a reset on the bus.
+                self._reset_i2cbus()
+                # If resetting hits an error, it will set the _i2c_available to false and we skip this setup.
+                if self._i2c_available:
+                    for addr in self._scan_aw9523s():
+                        self._logger.info("Configuring AW9523 at address '{}'".format(hex(addr)))
+                        self._ioexpanders[str(addr)] = AW9523(self._i2c_bus, addr, reset=True)
+                        self._logger.info("Resetting all outputs on board...")
+                        self._reset_aw9523(self._ioexpanders[str(addr)])
+                else:
+                    self._logger.warning("Skipping IO expander setup, I2C bus is not available.")
 
         # Pass the sensor config to the setup method to see if it works!
         self._sensors = self._create_sensor_multiple(sensor_config)
@@ -163,8 +169,13 @@ class CBSensorMgr:
                 self._latest_state[sensor_id] = self._sensors[sensor_id].reading()
             elif self._sensors[sensor_id] == CobraBay.const.SENSTATE_FAULT:
                 # If the sensor faulted on creation, it doesn't have a reading method, construct a fault response.
-                self._latest_state[sensor_id] = SensorReading(response_type=CobraBay.const.SENSTATE_FAULT,
-                                                              range=None, temp=None, fault_reason="Did not initialize.")
+                self._latest_state[sensor_id] = SensorReading(
+                    state=CobraBay.const.SENSTATE_FAULT,
+                    status=CobraBay.const.SENSTATE_FAULT,
+                    fault=True,
+                    response_type=CobraBay.const.SENSTATE_FAULT,
+                    range=CobraBay.const.GEN_UNAVAILABLE, temp=CobraBay.const.GEN_UNAVAILABLE,
+                    fault_reason="Did not initialize.")
         # Calculate the run_time.
         run_time = time.monotonic_ns() - start_time
         self._scan_speed_log.append(run_time)
@@ -244,22 +255,6 @@ class CBSensorMgr:
         for sensor_obj in self._sensors:
             del self._sensors[sensor_obj]
 
-    def reset_i2cbus(self):
-
-        self._logger.info("Resetting I2C bus on request.")
-        self._ctrl_enable.value = False
-        self._logger.info("Bus is now disabled. Waiting {}s before enablement.".format(self._wait_reset))
-        time.sleep(self._wait_reset)
-        self._ctrl_enable.value = True
-        self._logger.info("Bus enable. Waiting {}s for ready.".format(self._wait_ready))
-        mark = time.monotonic()
-        while not self._ctrl_ready.value:
-            if time.monotonic() - mark >= self._wait_ready:
-                raise IOError("I2C Bus did not become ready in time.")
-            time.sleep(0.1)
-        self._logger.info("Bus now ready.")
-
-
     def sensors_activate(self):
         for sensor_id in self._sensors:
             if isinstance(self._sensors[sensor_id], CobraBay.sensors.BaseSensor):
@@ -277,11 +272,16 @@ class CBSensorMgr:
             # self._logger.debug("Traversing detectors to set status to '{}'".format(target_state))
             # Traverse the dict looking for detectors that need activation.
             for sensor in self._sensors:
-                if target_sensor is None or sensor == target_sensor:
-                    self._logger.info("{} - Setting sensor {}".format(time.monotonic(), sensor))
-                    self._logger.debug("Changing sensor {}".format(sensor))
-                    self._sensors[sensor].status = target_state
-                    self._logger.info("{} - Set complete.".format(time.monotonic()))
+                if ( target_sensor is None or sensor == target_sensor):
+                    self._logger.debug("Sensor is of type: {}".format(type(self._sensors[sensor])))
+                    if self._sensors[sensor] == CobraBay.const.SENSTATE_FAULT:
+                        self._logger.warning("Cannot set state of sensor '{}' before it is initialized.".
+                                             format(target_sensor))
+                    else:
+                        self._logger.info("{} - Setting sensor {}".format(time.monotonic(), sensor))
+                        self._logger.debug("Changing sensor {}".format(sensor))
+                        self._sensors[sensor].status = target_state
+                        self._logger.info("{} - Set complete.".format(time.monotonic()))
         else:
             raise ValueError("'{}' not a valid state for sensors.".format(target_state))
 
@@ -333,6 +333,8 @@ class CBSensorMgr:
         elif sensor_config['hw_type'] == 'VL53L1X':
             if self._i2c_bus is None:
                 raise ValueError("Using I2C Sensor without I2C bus defined!")
+            if self._i2c_available is False:
+                raise OSError("Skipping sensor '{}', I2C bus is not available.".format(sensor_config['name']))
             if sensor_config['enable_board'] == 0:
                 enable_board = 0
             else:
@@ -341,7 +343,7 @@ class CBSensorMgr:
                 except KeyError:
                     self._logger.error("Cannot configure sensor '{}', requested IO expander at address '{}' does not "
                                        "exist.".format(sensor_config['name'], hex(sensor_config['enable_board'])))
-                    return
+                    raise ValueError("IO expander does not exist.")
             self._logger.debug("Will pass I2C Bus: {} ({})".format(self._i2c_bus, type(self._i2c_bus)))
             self._logger.debug("Will pass IO Expander: {} ({})".format(enable_board, type(enable_board)))
             # Now create the actual sensor object.
@@ -377,7 +379,7 @@ class CBSensorMgr:
 
         # If the bus doesn't start ready, reset it.
         if not ready.value:
-            self.reset_i2cbus()
+            self._reset_i2cbus()
 
         # Determine what to do for I2C creation.
         if i2c_bus is not None:
@@ -405,9 +407,25 @@ class CBSensorMgr:
         while not q.empty():
             try:
                 q.get(block=False)
-            except Empty:
+            except queue.Empty:
                 continue
             q.task_done()
+
+    def _reset_i2cbus(self):
+        self._logger.info("Resetting I2C bus on request.")
+        self._ctrl_enable.value = False
+        self._logger.info("Bus is now disabled. Waiting {}s before enablement.".format(self._wait_reset))
+        time.sleep(self._wait_reset)
+        self._ctrl_enable.value = True
+        self._logger.info("Bus enable. Waiting {}s for ready.".format(self._wait_ready))
+        mark = time.monotonic()
+        while not self._ctrl_ready.value:
+            if time.monotonic() - mark >= self._wait_ready:
+                self._logger.error("I2C Bus did not become ready in time. Will not set up I2C-based sensors.")
+                self._i2c_available = False
+                break
+            time.sleep(0.1)
+        self._logger.info("Bus now ready.")
 
     def _scan_aw9523s(self):
         """

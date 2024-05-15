@@ -18,6 +18,7 @@ from CobraBay.const import *
 # TODO: Reorganize class to standard.
 # FixMe: Maybe MQTT server reconnect issue.
 
+
 class CBNetwork:
     def __init__(self,
                  unit_system,
@@ -45,7 +46,6 @@ class CBNetwork:
         :param password:
         :param cbcore:
         :param ha_discover:
-        :param raw_sensors:
         :param accept_commands:
         :param log_level:
         :param mqtt_log_level:
@@ -55,7 +55,6 @@ class CBNetwork:
         self._logger = logging.getLogger("CobraBay").getChild("Network")
         self._logger.setLevel(log_level.upper())
         self._logger.info("Network initializing...")
-
 
         # Save parameters.
         # Reference to the CobraBay Core.
@@ -93,7 +92,6 @@ class CBNetwork:
         self._display_obj = None
         # Reference to the Hardware Monitor
         self._pistatus = None
-
 
         # Create a sublogger for the MQTT client.
         self._logger_mqtt = logging.getLogger("CobraBay").getChild("MQTT")
@@ -270,8 +268,8 @@ class CBNetwork:
             if (isinstance(message, str) and isinstance(previous_payload, str)) or \
                     (isinstance(message, (int, float)) and isinstance(previous_payload, (int, float))):
                 if message != previous_payload:
-                    self._logger.debug("Payload '{}' does not match previous payload '{}'. Publishing.".format(payload,
-                                                                                                               previous_payload))
+                    self._logger.debug("Payload '{}' does not match previous payload '{}'. Publishing.".
+                                       format(payload, previous_payload))
                     send = True
                 else:
                     self._logger.debug("Payload has not changed, will not publish")
@@ -288,7 +286,7 @@ class CBNetwork:
                         send = True
                         break
             # If type has changed, which is odd,  (and it shouldn't, usually), send it.
-            elif type(message) != type(previous_payload):
+            elif type(message) is not type(previous_payload):
                 self._logger.debug("Payload type has changed from '{}' to '{}'. Unusual, but publishing anyway.".
                                    format(type(previous_payload), type(payload)))
                 send = True
@@ -353,7 +351,8 @@ class CBNetwork:
             # established entities.
             if self._ha_info['override']:
                 if time.monotonic() - self._ha_info['start'] <= 15:
-                    self._logger.debug("HA discovery {}s ago, sending all".format(time.monotonic() - self._ha_info['start']))
+                    self._logger.debug("HA discovery {}s ago, sending all".format(time.monotonic() -
+                                                                                  self._ha_info['start']))
                     force_repeat = True
                 else:
                     self._logger.info("Have sent all messages for 15s after HA discovery. Disabling.")
@@ -564,7 +563,7 @@ class CBNetwork:
                 self._logger.debug("Sending for '{}'".format(sensor_id))
                 # Only send if the sensor actually has a value. This will usually be right at startup.
                 # Quality
-                #TODO: Streamline this logic once the underlying Bay issues are fixed.
+                # TODO: Streamline this logic once the underlying Bay issues are fixed.
                 try:
                     outbound_messages.append(
                         {'topic': topic_base + 'sensors/' + sensor_id + '/quality',
@@ -594,13 +593,12 @@ class CBNetwork:
                 try:
                     outbound_messages.append(
                         {'topic': topic_base + 'sensors/' + sensor_id + '/intercepted',
-                        'payload': input_obj.sensor_info['intercepted'][sensor_id],
-                        'repeat': self._chattiness['sensors_always_send']})
+                         'payload': input_obj.sensor_info['intercepted'][sensor_id],
+                         'repeat': self._chattiness['sensors_always_send']})
                 except KeyError:
                     outbound_messages.append(
                         {'topic': topic_base + 'sensors/' + sensor_id + '/intercepted',
-                        'payload': GEN_UNKNOWN,
-                        'repeat': self._chattiness['sensors_always_send']})
+                         'payload': GEN_UNKNOWN, 'repeat': self._chattiness['sensors_always_send']})
 
         # If performing a VERIFY on the bay, we now have all the messages, set bay back to ready.
         if input_obj.state == BAYSTATE_VERIFY:
@@ -678,7 +676,7 @@ class CBNetwork:
             self._logger.debug("Discovery Log: {}".format(self._discovery_log))
             self._logger.debug("Checking discovery for: {}".format(item))
             # Run the discovery if we haven't before, or if force is requested.
-            #TODO: Update Discovery processing.
+            # TODO: Update Discovery processing.
             if not self._discovery_log[item] or force:
                 if item == 'system':
                     self._logger.info("Sending Home Assistant discovery for '{}'.".format(item))
@@ -960,6 +958,9 @@ class CBNetwork:
         # Do common long/lat items first.
         for sensor_id in bay_obj.configured_sensors['lat'] + bay_obj.configured_sensors['long']:
             sen_obj = self._sensormgr.get_sensor(sensor_id)
+            if sen_obj == SENSTATE_FAULT:
+                self._logger.info("Skipping sensor '{}', not initialized.".format(sensor_id))
+                break
             sensor_base = topic_base + "sensors/" + sensor_id + "/"
             # Bay-adjusted range reading.
             # Reading direct from the sensor.
@@ -984,6 +985,9 @@ class CBNetwork:
         # Lateral only elements.
         for sensor_id in bay_obj.configured_sensors['lat']:
             sen_obj = self._sensormgr.get_sensor(sensor_id)
+            if sen_obj == SENSTATE_FAULT:
+                self._logger.info("Skipping sensor '{}', not initialized.".format(sensor_id))
+                break
             sensor_base = topic_base + "sensors/" + sensor_id + "/"
             self._ha_discover(
                 name="{} Sensor - {} Intercepted".format(bay_obj.name, sen_obj.name),
@@ -994,7 +998,6 @@ class CBNetwork:
                 payload_off="false"
             )
 
-
     def _ha_discovery_sensors(self):
         """
         Send Home Assistant messages for sensors.
@@ -1004,6 +1007,9 @@ class CBNetwork:
         topic_base = "CobraBay/" + self._client_id + '/'
         for sensor_id in self._cbcore.configured_sensors:
             sen_obj = self._sensormgr.get_sensor(sensor_id)
+            if sen_obj == SENSTATE_FAULT:
+                self._logger.info("Skipping sensor '{}', not initialized.".format(sensor_id))
+                break
             sensor_base = topic_base + "sensors/" + sensor_id + "/"
 
             # Current state of the detector.
