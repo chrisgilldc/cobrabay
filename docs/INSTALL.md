@@ -19,16 +19,16 @@ Raspberry Pi OS Lite 64-bit.
 * Update system settings with raspi config ```sudo raspi-config```
   * Enable I2C.
     * Navigate to '3 Interface Options'
-    * Select 'I5 I2C'. Select 'Yes', then 'OK'.
+    * Select 'I2C'. Select 'Yes', then 'OK'.
   * Enable serial port for TFMini.
     * Navigate to '3 Interface Options'
-    * Select 'I6 Serial Port'
+    * Select 'Serial Port'
     * When asked 'Would you like a login shell to be accessble over serial?', select NO.
     * When asked 'Would you like the serial port hardware to be enabled?', select YES.
   * Press tab twice to select 'FINISH'
   * When asked 'Would you like to reboot now?', select 'NO'
 * Update system configuration.
-  * Add 'isolcpus=3' to the end of /boot/cmdline.txt
+  * Add 'isolcpus=3' to the end of /boot/firmware/cmdline.txt
   * Blacklist the sound module. The Adafruit installation script currently doesn't do this correctly for the latest RPiOS version ([#253](https://github.com/adafruit/Raspberry-Pi-Installer-Scripts/issues/253))
   ```sudo echo -n "blacklist snd_bcm2835" > /etc/modprobe.d/alsa-blacklist.conf```
 * Reboot the system.
@@ -38,29 +38,27 @@ Raspberry Pi OS Lite 64-bit.
 
 Unfortunately, the rgbmatrix library is not packaged. It needs to be installed manually. Install it manually using the following steps.
 * Install the RGB Matrix library using the Adafruit scripts
-  * ```curl https://raw.githubusercontent.com/adafruit/Raspberry-Pi-Installer-Scripts/main/rgb-matrix.sh >rgb-matrix.sh sudo bash rgb-matrix.sh```
+  * ```curl https://raw.githubusercontent.com/adafruit/Raspberry-Pi-Installer-Scripts/main/rgb-matrix.sh >rgb-matrix.sh; sudo bash rgb-matrix.sh```
   * Select "Y" to Continue
   * Select "2", Matrix HAT + RTC
   * Select "1" for Quality
   * The library will compile. When complete and asked to reboot, select "y"
-  
-### Install CobraBay
-
-* Install a few extra packages (if you used Lite)
-* ```sudo apt install gcc python3-dev git```
-
-* Install requirements.
-  * ```pip3 install -r requirements.txt```
 
 
 ### Install CobraBay
 
 Note: I have not yet made this a PIPable repository. Maybe some day. For now, you need to download the package manually 
-and do a local install.
+and do a local installation. 
 * Login as 'pi'
 * Download the [latest release](https://github.com/chrisgilldc/cobrabay/releases/latest) and extract.
-  ```wget https://github.com/chrisgilldc/cobrabay/archive/refs/tags/v0.2.0-alpha.tar.gz```
+  ```wget https://github.com/chrisgilldc/cobrabay/releases/latest/download/cobrabay-latest.tar.gz```
 * Extract the archive.
-  ```tar -xzf v0.2.0-alpha.tar.gz```
+  ```tar -xzf cobrabay-latest.tar.gz```
 * PIP install for the Pi user from the archive
-  ```pip install --user ./v0.2.0-alpha.tar.gz```
+  ```pip install --user ./cobrabay-latest.tar.gz```
+* Install a few extra packages (if you used Lite)
+  * ```sudo apt install gcc python3-dev git```
+* Install requirements.
+  * ```pip3 install -r requirements.txt```
+
+### Configure CobraBay
