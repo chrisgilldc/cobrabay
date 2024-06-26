@@ -1,8 +1,11 @@
+from numpy import timedelta64
+
 # Various constants
 
 ## General constants. Multiple types of objects need these.
 GEN_UNKNOWN = 'unknown'
 GEN_UNAVAILABLE = 'unavailable'
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 ## Bay States
 BAYSTATE_DOCKING = 'docking'
@@ -31,32 +34,35 @@ SENSTATE_ENABLED = 'enabled'
 SENSTATE_RANGING = 'ranging'
 SENSTATE_NOTRANGING = 'not_ranging'
 
-## Sensor response codes
-SENRESP_OK = 'ok'
-
-# Non-Quantity values the sensor can be in without
-SENSOR_VALUE_OK = 'ok'
-SENSOR_VALUE_WEAK = 'weak'
-SENSOR_VALUE_STRONG = 'strong'
-SENSOR_VALUE_FLOOD = 'flood'
-SENSOR_VALUE_TOOCLOSE = 'tooclose'
+# Sensor response types.
+SENSOR_RESP_OK = 'ok'
+SENSOR_RESP_NOTOK = 'not_ok'
+SENSOR_RESP_INR = 'inr'  ## Interrupt Not Ready. IE: sensor wasn't ready to read.
+SENSOR_RESP_WEAK = 'weak'
+SENSOR_RESP_STRONG = 'strong'
+SENSOR_RESP_FLOOD = 'flood'
+SENSOR_RESP_TOOCLOSE = 'tooclose'
+SENSOR_RESP_TOOFAR = 'toofar'
 
 # Detector quality values.
-DETECTOR_QUALITY_OK = 'ok'
-DETECTOR_QUALITY_WARN = 'warning'
-DETECTOR_QUALITY_CRIT = 'critical'
-DETECTOR_QUALITY_BASE = 'base'
-DETECTOR_QUALITY_FINAL = 'final'
-DETECTOR_QUALITY_PARK = 'park'
-DETECTOR_QUALITY_BACKUP = 'backup'
-DETECTOR_QUALITY_NOOBJ = 'no_object'
-DETECTOR_QUALITY_EMERG = 'emergency'
-DETECTOR_QUALITY_DOOROPEN = 'door_open'
-DETECTOR_QUALITY_BEYOND = 'beyond_range'
-DETECTOR_NOREADING = 'no_reading'
-DETECTOR_NOINTERCEPT = 'not_intercepted'
+SENSOR_QUALITY_OK = 'ok'
+SENSOR_QUALITY_WARN = 'warning'
+SENSOR_QUALITY_CRIT = 'critical'
+SENSOR_QUALITY_BASE = 'base'
+SENSOR_QUALITY_FINAL = 'final'
+SENSOR_QUALITY_PARK = 'park'
+SENSOR_QUALITY_BACKUP = 'backup'
+SENSOR_QUALITY_NOOBJ = 'no_object'
+SENSOR_QUALITY_EMERG = 'emergency'
+SENSOR_QUALITY_DOOROPEN = 'door_open'
+SENSOR_QUALITY_BEYOND = 'beyond_range'
+SENSOR_QUALITY_NOREADING = 'no_reading'
+SENSOR_QUALITY_NOTINTERCEPTED = 'not_intercepted'
 
 # Directional values
 DIR_FWD = 'forward'
 DIR_REV = 'reverse'
 DIR_STILL = 'still'
+
+# Time intervals
+TIME_MOTION_EVAL = timedelta64(250,'ms')
