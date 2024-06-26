@@ -1,0 +1,8 @@
+/path/to/cobrabay/log
+{
+        rotate 4
+        weekly
+        missingok
+        notifempty
+        size 25M
+}

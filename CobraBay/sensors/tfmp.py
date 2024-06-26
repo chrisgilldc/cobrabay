@@ -7,7 +7,7 @@ import importlib
 import time
 import pint
 import serial
-from CobraBay.datatypes import TFMP_data
+from CobraBay.datatypes import TFMPData
 
 class TFMP:
     ####
@@ -138,7 +138,7 @@ class TFMP:
             if status == "OK":
                 dist = pint.Quantity(dist,"cm").to(self._unit_length)
             temp = pint.Quantity(temp, "celsius").to(self._unit_temp)
-        return_data = TFMP_data(status, dist, flux, temp)
+        return_data = TFMPData(status, dist, flux, temp)
         return return_data
 
     # Core command sender. This will send commands and process returns. Commands are then exposed through public

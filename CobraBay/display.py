@@ -143,10 +143,10 @@ class CBDisplay:
 
         # Eventually replace this with the _status_color method.
         status_lookup = (
-            {'status': DETECTOR_QUALITY_OK, 'border': (0, 128, 0, 255), 'fill': (0, 128, 0, 255)},
-            {'status': DETECTOR_QUALITY_WARN, 'border': (255, 255, 0, 255), 'fill': (255, 255, 0, 255)},
-            {'status': DETECTOR_QUALITY_CRIT, 'border': (255, 0, 0, 255), 'fill': (255, 0, 0, 255)},
-            {'status': DETECTOR_QUALITY_NOOBJ, 'border': (255, 255, 255, 255), 'fill': (0, 0, 0, 0)}
+            {'status': SENSOR_QUALITY_OK, 'border': (0, 128, 0, 255), 'fill': (0, 128, 0, 255)},
+            {'status': SENSOR_QUALITY_WARN, 'border': (255, 255, 0, 255), 'fill': (255, 255, 0, 255)},
+            {'status': SENSOR_QUALITY_CRIT, 'border': (255, 0, 0, 255), 'fill': (255, 0, 0, 255)},
+            {'status': SENSOR_QUALITY_NOOBJ, 'border': (255, 255, 255, 255), 'fill': (0, 0, 0, 0)}
         )
 
         i = 0
@@ -154,22 +154,22 @@ class CBDisplay:
         # just multiply.
         accumulated_height = 0
         for intercept in bay_obj.lateral_sorted:
-            lateral = intercept.lateral
-            self._logger.debug("Processing lateral zone: {}".format(lateral))
-            self._layers[bay_obj.id][lateral] = {}
+            sensor_id = intercept.sensor_id
+            self._logger.debug("Processing lateral zone: {}".format(sensor_id))
+            self._layers[bay_obj.id][sensor_id] = {}
             for side in ('L', 'R'):
-                self._layers[bay_obj.id][lateral][side] = {}
+                self._layers[bay_obj.id][sensor_id][side] = {}
                 if side == 'L':
                     line_w = 0
                     nointercept_x = 1
                 elif side == 'R':
-                    line_w = w - 3
-                    nointercept_x = w - 2
+                    line_w = self._matrix_width - 3
+                    nointercept_x = self._matrix_width - 2
                 else:
                     raise ValueError("Not a valid side option, this should never happen!")
 
                 # Make an image for the 'fault' status.
-                img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+                img = Image.new('RGBA', (self._matrix_width, self._matrix_height), (0, 0, 0, 0))
                 # Make a striped box for fault.
                 img = self._rectangle_striped(
                     img,
@@ -178,24 +178,24 @@ class CBDisplay:
                     pricolor='red',
                     seccolor='yellow'
                 )
-                self._layers[bay_obj.id][lateral][side]['fault'] = img
+                self._layers[bay_obj.id][sensor_id][side]['fault'] = img
                 del (img)
 
                 # Make an image for no_object
-                img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+                img = Image.new('RGBA', (self._matrix_width, self._matrix_height), (0, 0, 0, 0))
                 # Draw white lines up the section.
                 draw = ImageDraw.Draw(img)
                 draw.line(
                     [nointercept_x, 1 + accumulated_height, nointercept_x, 1 + accumulated_height + pixel_lengths[i]],
                     fill='white', width=1)
-                self._layers[bay_obj.id][lateral][side][DETECTOR_NOINTERCEPT] = img
+                self._layers[bay_obj.id][sensor_id][side][SENSOR_QUALITY_NOTINTERCEPTED] = img
                 del (img)
 
                 for item in status_lookup:
                     self._logger.debug("Creating layer for side {}, status {} with border {}, fill {}."
                                        .format(side, item['status'], item['border'], item['fill']))
                     # Make the image.
-                    img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+                    img = Image.new('RGBA', (self._matrix_width, self._matrix_height), (0, 0, 0, 0))
                     draw = ImageDraw.Draw(img)
                     # Draw the rectangle
                     draw.rectangle(
@@ -204,7 +204,7 @@ class CBDisplay:
                         outline=item['border'],
                         width=1)
                     # Put this in the right place in the lookup.
-                    self._layers[bay_obj.id][lateral][side][item['status']] = img
+                    self._layers[bay_obj.id][sensor_id][side][item['status']] = img
                     # Write for debugging
                     # img.save("/tmp/CobraBay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
                     del (draw)
@@ -270,6 +270,12 @@ class CBDisplay:
         self.current = img
 
     def show_motion(self, direction, bay_obj):
+        #TODO: Maybe remove direction, not sure we need that anymore.
+        """Show motion placard based on bay object's sensor info.
+
+        :param bay_obj: Bay object to display.
+        :type bay_obj: CBBay
+        """
         self._logger.debug("Show Motion received bay '{}'".format(bay_obj.name))
 
         # Don't do motion display if the bay isn't in a motion state.
@@ -277,17 +283,24 @@ class CBDisplay:
             self._logger.error("Asked to show motion for bay that isn't performing a motion. Will not do!")
             return
 
+        self._logger.debug("Bay has sensor info: {}".format(bay_obj.sensor_info))
+
         # For easy reference.
         w = self._matrix_width
         h = self._matrix_height
         # Make a base image, black background.
-        final_image = Image.new("RGBA", (w, h), (0, 0, 0, 255))
+        final_image = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0, 0, 0, 255))
 
         ## Center area, the range number.
         self._logger.debug("Compositing range placard...")
+
+        # Get the range value from the bay.
+        range_reading = bay_obj.sensor_info['reading'][bay_obj.selected_range]
+        range_quality = bay_obj.sensor_info['quality'][bay_obj.selected_range]
+
         range_layer = self._placard_range(
-            bay_obj.range.value,
-            bay_obj.range.quality,
+            range_reading,
+            range_quality,
             bay_obj.state
         )
         final_image = Image.alpha_composite(final_image, range_layer)
@@ -296,10 +309,9 @@ class CBDisplay:
         self._logger.debug("Compositing strobe...")
         try:
             if self._bottom_box.lower() == 'strobe':
-
                 final_image = Image.alpha_composite(final_image,
                                                     self._strobe(
-                                                        range_quality=bay_obj.range.quality,
+                                                        range_quality=range_quality,
                                                         range_pct=bay_obj.range_pct))
             elif self._bottom_box.lower() == 'progress':
                 self._logger.debug("Compositing in progress for bottom box.")
@@ -311,40 +323,44 @@ class CBDisplay:
 
         self._logger.debug("Compositing laterals.")
         for intercept in bay_obj.lateral_sorted:
-            detector = bay_obj.detectors[intercept.lateral]
-            # Hit the detector quality once. There's a slim chance this could change during the course of evaluation and
-            # lead to wonky results.
-            dq = detector.quality
-            dv = detector.value
-            if dq in (DETECTOR_NOINTERCEPT, DETECTOR_QUALITY_NOOBJ):
+            self._logger.debug("Lateral: {}".format(intercept.sensor_id))
+            sensor_quality = bay_obj.sensor_info['quality'][intercept.sensor_id]
+            sensor_reading = bay_obj.sensor_info['reading'][intercept.sensor_id]
+
+            if sensor_quality in (SENSOR_QUALITY_NOTINTERCEPTED, SENSOR_QUALITY_NOOBJ):
                 # No intercept shows on both sides.
                 combined_layers = Image.alpha_composite(
-                    self._layers[bay_obj.id][detector.id]['L'][dq],
-                    self._layers[bay_obj.id][detector.id]['R'][dq]
+                    self._layers[bay_obj.id][intercept.sensor_id]['L'][sensor_quality],
+                    self._layers[bay_obj.id][intercept.sensor_id]['R'][sensor_quality]
                 )
                 final_image = Image.alpha_composite(final_image, combined_layers)
-            elif dq in (DETECTOR_QUALITY_OK, DETECTOR_QUALITY_WARN, DETECTOR_QUALITY_CRIT):
+            elif sensor_quality in (SENSOR_QUALITY_OK, SENSOR_QUALITY_WARN, SENSOR_QUALITY_CRIT):
+                self._logger.debug("Bay's merged config is: {}".format(bay_obj.config_merged))
                 # Pick which side the vehicle is offset towards.
-                if detector.value == 0:
-                    skew = ('L', 'R')  # In the rare case the value is exactly zero, show both sides.
-                elif detector.side == 'R' and dv > 0:
-                    skew = ('R')
-                elif detector.side == 'R' and dv < 0:
-                    skew = ('L')
-                elif detector.side == 'L' and dv > 0:
-                    skew = ('L')
-                elif detector.side == 'L' and dv < 0:
-                    skew = ('R')
-
-                self._logger.debug(
-                    "Compositing in lateral indicator layer for {} {} {}".format(detector.name, skew, dq))
-                for item in skew:
-                    selected_layer = self._layers[bay_obj.id][detector.id][item][dq]
-                    final_image = Image.alpha_composite(final_image, selected_layer)
+                try:
+                    if sensor_reading == 0:
+                        skew = ('L', 'R')  # In the rare case the value is exactly zero, show both sides.
+                    elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'R' and sensor_reading > 0:
+                        skew = ('R')
+                    elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'R' and sensor_reading < 0:
+                        skew = ('L')
+                    elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'L' and sensor_reading > 0:
+                        skew = ('L')
+                    elif bay_obj.config_merged[intercept.sensor_id]['side'] == 'L' and sensor_reading < 0:
+                        skew = ('R')
+                except TypeError:
+                    self._logger.warning("Sensor reading had unexpected value '{}' and type '{}'".
+                                         format(sensor_reading, type(sensor_reading)))
+                else:
+                    self._logger.debug(
+                        "Compositing in lateral indicator layer for {} {} {}".format(bay_obj.config_merged[intercept.sensor_id]['name'], skew, sensor_quality))
+                    for item in skew:
+                        selected_layer = self._layers[bay_obj.id][intercept.sensor_id][item][sensor_quality]
+                        final_image = Image.alpha_composite(final_image, selected_layer)
             else:
                 combined_layers = Image.alpha_composite(
-                    self._layers[bay_obj.id][detector.id]['L']['fault'],
-                    self._layers[bay_obj.id][detector.id]['R']['fault']
+                    self._layers[bay_obj.id][intercept.sensor_id]['L']['fault'],
+                    self._layers[bay_obj.id][intercept.sensor_id]['R']['fault']
                 )
                 final_image = Image.alpha_composite(final_image, combined_layers)
         self._logger.debug("Returning final image.")
@@ -560,7 +576,7 @@ class CBDisplay:
         draw.rectangle([x_input + 2, y_input, x_input + 4, y_input - 5], outline='green', fill='green')
         # Lateral sensor. Presuming one!
         draw.line([x_input + 3, y_input - 7, x_input + 3, y_input - 7],
-                  fill=self._status_color(DETECTOR_QUALITY_WARN)['fill'])
+                  fill=self._status_color(SENSOR_QUALITY_WARN)['fill'])
         # Lateral sensors.
         return img
 
@@ -628,9 +644,9 @@ class CBDisplay:
 
         # Override string states. If the range quality has these values, we go ahead and show the string rather than the
         # measurement.
-        if range_quality == DETECTOR_QUALITY_BACKUP:
+        if range_quality == SENSOR_QUALITY_BACKUP:
             return self._layers['backup']
-        elif range_quality in (DETECTOR_QUALITY_DOOROPEN, DETECTOR_QUALITY_BEYOND):
+        elif range_quality in (SENSOR_QUALITY_DOOROPEN, SENSOR_QUALITY_BEYOND):
             # DOOROPEN is when the detector cannot get a reflection, ie: the door is open.
             # BEYOND is when a reading is found but it's beyond the defined length of the bay.
             # Either way, this indicates either no vehicle is present yet, or a vehicle is present but past the garage
@@ -813,10 +829,10 @@ class CBDisplay:
         """
         # Pre-defined quality-color mappings.
         color_table = {
-            DETECTOR_QUALITY_OK: {'border': (0, 128, 0, 255), 'fill': (0, 128, 0, 255)},
-            DETECTOR_QUALITY_WARN: {'border': (255, 255, 0, 255), 'fill': (255, 255, 0, 255)},
-            DETECTOR_QUALITY_CRIT: {'border': (255, 0, 0, 255), 'fill': (255, 0, 0, 255)},
-            DETECTOR_QUALITY_NOOBJ: {'border': (255, 255, 255, 255), 'fill': (0, 0, 0, 0)}
+            SENSOR_QUALITY_OK: {'border': (0, 128, 0, 255), 'fill': (0, 128, 0, 255)},
+            SENSOR_QUALITY_WARN: {'border': (255, 255, 0, 255), 'fill': (255, 255, 0, 255)},
+            SENSOR_QUALITY_CRIT: {'border': (255, 0, 0, 255), 'fill': (255, 0, 0, 255)},
+            SENSOR_QUALITY_NOOBJ: {'border': (255, 255, 255, 255), 'fill': (0, 0, 0, 0)}
         }
         try:
             return color_table[status]

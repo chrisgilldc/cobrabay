@@ -8,16 +8,20 @@ import sys
 import pid.base
 import CobraBay
 import logging
-import pwd
 import os
+import pwd
+import socket
 from logging.handlers import WatchedFileHandler
 # from collections import namedtuple
 from pid import PidFile
 from CobraBay.datatypes import ENVOPTIONS
+# from Queue import Empty
+from multiprocessing import Queue, Process
+
 
 def main():
     print("CobraBay Parking System - {}".format(CobraBay.__version__))
-    print("Running as '{}'".format(pwd.getpwuid(os.getuid()).pw_name))
+    print("User: {}'\tHost: {}\tIP: {}".format(pwd.getpwuid(os.getuid()).pw_name, socket.getfqdn(), socket.gethostbyname(socket.gethostname())))
     # Parse command line options.
     parser = argparse.ArgumentParser(
         description="CobraBay Parking System"
@@ -25,12 +29,11 @@ def main():
     parser.add_argument("-b", "--base", default=".", help="Base directory, for all other paths")
     parser.add_argument("-c", "--config", default="./config.yaml", help="Config file location.")
     parser.add_argument("-cd", "--configdir", default=".", help="Directory for config files.")
-    parser.add_argument("-p", "--profile", action='store_true', help="Enable profiler.")
     parser.add_argument("-r", "--rundir", default="/tmp", help="Run directory, for the PID file.")
     parser.add_argument("-ld", "--logdir", default=".", help="Directory to write logs to.")
     parser.add_argument("-lf", "--logfile", default="./cobrabay.log", help="Log file name to write")
     parser.add_argument("-ll", "--loglevel", help="General logging level. More fine-grained control "
-                                                                      "in config file.")
+                                                  "in config file.")
     args = parser.parse_args()
 
     # Validate the environment options.
@@ -43,8 +46,7 @@ def main():
             input_configfile=args.config,
             input_logdir=args.logdir,
             input_logfile=args.logfile,
-            input_loglevel=args.loglevel,
-            input_profile=args.profile
+            input_loglevel=args.loglevel
         )
     except BaseException as e:
         print(e)
@@ -59,12 +61,11 @@ def main():
             console_handler = logging.StreamHandler()
             console_handler.setLevel(logging.DEBUG)
             master_logger.addHandler(console_handler)
-
-            master_logger.info("Running as PID {}".format(p.pid))
+            master_logger.info("Main process running as PID {}".format(p.pid))
 
             # Create a CobraBay config object.
             try:
-                cbconfig = CobraBay.CBConfig(config_file=environment.configfile, environment=environment)
+                coreconfig = CobraBay.config.CBCoreConfig(config_file=environment.configfile, environment=environment)
             except BaseException as e:
                 # Relying on the config module to log details on *what* the error is.
                 print("Configuration had errors. Cannot continue!")
@@ -72,23 +73,35 @@ def main():
 
             # Initialize the system
             master_logger.info("Initializing...")
-            cb = CobraBay.CBCore(config_obj=cbconfig,envoptions=environment)
+            # Create the queues.
+            # Data flow.
+            q_cbsmdata = Queue()
+            # Control
+            q_cbsmcontrol = Queue()
+
+            # Create the core system core, which will run in the main process.
+            cb = CobraBay.CBCore(config_obj=coreconfig, envoptions=environment, q_cbsmdata=q_cbsmdata,
+                                 q_cbsmcontrol=q_cbsmcontrol)
+
+            # Start the Sensor Manager process.
+            # cbsm_process = Process(target=CobraBay.sensormgr.CBSensorMgr, args=(sensorconfig, q_cbsmdata=q_cbsmdata, q_cbsmcontrol=q_cbsmcontrol))
+            # cbsm_process.start()
+            
 
             # Start.
             master_logger.info("Initialization complete. Operation start.")
-            cb.run(profile=environment.profile, rundir=environment.rundir)
+            cb.run()
     except pid.base.PidFileAlreadyLockedError:
         print("Cannot start, already running!")
 
 
-def _validate_environment(input_base, 
+def _validate_environment(input_base,
                           input_rundir,
                           input_configdir,
                           input_configfile,
                           input_logdir,
                           input_logfile,
-                          input_loglevel,
-                          input_profile):
+                          input_loglevel):
     # Check the base directory.
     try:
         base = pathlib.Path(input_base)
@@ -180,11 +193,6 @@ def _validate_environment(input_base,
     else:
         loglevel = None
 
-    # Profiler enable.
-    if input_profile not in (True, False):
-        raise ValueError("Profile must be either true or false. Instead got '{}', which should be impossible!".
-                         format(input_profile))
-
     valid_environment = ENVOPTIONS(
         base=basedir,
         rundir=rundir,
@@ -192,11 +200,11 @@ def _validate_environment(input_base,
         configfile=configfile,
         logdir=logdir,
         logfile=logfile,
-        loglevel=loglevel,
-        profile=input_profile
+        loglevel=loglevel
     )
 
     return valid_environment
+
 
 if __name__ == "__main__":
     sys.exit(main())
