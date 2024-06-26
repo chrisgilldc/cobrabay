@@ -21,6 +21,8 @@ optimized, done better or redesigned here. Constructive feedback welcome!
   * Fixed. Vector is now computed and properly sent to MQTT as well. Sensitivity needs tuning, small changes are resulting in 'unknown' results.
 * ~~Undocking never kicks out of Undock placard.~~
   * Fixed by the vector issue.
+* Fix shutdown exceptions. Sensor destructor doesn't actually work correctly.
+* Better handle I2C errors.
 * MQTT messages go 'unknown' in HA - review MQTT messages for retain status, should probably be more aggressive about it.
 
 ## Known Issues:
@@ -40,9 +42,9 @@ optimized, done better or redesigned here. Constructive feedback welcome!
   * Ability to save current system settings to config file
   * Ability to soft-reload system with new config file.
   * Ability to set some (all?) config values via MQTT.
-  * Ability to save current vehicle position as offsets
+  * Ability to save current vehicle position as offsets.
 * Display
-  * Replace strober with progress bar - **In progress** 
+  * Replace strober with progress bar 
   * Micro-car graphic
   * Alternatives to clock, possibly divide the display.
 * Consoldiate sensor access and data path 
