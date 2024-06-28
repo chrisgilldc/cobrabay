@@ -36,6 +36,7 @@ Raspberry Pi OS Lite 64-bit.
 
 ### Prepare to install CobraBay
 
+#### Install the rgbmatrix library
 Unfortunately, the rgbmatrix library is not packaged. It needs to be installed manually. Install it manually using the following steps.
 * Install the RGB Matrix library using the Adafruit scripts
   * ```curl https://raw.githubusercontent.com/adafruit/Raspberry-Pi-Installer-Scripts/main/rgb-matrix.sh >rgb-matrix.sh; sudo bash rgb-matrix.sh```
@@ -44,21 +45,42 @@ Unfortunately, the rgbmatrix library is not packaged. It needs to be installed m
   * Select "1" for Quality
   * The library will compile. When complete and asked to reboot, select "y"
 
+#### Create a Virtual Environment.
+
+Raspberry Pi OS, as of Bookworm, requires use of Virtual Environments (venvs) to contain Python packages.
+
+To set up a venv for CobraBay, do the following:
+* Ensure venv support is installed.
+  * ```sudo apt install python3.11-venv```
+* Install the Python packages available as RPiOS packages.
+  * ```sudo apt-get install -y python3-cerberus python3-gpiozero python3-paho-mqtt python3-numpy python3-pint python3-psutil python3-serial python3-smbus2 python3-yaml```
+* Create a venv. If you change the path of this venv, be sure to update the path in all further instructions.
+  * ```python -m venv --system-site-packages ~/.env_cobrabay```
+* Enter the venv
+  * ```source ~/.env_cobrabay/bin/activate```
+
 
 ### Install CobraBay
 
-Note: I have not yet made this a PIPable repository. Maybe some day. For now, you need to download the package manually 
-and do a local installation. 
-* Login as 'pi'
-* Download the [latest release](https://github.com/chrisgilldc/cobrabay/releases/latest) and extract.
-  ```wget https://github.com/chrisgilldc/cobrabay/releases/latest/download/cobrabay-latest.tar.gz```
+CobraBay is currently in Alpha and not fully packaged. You will need to install by pulling from the source. The main
+branch is expected to be relatively stable, with some possible crashing conditions.
+* Download the [main branch code](wget https://github.com/chrisgilldc/cobrabay/archive/refs/heads/main.zip) and extract.
+  ```wget https://github.com/chrisgilldc/cobrabay/archive/refs/heads/main.zip```
 * Extract the archive.
-  ```tar -xzf cobrabay-latest.tar.gz```
-* PIP install for the Pi user from the archive
-  ```pip install --user ./cobrabay-latest.tar.gz```
+  ```unzip main.zip```
+* It's recommended to rename based on the current version. These instructions will use 'cobrabay_version' as the path.
+  * ```mv cobrabay-main cobrabay_0.4.0a```
+* Install the remaining packages into the venv.
+  * Enter the venv if not already. ```source ~/.env_cobrabay/bin/activate```
+  * Install packages. ```pip install -r ~/cobrabay_version/requirements.txt```
+* 
 * Install a few extra packages (if you used Lite)
   * ```sudo apt install gcc python3-dev git```
 * Install requirements.
   * ```pip3 install -r requirements.txt```
+* Install the remaining packages from the requirements list. Note that this includes the packages already installed from
+the system packages, which should have been included and not get picked up again.
+  * ```pip3```
+  * 
 
 ### Configure CobraBay
