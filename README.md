@@ -23,8 +23,13 @@ optimized, done better or redesigned here. Constructive feedback welcome!
   * Fixed by the vector issue.
 * Fix shutdown exceptions. Sensor destructor doesn't actually work correctly.
 * Better handle I2C errors.
-* MQTT messages go 'unknown' in HA - review MQTT messages for retain status, should probably be more aggressive about it.
-
+* Logging
+  * Add log file size limits and auto-rollover. Otherwise, in debug mode this can fill the filesystem!
+* Network
+  * MQTT messages go 'unknown' in HA - Should probably be more aggressive about retain statuses.
+  * Run network loop after MQTT connect attempt to confirm actual connection.
+  * Properly react to homeassistant/status online messages.
+  
 ## Known Issues:
 * ~~Detector offsets sometimes don't apply.~~ Fixed (I think)
 * If MQTT broker is inaccessible during startup, an MQTT trigger will cause system to go into a loop.

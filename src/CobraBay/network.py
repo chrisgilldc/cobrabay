@@ -380,6 +380,12 @@ class CBNetwork:
         return stats.isup
 
     def _connect_mqtt(self):
+        #TODO: Fix the MQTT connection handling. This is sufficiently robust to handle immediate errors (ie: no route
+        # to host) that throw exceptions, but never calls the network loop so doesn't actually wait for a CONNACK. This
+        # will fail to catch errors on the broker side like "unauthorized".
+        # See: https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html#paho.mqtt.client.Client.connect
+
+
         # Set the last will prior to connecting.
         self._logger.info("Creating last will.")
         self._mqtt_client.will_set(
@@ -401,32 +407,32 @@ class CBNetwork:
         self._mqtt_connected = True
         return True
 
-    def connect(self):
-        """
-        Convenience method to connect to MQTT.
-        :return:
-        """
-        try:
-            self._connect_mqtt()
-        except Exception as e:
-            raise
-        return None
-
-    def disconnect(self, message=None):
-        """
-        Convenience method to perform planned disconnects. Will log with specific 'message' if provided.
-        :param message:
-        """
-        self._logger.info('Planned disconnect with message "' + str(message) + '"')
-        # If we have a disconnect message, send it to the device topic.
-        # if message is not None:
-        #     self._mqtt_client.publish(self._topics['system']['device_state']['topic'], message)
-        # When disconnecting, mark the device and the bay as unavailable.
-        self._send_offline()
-        # Disconnect from broker
-        self._mqtt_client.disconnect()
-        # Set the internal tracker to disconnected.
-        self._mqtt_connected = False
+    # def connect(self):
+    #     """
+    #     Convenience method to connect to MQTT.
+    #     :return:
+    #     """
+    #     try:
+    #         self._connect_mqtt()
+    #     except Exception as e:
+    #         raise
+    #     return None
+    #
+    # def disconnect(self, message=None):
+    #     """
+    #     Convenience method to perform planned disconnects. Will log with specific 'message' if provided.
+    #     :param message:
+    #     """
+    #     self._logger.info('Planned disconnect with message "' + str(message) + '"')
+    #     # If we have a disconnect message, send it to the device topic.
+    #     # if message is not None:
+    #     #     self._mqtt_client.publish(self._topics['system']['device_state']['topic'], message)
+    #     # When disconnecting, mark the device and the bay as unavailable.
+    #     self._send_offline()
+    #     # Disconnect from broker
+    #     self._mqtt_client.disconnect()
+    #     # Set the internal tracker to disconnected.
+    #     self._mqtt_connected = False
 
     @property
     def display(self):
