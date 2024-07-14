@@ -407,32 +407,32 @@ class CBNetwork:
         self._mqtt_connected = True
         return True
 
-    # def connect(self):
-    #     """
-    #     Convenience method to connect to MQTT.
-    #     :return:
-    #     """
-    #     try:
-    #         self._connect_mqtt()
-    #     except Exception as e:
-    #         raise
-    #     return None
-    #
-    # def disconnect(self, message=None):
-    #     """
-    #     Convenience method to perform planned disconnects. Will log with specific 'message' if provided.
-    #     :param message:
-    #     """
-    #     self._logger.info('Planned disconnect with message "' + str(message) + '"')
-    #     # If we have a disconnect message, send it to the device topic.
-    #     # if message is not None:
-    #     #     self._mqtt_client.publish(self._topics['system']['device_state']['topic'], message)
-    #     # When disconnecting, mark the device and the bay as unavailable.
-    #     self._send_offline()
-    #     # Disconnect from broker
-    #     self._mqtt_client.disconnect()
-    #     # Set the internal tracker to disconnected.
-    #     self._mqtt_connected = False
+    def connect(self):
+        """
+        Convenience method to connect to MQTT.
+        :return:
+        """
+        try:
+            self._connect_mqtt()
+        except Exception as e:
+            raise
+        return None
+
+    def disconnect(self, message=None):
+        """
+        Convenience method to perform planned disconnects. Will log with specific 'message' if provided.
+        :param message:
+        """
+        self._logger.info('Planned disconnect with message "' + str(message) + '"')
+        # If we have a disconnect message, send it to the device topic.
+        # if message is not None:
+        #     self._mqtt_client.publish(self._topics['system']['device_state']['topic'], message)
+        # When disconnecting, mark the device and the bay as unavailable.
+        self._send_offline()
+        # Disconnect from broker
+        self._mqtt_client.disconnect()
+        # Set the internal tracker to disconnected.
+        self._mqtt_connected = False
 
     @property
     def display(self):
