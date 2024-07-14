@@ -11,8 +11,6 @@ from logging.handlers import WatchedFileHandler
 from pprint import pformat
 import CobraBay
 
-
-
 class CBCore:
     def __init__(self, config_obj, envoptions, q_cbsmdata=None, q_cbsmcontrol=None):
         """
@@ -30,12 +28,10 @@ class CBCore:
         self.sensor_log = []
         self._sensormgr = None
         self._triggers = None
+        self._exit_code = -1
 
         # Set the system state to initializing.
         self.system_state = 'init'
-
-        # Register the signal handlers.
-        self._setup_signal_handlers()
 
         # Get the master handler. This may have already been started by the command line invoker.
         self._master_logger = logging.getLogger("CobraBay")
@@ -63,9 +59,12 @@ class CBCore:
 
     # Main operating loop.
     def run(self):
+        # Register the signal handlers.
+        self._setup_signal_handlers()
+        # Start the run loop.
         try:
-            # This loop runs while the system is idle. Process commands, increment various timers.
-            while True:
+            # Main run loop. Keep running as long as the exit code isn't set.
+            while self._exit_code < 0:
                 # Update the local sensor variable.
                 self._sensor_update()
                 # Call Bay update to have them update their data state.
@@ -89,9 +88,13 @@ class CBCore:
                         break
                 self._display.show("clock", system_status=system_status)
         except BaseException as e:
+            # Exit due to failure.
             self._logger.critical("Unexpected exception encountered!")
             self._logger.exception(e)
             self.system_exit(1)
+        else:
+            # We should only get here if we caught some kind of signal and set an exit code. Clean up and do it.
+            self.system_exit(self._exit_code)
 
     def system_exit(self, exit_code=1):
         """
@@ -103,19 +106,8 @@ class CBCore:
         # Shut off the sensors.
         # This must be done first, otherwise the I2C bus will get cut out from underneath the sensors.
         #TODO: Add call to SensorManager to disable sensors.
-        # Have the display show 'offline'. This will put it in the buffer for the network module to grab and send to
-        # MQTT as well.
-        try:
-            self._display.show(system_status={'network': False, 'mqtt': False}, mode='message', message="OFFLINE",
-                               icons=False)
-        except AttributeError:
-            self._logger.error("Could not set final display image.")
-        # Poll the network module which will send the last messages. We don't care about the final inbound messages.
-        try:
-            self._logger.info("Sending offline MQTT message.")
-            inbound_commands = self._network.poll()
-        except AttributeError:
-            self._logger.error("Could not send final MQTT messages.")
+        # Set all sensors to disabled. This won't actually disable the TFMini, but meh.
+        self._sensormgr.set_sensor_state(CobraBay.const.SENSTATE_DISABLED)
         self._logger.critical("Terminated.")
         sys.exit(exit_code)
 
@@ -564,10 +556,11 @@ class CBCore:
             self._logger.critical("SIGHUP for reload not yet supported. Will do nothing.")
         elif signalNumber == 2:
             self._logger.critical("Keyboard interrupt received! Performing clean shutdown and exit.")
-            self.system_exit(exit_code=0)
+            # self.system_exit(exit_code=0)
+            self._exit_code = 0
         elif signalNumber in (3, 15):
             self._logger.critical("Performing clean shutdown and exit.")
-            self.system_exit(exit_code=0)
+            self._exit_code = 0
         else:
             self._logger.critical("Unexpected signal received. Cleaning up and exiting.")
-            self.system_exit(exit_code=signalNumber+128)
+            self._exit_code = signalNumber+128
