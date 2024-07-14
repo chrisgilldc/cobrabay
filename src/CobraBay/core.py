@@ -105,7 +105,6 @@ class CBCore:
         self.system_state = 'offline'
         # Shut off the sensors.
         # This must be done first, otherwise the I2C bus will get cut out from underneath the sensors.
-        #TODO: Add call to SensorManager to disable sensors.
         # Set all sensors to disabled. This won't actually disable the TFMini, but meh.
         self._sensormgr.set_sensor_state(CobraBay.const.SENSTATE_DISABLED)
         self._logger.critical("Terminated.")
