@@ -380,6 +380,12 @@ class CBNetwork:
         return stats.isup
 
     def _connect_mqtt(self):
+        #TODO: Fix the MQTT connection handling. This is sufficiently robust to handle immediate errors (ie: no route
+        # to host) that throw exceptions, but never calls the network loop so doesn't actually wait for a CONNACK. This
+        # will fail to catch errors on the broker side like "unauthorized".
+        # See: https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html#paho.mqtt.client.Client.connect
+
+
         # Set the last will prior to connecting.
         self._logger.info("Creating last will.")
         self._mqtt_client.will_set(

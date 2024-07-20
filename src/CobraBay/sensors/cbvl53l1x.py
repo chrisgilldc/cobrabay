@@ -334,11 +334,11 @@ class CBVL53L1X(I2CSensor):
             self._sensor_obj.timing_budget(timing_input.magnitude)
 
     ## Private Methods
-    def __del__(self):
-        """Destructor, disables the sensor when the object is destroyed."""
-        self._logger.debug("Disabling sensor on object deletion.")
-        self._logger.debug("Enable pin object: {}".format(self._enable_pin))
-        self.status = 'disabled'
+    # def __del__(self):
+    #     """Destructor, disables the sensor when the object is destroyed."""
+    #     self._logger.debug("Disabling sensor on object deletion.")
+    #     self._logger.debug("Enable pin object: {}".format(self._enable_pin))
+    #     self.status = 'disabled'
 
     def _disable(self):
         """
@@ -347,7 +347,8 @@ class CBVL53L1X(I2CSensor):
         :param self:
         """
 
-        self._sensor_obj.stop_ranging()
+        # Don't bother to stop ranging, it's inherent in disabling the pin.
+        # self._sensor_obj.stop_ranging()
         self._enable_pin.value = False
         # Also set the internal ranging variable to false, since by definition, when the board gets killed,
         # we stop ranging.

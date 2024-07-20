@@ -17,14 +17,20 @@ optimized, done better or redesigned here. Constructive feedback welcome!
 
 
 ## Bugs
-* ~~Bay vector isn't computed, speed and direction aren't sent.~~
-  * Fixed. Vector is now computed and properly sent to MQTT as well. Sensitivity needs tuning, small changes are resulting in 'unknown' results.
-* ~~Undocking never kicks out of Undock placard.~~
-  * Fixed by the vector issue.
-* Fix shutdown exceptions. Sensor destructor doesn't actually work correctly.
-* Better handle I2C errors.
-* MQTT messages go 'unknown' in HA - review MQTT messages for retain status, should probably be more aggressive about it.
-
+* System
+  * Improve I2C Error Handling - Some I2C faults, especially for an AW9523, can still tank the system.
+  * Finish implementing threading. Maybe not needed if fault isolation is done? TBD.
+  * Fix shutdown exceptions. Sensor destructor doesn't actually work correctly.
+  * Report IP correctly on startup
+* Logging
+  * Add log file size limits and auto-rollover. Otherwise, in debug mode this can fill the filesystem!
+* Network
+  * MQTT messages go 'unknown' in HA - Should probably be more aggressive about retain statuses.
+  * Run network loop after MQTT connect attempt to confirm actual connection.
+  * Properly react to homeassistant/status online messages.
+* Bay & Sensor
+  * Bay doesn't acknowledge range sensor negative range.
+  
 ## Known Issues:
 * ~~Detector offsets sometimes don't apply.~~ Fixed (I think)
 * If MQTT broker is inaccessible during startup, an MQTT trigger will cause system to go into a loop.
@@ -33,8 +39,8 @@ optimized, done better or redesigned here. Constructive feedback welcome!
 * Performance
   * Split sensors into separate thread/process. 
 * Operations
+  * MQTT-based sensor
   * Range-based trigger. Start process based on range changes.
-  * ~~Even better sensor handling.~~ Reset sensors if they go offline.
   * Additional diagnostics via MQTT. Min/max ranges seen, total faults, total non-numerical values on sensor, maybe more.
   * Restructure commands for cleaner HA interaction.
   * Trigger to abort operation, ie when garage door closes.
@@ -47,7 +53,6 @@ optimized, done better or redesigned here. Constructive feedback welcome!
   * Replace strober with progress bar 
   * Micro-car graphic
   * Alternatives to clock, possibly divide the display.
-* Consoldiate sensor access and data path 
 * Multiple bay support (is this needed? IDK.)
 * Documentation
   * Review install instructions

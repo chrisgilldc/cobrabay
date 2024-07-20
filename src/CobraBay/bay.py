@@ -114,6 +114,7 @@ class CBBay:
         }
         self._state = None
         self._trigger_registry = {}
+        self._vector = Vector(timestamp=datetime64('now'), speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
 
         # Create a unit registry.
         self._ureg = UnitRegistry
@@ -218,6 +219,8 @@ class CBBay:
 
         # If the data hasn't changed, don't update.
         if len(self._cbcore.sensor_log) > 0:
+            #TODO: Fix update checking and skip when sensors haven't changed.
+
             # if self._cbcore.sensor_latest_data.timestamp == self._sensor_log[0].timestamp:
             #     self._logger.debug("No change to latest sensor data, nothing to update.")
             #     return
@@ -275,6 +278,9 @@ class CBBay:
 
                 # Quality
                 self._sensor_info['quality'][sensor_id] = self._sensor_quality_lat(sensor_id)
+
+        # Update the vector status.
+        self.calculate_vector()
 
         # If bay is in a motion state, check the timer for expiration.
         if self.state in BAYSTATE_MOTION:
@@ -519,78 +525,20 @@ class CBBay:
     @property
     def vector(self):
         """
-        The vector from the bay's selected range detector.
+        Access the calculated vector.
 
         :return:
         :rtype: namedtuple
         """
-        # When performing a verify, always report no motion, since we're not collecting enough data, any
-        # values will be noise.
-        # TODO: Rework vector calculation. Need to bring this inboard since detectors are gone.
-        # return Vector(speed=Quantity('0kph'), direction='still')
-        # Return variable for unknown movement.
-        vector_unknown = Vector(speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
-
-        # Have to have at least two elements.
-        if len(self._cbcore.sensor_log) < 2:
-            self._logger.debug("Vector - Not enough sensor readings to calculate vector.")
-            return vector_unknown
-
-        # If we haven't had a motion reading recently enough, vector can't be determined.
-        # 100ms is 100000000ns, will make this static.
-        timediff = (datetime64('now', 'ns') - self._cbcore.sensor_log[0].timestamp).astype(np_int32)
-        self._logger.debug("Vector - Time difference is '{}' ({})".format(timediff, type(timediff)))
-
-        if timediff < timedelta64(750000000, 'ns').astype(np_int32):
-            # TODO: Make this interval be based on the actual sensor timing interval. OR, can keep, good enough?
-            self._logger.info("Vector - Most recent longitudinal reading over 750ms ago, can't determine vector.")
-            return vector_unknown
-
-        # If we haven't returned yet, we can calculate.
-        i = 1
-        while i <= len(self._cbcore.sensor_log):
-            # Find the element in the log where the selected range sense returned a Quantity, and is either
-            # 250ms (0.25s) ago OR is the last reading (good enough)
-            if ((((self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(np_int32)
-                  >= 250000000) or i == len(self._cbcore.sensor_log))
-                    and type(self._cbcore.sensor_log[i].sensors[self._selected_range].range) is Quantity):
-                self._logger.debug("Vector - Comparing to reading {}".format(i))
-                # TODO: Account for a dead zone so tiny changes don't result in a motion.
-                # FIXME: Returns unknown sometimes, don't know why.
-                spread_time = (self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(
-                    np_int32)
-                self._logger.debug("Vector - Sensor reading time spread is {}".format(spread_time))
-                try:
-                    spread_distance = (self._cbcore.sensor_log[0].sensors[self._selected_range].range
-                                   - self._cbcore.sensor_log[i].sensors[self._selected_range].range)
-                except pint.errors.DimensionalityError:
-                    self._logger.warning("Dimensionality error when evaluating vector. SensorReading 0 had selected "
-                                         "range {} ({}) while {} had selected range {} ({})".format(
-                        self._cbcore.sensor_log[0].sensors[self._selected_range].range,
-                        type(self._cbcore.sensor_log[0].sensors[self._selected_range].range),
-                        i, self._cbcore.sensor_log[i].sensors[self._selected_range].range,
-                        type(self._cbcore.sensor_log[i].sensors[self._selected_range].range)
-                    ))
-                    return vector_unknown
-                self._logger.debug("Vector - Sensor reading distance spread is {}".format(spread_distance))
-                speed = abs(spread_distance) / Quantity(spread_time, "ns")
-                if spread_distance == 0:
-                    direction = DIR_STILL
-                elif spread_distance > 0:
-                    direction = DIR_REV
-                elif spread_distance < 0:
-                    direction = DIR_FWD
-                else:
-                    self._logger.warning(
-                        "Vector - Direction spread has unhandleable value '{}'".format(spread_distance))
-                    return vector_unknown
-                # Convert the value.
-                self._logger.debug("Vector - Raw speed is '{}'".format(speed))
-                speed = speed.to("kph")
-                self._logger.debug("Vector - Converted speed '{}'".format(speed))
-                return Vector(speed=speed, direction=direction)
-            # Increment
-            i += 1
+        # Is this too old?
+        self._logger.debug("Vector - Raw: {}".format(pformat(self._vector)))
+        timediff = timediff = (datetime64('now', 'ns') - self._vector.timestamp).astype(np_int32)
+        if timediff > 250000000:
+            self._logger.warning("Vector - Calculated vector too old, {}ns.".format(timediff))
+            self._logger.debug("Vector - {} vs {}".format(datetime64('now', 'ns'), self._vector.timestamp))
+            return Vector(timestamp=datetime64('now'), speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
+        else:
+            return self._vector
 
     ## Private Methods
 
@@ -655,6 +603,86 @@ class CBBay:
     #         self._logger.debug(
     #             "Calculated ranges for lateral sensor '{}': {}".format(sensor_config['name'], pformat(lat_ranges)))
     #         self._ranges['lat'][sensor_config['name']] = lat_ranges
+
+    def calculate_vector(self):
+        """
+        Calculate speed and direction based on longitudinal sensors.
+
+        :return: None
+        """
+
+        # Have to have at least two elements.
+        if len(self._cbcore.sensor_log) < 2:
+            self._logger.debug("Vector - Not enough sensor readings to calculate vector.")
+            self._vector = Vector(timestamp=datetime64('now'), speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
+            return
+
+        # If we haven't had a motion reading recently enough, vector can't be determined.
+        timediff = (datetime64('now', 'ns') - self._cbcore.sensor_log[0].timestamp).astype(np_int32)
+        self._logger.debug("Vector - Time difference to latest sensor reading is '{}'ns ({})".
+                           format(timediff, type(timediff)))
+
+        if timediff > timedelta64(750000000, 'ns').astype(np_int32):
+            # TODO: Make this interval be based on the actual sensor timing interval. OR, can keep, good enough?
+            self._logger.info("Vector - Most recent longitudinal reading over 750ms ago, can't determine vector.")
+            self._vector = Vector(timestamp=datetime64('now'), speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
+            return
+
+        # If we haven't returned yet, we can calculate.
+        i = 1
+        self._logger.debug("Vector - Sensor log dump: {}".format(pformat(self._cbcore.sensor_log)))
+        while i <= len(self._cbcore.sensor_log):
+            # Find the element in the log where the selected range sense returned a Quantity, and is either
+            # 250ms (0.25s) ago OR is the last reading (good enough)
+            if ((((self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(np_int32)
+                  >= 250000000) or i == len(self._cbcore.sensor_log))
+                    and type(self._cbcore.sensor_log[i].sensors[self._selected_range].range) is Quantity):
+                self._logger.debug("Vector - Comparing to reading {} (of {})".
+                                   format(i, len(self._cbcore.sensor_log)))
+                spread_time = (self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(
+                    np_int32)
+                self._logger.debug("Vector - Sensor reading time spread is {} ({} to {})".format(spread_time,
+                                                                                                 self._cbcore.sensor_log[
+                                                                                                     0].timestamp,
+                                                                                                 self._cbcore.sensor_log[
+                                                                                                     i].timestamp))
+                try:
+                    spread_distance = (self._cbcore.sensor_log[0].sensors[self._selected_range].range
+                                       - self._cbcore.sensor_log[i].sensors[self._selected_range].range)
+                except pint.errors.DimensionalityError:
+                    # This might not be needed any longer, but keeping it in for now.
+                    self._logger.warning("Dimensionality error when evaluating vector. SensorReading 0 had selected "
+                                         "range {} ({}) while {} had selected range {} ({})".format(
+                        self._cbcore.sensor_log[0].sensors[self._selected_range].range,
+                        type(self._cbcore.sensor_log[0].sensors[self._selected_range].range),
+                        i, self._cbcore.sensor_log[i].sensors[self._selected_range].range,
+                        type(self._cbcore.sensor_log[i].sensors[self._selected_range].range)
+                    ))
+                    self._vector = Vector(timestamp=datetime64('now'), speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
+                    return
+                self._logger.debug("Vector - Sensor reading distance spread is {}".format(spread_distance))
+                speed = abs(spread_distance) / Quantity(spread_time, "ns")
+                if abs(spread_distance) < Quantity("1cm"):
+                    # This sets a fixed dead zone of 1cm.
+                    # TODO: Add ability to set longitudinal sensor dead zone in the config file.
+                    direction = DIR_STILL
+                elif spread_distance > 0:
+                    direction = DIR_REV
+                elif spread_distance < 0:
+                    direction = DIR_FWD
+                else:
+                    self._logger.warning(
+                        "Vector - Direction spread has unhandleable value '{}'".format(spread_distance))
+                    self._vector = Vector(timestamp=datetime64('now'), speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
+                    return
+                # Convert the value.
+                self._logger.debug("Vector - Raw speed is '{}'".format(speed))
+                speed = speed.to("kph")
+                self._logger.debug("Vector - Converted speed '{}'".format(speed))
+                self._vector = Vector(timestamp=datetime64('now'), speed=speed, direction=direction)
+                return
+            # Increment
+            i += 1
 
     def _calculate_quality_ranges(self, longitudinal, lateral):
         ''' Calculate ranges for each sensor.'''
