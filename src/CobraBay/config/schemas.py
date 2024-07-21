@@ -54,8 +54,20 @@ CB_CORE = {
                     'port': {'type': 'integer', 'default': 1883},
                     'username': {'type': 'string'},
                     'password': {'type': 'string'},
-                    'accept_commands': {'type': 'boolean', 'default': True},
-                    'ha_discover': {'type': 'boolean', 'default': True},
+                    'base': {'type': 'string', 'default': 'CobraBay'},
+                    # 'accept_commands': {'type': 'boolean', 'default': True},
+                    'ha': {'type': 'dict',
+                           'schema': {
+                               'discover': {'type': 'boolean', 'default': True},
+                               'pdsend': {'type': 'integer', 'default': 15},
+                               'base': {'type': 'string', 'default': 'homeassistant'}
+                           },
+                           'default': {
+                               'discover': True,
+                               'pdsend': 15,
+                               'base': 'homeassistant'
+                           }
+                    },
                     'chattiness': {'type': 'dict',
                                    'schema': {
                                        'sensors_raw': {'type': 'boolean', 'default': False},

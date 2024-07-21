@@ -28,10 +28,10 @@ class CBNetwork:
                  port,
                  username,
                  password,
+                 base,
                  cbcore,
-                 ha_discover=True,
+                 ha=None,
                  chattiness=None,
-                 accept_commands=True,
                  log_level="WARNING",
                  mqtt_log_level="DISABLED"):
         """
@@ -78,9 +78,9 @@ class CBNetwork:
         self._mqtt_port = port
         self._mqtt_username = username
         self._mqtt_password = password
-        # Dict for all the Home Assistant info.
-        self._ha_info = {
-            'discover': ha_discover,
+        self._mqtt_base = base # Base topic for MQTT.
+        self._ha_settings = ha  # Home Assistant settings.
+        self._ha_info = { # Home Assistant tracking info.
             'override': False,
             'start': time.monotonic()
         }
@@ -189,7 +189,8 @@ class CBNetwork:
         self._trigger_registry[trigger_obj.id] = trigger_obj
         self._logger.info("Stored trigger object '{}'".format(trigger_obj.id))
         # Add the MQTT Prefix to use to the object. Triggers set to override this will just ignore it.
-        trigger_obj.topic_prefix = "CobraBay/" + self._client_id
+        # trigger_obj.topic_prefix = "CobraBay/" + self._client_id
+        trigger_obj.topic_prefix = f"{self._mqtt_base}/{self._client_id}"
         # Since it's possible we're already connected to MQTT, we call subscribe here separately.
         self._trigger_subscribe(trigger_obj.id)
 
@@ -349,13 +350,14 @@ class CBNetwork:
             # Send all the messages outbound.
             # For the first 15s after HA discovery, send everything. This makes sure data arrives after HA has
             # established entities.
-            if self._ha_info['override']:
-                if time.monotonic() - self._ha_info['start'] <= 15:
+            if self._ha_info['override'] and self._ha_settings['discover']:
+                if time.monotonic() - self._ha_info['start'] <= self._ha_settings['pdsend']:
                     self._logger.debug("HA discovery {}s ago, sending all".format(time.monotonic() -
                                                                                   self._ha_info['start']))
                     force_repeat = True
                 else:
-                    self._logger.info("Have sent all messages for 15s after HA discovery. Disabling.")
+                    self._logger.info(f"Have sent all messages for {self._ha_settings['pdsend']}s after HA discovery. "
+                                      f"Disabling.")
                     self._ha_info['override'] = False
                     force_repeat = False
             else:
@@ -388,9 +390,11 @@ class CBNetwork:
 
         # Set the last will prior to connecting.
         self._logger.info("Creating last will.")
-        self._mqtt_client.will_set(
-            "CobraBay/" + self._client_id + "/connectivity",
-            payload='offline', qos=0, retain=True)
+        # self._mqtt_client.will_set(
+        #     "CobraBay/" + self._client_id + "/connectivity",
+        #     payload='offline', qos=0, retain=True)
+        self._mqtt_client.will_set(f"{self._mqtt_base}/{self._client_id}/connectivity",
+                                   payload='offline', qos=0, retain=True)
         try:
             self._mqtt_client.connect(host=self._mqtt_broker, port=self._mqtt_port)
         except Exception as e:
@@ -398,7 +402,7 @@ class CBNetwork:
             return False
 
         # Send a discovery message and an online notification.
-        if self._ha_info['discover']:
+        if self._ha_settings['discover']:
             self._ha_discovery()
             # Reset the topic history so any newly discovered entities get sent to.
             self._topic_history = {}
@@ -466,13 +470,16 @@ class CBNetwork:
 
     # Quick helper methods to send online/offline messages correctly.
     def _send_online(self):
-        self._mqtt_client.publish("CobraBay/" + self._client_id + "/connectivity",
-                                  payload="online",
-                                  retain=True)
+        # self._mqtt_client.publish("CobraBay/" + self._client_id + "/connectivity",
+        #                           payload="online",
+        #                           retain=True)
+        self._mqtt_client.publish(f"{self._mqtt_base}/{self._client_id}/connectivity",payload="online",retain=True)
+
 
     def _send_offline(self):
-        self._mqtt_client.publish("CobraBay/" + self._client_id + "/connectivity",
-                                  payload="offline", retain=True)
+        # self._mqtt_client.publish("CobraBay/" + self._client_id + "/connectivity",
+        #                           payload="offline", retain=True)
+        self._mqtt_client.publish(f"{self._mqtt_base}/{self._client_id}/connectivity",payload="offline", retain=True)
 
     # MQTT Message generators. Network module creates MQTT messages from object states. This centralizes MQTT message
     # creation.
@@ -487,7 +494,7 @@ class CBNetwork:
             self._pistatus_timestamp = time.monotonic()
         # Add the display. System can't seem to validly compare, so we should always send.
         outbound_messages.append(
-            {'topic': 'CobraBay/' + self._client_id + '/display', 'payload': self.display.current, 'repeat': True})
+            {'topic': f"{self._mqtt_base}/{self._client_id}/display", 'payload': self.display.current, 'repeat': True})
         # Add the direct sensor readings if requested.
         if self._chattiness['sensors_raw']:
             outbound_messages.extend(self._mqtt_messages_sensors(force_publish=self._chattiness['sensors_always_send']))
@@ -514,13 +521,13 @@ class CBNetwork:
 
     def _mqtt_messages_pistatus(self, input_obj):
         outbound_messages = [
-            {'topic': 'CobraBay/' + self._client_id + '/cpu_pct', 'payload': input_obj.status('cpu_pct'),
+            {'topic': f"{self._mqtt_base}/{self._client_id}/cpu_pct", 'payload': input_obj.status('cpu_pct'),
              'repeat': False},
-            {'topic': 'CobraBay/' + self._client_id + '/cpu_temp', 'payload': input_obj.status('cpu_temp'),
+            {'topic': f"{self._mqtt_base}/{self._client_id}/cpu_temp", 'payload': input_obj.status('cpu_temp'),
              'repeat': False},
-            {'topic': 'CobraBay/' + self._client_id + '/mem_info', 'payload': input_obj.status('mem_info'),
+            {'topic': f"{self._mqtt_base}/{self._client_id}/mem_info", 'payload': input_obj.status('mem_info'),
              'repeat': False},
-            {'topic': 'CobraBay/' + self._client_id + '/undervoltage', 'payload': input_obj.status('undervoltage'),
+            {'topic': f"{self._mqtt_base}/{self._client_id}/undervoltage", 'payload': input_obj.status('undervoltage'),
              'repeat': False}
         ]
         return outbound_messages
@@ -534,7 +541,7 @@ class CBNetwork:
         """
         outbound_messages = []
         # Topic base for convenience.
-        topic_base = 'CobraBay/' + self._client_id + '/' + input_obj.id + '/'
+        topic_base = f"{self._mqtt_base}/{self._client_id}/{input_obj.id}/"
         # Bay state
         outbound_messages.append({'topic': topic_base + 'state', 'payload': input_obj.state, 'repeat': False})
 
@@ -632,7 +639,7 @@ class CBNetwork:
     #     else:
     #         return sensor_messages
 
-    def _mqtt_messages_sensor(self, sensor_id, topic_base=None, force_publish=False):
+    def _mqtt_messages_sensor(self, sensor_id, force_publish=False):
         """
         Create messages for a given sensor id.
 
@@ -642,9 +649,8 @@ class CBNetwork:
         :return:
         """
         self._logger_mqtt.debug("Building MQTT messages for sensor: {}".format(sensor_id))
-        if topic_base is None:
-            topic_base = 'CobraBay/' + self._client_id + '/sensors/'
-        topic_base = topic_base + sensor_id + '/'
+        # Build the topic base.
+        topic_base = f"{self._mqtt_base}/{self._client_id}/sensors/{sensor_id}/"
         try:
             sensor_latest_data = self._cbcore.sensor_latest_data[sensor_id]
         except KeyError:
@@ -780,7 +786,7 @@ class CBNetwork:
         # May want to exclude in certain other cases.
         if system_avail:
             sa = {
-                'topic': 'CobraBay/' + self._client_id + '/connectivity',
+                'topic': f"{self._mqtt_base}/{self._client_id}/connectivity",
                 'payload_available': 'online',
                 'payload_not_available': 'offline'}
             discovery_dict['availability'].append(sa)
@@ -806,8 +812,10 @@ class CBNetwork:
             discovery_dict['availability_mode'] = avail_mode
 
         discovery_json = json_dumps(discovery_dict)
-        discovery_topic = "homeassistant/{}/CobraBay_{}/{}/config". \
-            format(entity_type, self._client_id, discovery_dict['object_id'])
+        # discovery_topic = "homeassistant/{}/CobraBay_{}/{}/config". \
+        #     format(entity_type, self._client_id, discovery_dict['object_id'])
+        discovery_topic = (f"{self._ha_settings['base']}/{entity_type}/CobraBay_{self._client_id}/"
+                           f"{discovery_dict['object_id']}/config")
         self._logger.info("Publishing HA discovery to topic '{}'\n\t{}".format(discovery_topic, discovery_json))
         # All discovery messages should be retained.
         self._mqtt_client.publish(topic=discovery_topic, payload=discovery_json, retain=True)
@@ -823,7 +831,7 @@ class CBNetwork:
         # Device connectivity
         self._ha_discover(
             name="{} Connectivity".format(self._system_name),
-            topic="CobraBay/" + self._client_id + "/connectivity",
+            topic=f"{self._mqtt_base}/{self._client_id}/connectivity",
             entity_type='binary_sensor',
             entity='{}_connectivity'.format(self._system_name.lower()),
             device_class='connectivity',
@@ -833,7 +841,7 @@ class CBNetwork:
         # CPU Percentage
         self._ha_discover(
             name="{} CPU Use".format(self._system_name),
-            topic="CobraBay/" + self._client_id + "/cpu_pct",
+            topic=f"{self._mqtt_base}/{self._client_id}/cpu_pct",
             entity_type='sensor',
             entity="{}_cpu_pct".format(self._system_name.lower()),
             unit_of_measurement="%",
@@ -842,7 +850,7 @@ class CBNetwork:
         # CPU Temperature
         self._ha_discover(
             name="{} CPU Temperature".format(self._system_name),
-            topic="CobraBay/" + self._client_id + "/cpu_temp",
+            topic=f"{self._mqtt_base}/{self._client_id}/cpu_temp",
             entity_type='sensor',
             entity="{}_cpu_temp".format(self._system_name.lower()),
             unit_of_measurement=self._uom('temp'),
@@ -851,7 +859,7 @@ class CBNetwork:
         # Memory Info
         self._ha_discover(
             name="{} Memory Free".format(self._system_name),
-            topic="CobraBay/" + self._client_id + "/mem_info",
+            topic=f"{self._mqtt_base}/{self._client_id}/mem_info",
             entity_type='sensor',
             entity="{}_mem_info".format(self._system_name.lower()),
             value_template='{{ value_json.mem_avail_pct }}',
@@ -861,7 +869,7 @@ class CBNetwork:
         # Undervoltage
         self._ha_discover(
             name="{} Undervoltage".format(self._system_name),
-            topic="CobraBay/" + self._client_id + "/undervoltage",
+            topic=f"{self._mqtt_base}/{self._client_id}/undervoltage",
             entity_type='binary_sensor',
             entity="{}_undervoltage".format(self._system_name.lower()),
             payload_on="true",
@@ -871,7 +879,7 @@ class CBNetwork:
         # Display
         self._ha_discover(
             name="{} Display".format(self._system_name),
-            topic="CobraBay/" + self._client_id + "/display",
+            topic=f"{self._mqtt_base}/{self._client_id}/display",
             entity_type='camera',
             entity="{}_display".format(self._system_name.lower()),
             image_encoding='b64',
@@ -895,7 +903,7 @@ class CBNetwork:
 
     def _ha_discovery_bay(self, bay_id):
         bay_obj = self._bay_registry[bay_id]
-        topic_base = "CobraBay/" + self._client_id + "/" + bay_obj.id + "/"
+        topic_base = f"{self._mqtt_base}/{self._client_id}/{bay_obj.id}/"
         # Discover the Bay level status items.
         # Bay State
         self._ha_discover(
@@ -1010,7 +1018,7 @@ class CBNetwork:
         :return:
         """
         # Discover the sensors....
-        topic_base = "CobraBay/" + self._client_id + '/'
+        topic_base = f"{self._mqtt_base}/{self._client_id}/"
         for sensor_id in self._cbcore.configured_sensors:
             sen_obj = self._sensormgr.get_sensor(sensor_id)
             if sen_obj == SENSTATE_FAULT:
