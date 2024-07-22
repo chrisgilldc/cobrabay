@@ -72,5 +72,7 @@ class Vector(namedtuple_typed):
     """
     Vector of longitudinal movement
     """
+    timestamp: datetime64
     speed: float
     direction: str
+
