@@ -780,23 +780,33 @@ class CBBay:
     #             ))
 
     def _sensor_intercepted(self, sensor_id):
+        """
+        Check to see if sensor_id is intercepted.
+        :param sensor_id: Longitudinal sensor to check.
+        :type sensor_id: str
+        :return: bool
+        """
         self._logger.debug("Lateral Intercept - Checking interception status for '{}'".format(sensor_id))
 
         intercept = next(item for item in self.lateral_sorted if item.sensor_id == sensor_id)
         self._logger.debug("Lateral Intercept - Using intercept {}".format(intercept))
-        try:
+        if isinstance(self._sensor_info['reading'][self.selected_range], pint.UnitRegistry.Quantity):
             if self._sensor_info['reading'][self.selected_range] <= intercept.intercept:
                 self._logger.info("Lateral Intercept - Lateral '{}' is intercepted.".format(sensor_id))
                 return True
             else:
                 self._logger.info("Lateral Intercept - Lateral '{}' is not intercepted.".format(sensor_id))
                 return False
-        except ValueError as e:
-            self._logger.warning("Lateral Intercept - Selected range threw ValueError exception with '{}' ({})".
-                                 format(self._sensor_info['reading'][self.selected_range],
-                                        type(self._sensor_info['reading'][self.selected_range])))
-            self._logger.exception(e)
+        else:
             return False
+        # try:
+        #
+        # except ValueError as e:
+        #     self._logger.debug("Lateral Intercept - Selected range threw ValueError exception with '{}' ({})".
+        #                          format(self._sensor_info['reading'][self.selected_range],
+        #                                 type(self._sensor_info['reading'][self.selected_range])))
+        #     self._logger.exception(e)
+        #     return False
 
     def _sensor_motion(self, sensor_id):
         """

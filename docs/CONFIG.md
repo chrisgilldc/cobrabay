@@ -32,10 +32,20 @@ All sections are **required**, even if empty. Can be defined in any order.
 | [mqtt](#mqtt)       | Yes       | dict                            | N/A | Dictionary of MQTT settings. See below                                                                                                                                          |
 | mqtt_commands       | Yes       | bool                            | N/A | Should commands via MQTT be honored?                                                                                                                                            |
 | interface           | Yes       | Any valid Linux interface name. | N/A | Interface to monitor for connectivity status on the display.                                                                                                                    |
-| homeassistant       | Yes       | bool                            | N/A | Integrate with Home Assistant? Will control sending of HA discovery options.                                                                                                    |
+| [ha](#ha)           | Yes       | bool                            | N/A | Options to integrated with Home Assistant.                                                                                       |
 | [logging](#Logging) | No     | dict                       | N/A | Options for logging system-wide or within specific modules. See below for details.                                                                                              |
 
 ### System Subsections
+
+#### ha
+
+Home Assistant for specific modules.
+
+| Options  | Required? | Valid Options          | Default         | Description                                                                                                                                                                                                                                                      |
+|----------|-----------|------------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| discover | No        | Bool                   | True            | Should discovery messages be sent?                                                                                                                                                                                                                               |
+| pd_send  | No        | Int                    | 15              | Time in seconds after discovery is complete that all status messages should be sent, regardless of duplication. This allows HA time to set up entities. Setting this too short can result in some entities being Unknown even if an MQTT message has been sent.. | 
+| base     | No        | String | 'homeassistant' | Base MQTT path for Home Assistant. Used to find the Home Assistant 'status' value and created discovery messages.                                                                                                                                                |
 
 #### mqtt
 
