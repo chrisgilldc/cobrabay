@@ -11,6 +11,8 @@ import time
 # from getmac import get_mac_address
 import psutil
 from paho.mqtt.client import Client
+
+import CobraBay.const
 from .util import Convertomatic
 from .version import __version__
 from CobraBay.const import *
@@ -244,6 +246,22 @@ class CBNetwork:
             message.topic, message.payload
         ))
 
+    def _outbound_conversion(self, message_in):
+        """Convert internal types to be Home Assistant compatible."""
+        if isinstance(message_in, dict):
+            message_out = {}
+            for key in message_in:
+                message_out[key] = self._outbound_conversion(message_in[key])
+        elif message_in is CobraBay.const.GEN_UNKNOWN:
+            # Home Assistant expects unknown values to be "Null"
+            message_out = None
+            self._logger.debug(f"Converted internal message '{message_in}' to '{message_out}' for HA.")
+        else:
+            self._logger.debug(f"Message '{message_in}' does not require outbound conversion.")
+            message_out = message_in
+        return message_out
+
+
     # Message publishing method
     def _pub_message(self, topic, payload, repeat):
         self._logger.debug("Processing message publication on topic '{}'".format(topic))
@@ -297,11 +315,15 @@ class CBNetwork:
             self._logger.debug("Publishing message...")
             # New message becomes the previous message.
             self._topic_history[topic] = message
-            # Convert the message to JSON if it's a dict, otherwise just send it.
-            if isinstance(message, dict):
-                outbound_message = json_dumps(message, default=str)
+
+            # Run the message through outbound type conversion.
+            converted_message = self._outbound_conversion(message)
+
+            # Convert the message to JSON if it's a dict.
+            if isinstance(converted_message, dict):
+                outbound_message = json_dumps(converted_message, default=str)
             else:
-                outbound_message = message
+                outbound_message = converted_message
             try:
                 self._mqtt_client.publish(topic, outbound_message)
             except TypeError as te:
@@ -936,7 +958,7 @@ class CBNetwork:
             entity_type='sensor',
             entity="{}_{}_speed".format(self._system_name.lower(), bay_obj.id),
             value_template="{{ value_json.speed }}",
-            device_type="speed",
+            device_class="speed",
             unit_of_measurement=self._uom('speed')
         )
         # Bay Direction
