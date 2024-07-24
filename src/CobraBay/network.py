@@ -11,6 +11,8 @@ import time
 # from getmac import get_mac_address
 import psutil
 from paho.mqtt.client import Client
+
+import CobraBay.const
 from .util import Convertomatic
 from .version import __version__
 from CobraBay.const import *
@@ -224,6 +226,8 @@ class CBNetwork:
     def _on_connect(self, userdata, flags, rc, properties=None):
         self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
         self._mqtt_connected = True
+        # Subscribe to the Home Assistant status topic.
+        self._mqtt_client.subscribe(f"{self._ha_settings['base']}/status")
         # Connect to all trigger topic callbacks.
         for trigger_id in self._trigger_registry.keys():
             self._trigger_subscribe(trigger_id)
@@ -243,6 +247,35 @@ class CBNetwork:
         self._logger.debug("Received message on topic {} with payload {}. No other handler, no action.".format(
             message.topic, message.payload
         ))
+
+    def _on_hastatus(self, client, user, message):
+        """Act appropriate based on changes in Home Assistant status"""
+        if message == 'offline':
+            self._logger.info("Home Assistant has gone offline.")
+        elif message == 'online':
+            self._logger.info("Home Assistant has gone online! Dumping send history and triggering discovery.")
+            # Reset the topic history.
+            self._topic_history = {}
+            # Retrigger discovery.
+
+
+        else:
+            self._logger.warning("Unknown Home Assistant status message '{message}'")
+
+    def _outbound_conversion(self, message_in):
+        """Convert internal types to be Home Assistant compatible."""
+        if isinstance(message_in, dict):
+            message_out = {}
+            for key in message_in:
+                message_out[key] = self._outbound_conversion(message_in[key])
+        elif message_in is CobraBay.const.GEN_UNKNOWN:
+            # Home Assistant expects unknown values to be "Null"
+            message_out = None
+            self._logger.debug(f"Converted internal message '{message_in}' to '{message_out}' for HA.")
+        else:
+            self._logger.debug(f"Message '{message_in}' does not require outbound conversion.")
+            message_out = message_in
+        return message_out
 
     # Message publishing method
     def _pub_message(self, topic, payload, repeat):
@@ -297,11 +330,15 @@ class CBNetwork:
             self._logger.debug("Publishing message...")
             # New message becomes the previous message.
             self._topic_history[topic] = message
-            # Convert the message to JSON if it's a dict, otherwise just send it.
-            if isinstance(message, dict):
-                outbound_message = json_dumps(message, default=str)
+
+            # Run the message through outbound type conversion.
+            converted_message = self._outbound_conversion(message)
+
+            # Convert the message to JSON if it's a dict.
+            if isinstance(converted_message, dict):
+                outbound_message = json_dumps(converted_message, default=str)
             else:
-                outbound_message = message
+                outbound_message = converted_message
             try:
                 self._mqtt_client.publish(topic, outbound_message)
             except TypeError as te:
@@ -712,7 +749,7 @@ class CBNetwork:
     def _ha_discover(self, name, topic, entity_type, entity, device_info=True, system_avail=True, avail=None,
                      avail_mode=None,
                      **kwargs):
-        allowed_types = ('camera', 'binary_sensor', 'sensor', 'select')
+        allowed_types = ('camera', 'binary_sensor', 'number', 'sensor', 'select')
         # Trap unknown types.
         if entity_type not in allowed_types:
             raise ValueError("Type must be one of {}".format(allowed_types))
@@ -734,7 +771,7 @@ class CBNetwork:
             'unique_id': self._client_id + '.' + entity,
             'availability': []
         }
-        # Add device info if asked to.
+        # Add device info if asked. It's on by default.
         if device_info:
             discovery_dict['device'] = self._device_info
 
@@ -750,6 +787,10 @@ class CBNetwork:
             required_parameters = ['payload_on', 'payload_off']
             nullable_parameters = ['device_class']
             optional_parameters = ['icon', 'value_template']
+        elif entity_type =='number':
+            required_parameters = ['command_topic']
+            nullable_parameters = []
+            optional_parameters = ['icon']
         elif entity_type == 'sensor':
             required_parameters = []
             nullable_parameters = ['device_class']
@@ -936,7 +977,7 @@ class CBNetwork:
             entity_type='sensor',
             entity="{}_{}_speed".format(self._system_name.lower(), bay_obj.id),
             value_template="{{ value_json.speed }}",
-            device_type="speed",
+            device_class="speed",
             unit_of_measurement=self._uom('speed')
         )
         # Bay Direction
@@ -998,14 +1039,16 @@ class CBNetwork:
 
         # Lateral only elements.
         for sensor_id in bay_obj.configured_sensors['lat']:
+            #TODO: Make this thread-safe.
             sen_obj = self._sensormgr.get_sensor(sensor_id)
             if sen_obj == SENSTATE_FAULT:
                 self._logger.info("Skipping sensor '{}', not initialized.".format(sensor_id))
                 break
-            sensor_base = topic_base + "sensors/" + sensor_id + "/"
+            sensor_base = f"{topic_base}/sensors/{sensor_id}"
+            # Sensor intercepted status
             self._ha_discover(
                 name="{} Sensor - {} Intercepted".format(bay_obj.name, sen_obj.name),
-                topic=sensor_base + "intercepted",
+                topic=f"{sensor_base}/intercepted",
                 entity_type="binary_sensor",
                 entity="{}_{}_{}_intercepted".format(self._system_name.lower(), bay_id, sensor_id),
                 payload_on="true",
