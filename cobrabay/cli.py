@@ -6,7 +6,7 @@ import argparse
 import pathlib
 import sys
 import pid.base
-import CobraBay
+import cobrabay
 import logging
 import os
 import pwd
@@ -14,13 +14,16 @@ import socket
 from logging.handlers import WatchedFileHandler
 # from collections import namedtuple
 from pid import PidFile
-from CobraBay.datatypes import ENVOPTIONS
+from cobrabay.datatypes import ENVOPTIONS
 # from Queue import Empty
 from multiprocessing import Queue, Process
 
 
 def main():
-    print("CobraBay Parking System - {}".format(CobraBay.__version__))
+    """
+    Main CobraBay CLI Invoker
+    """
+    print("cobrabay Parking System - {}".format(cobrabay.__version__))
     print("User: {}'\tHost: {}\tIP: {}".format(pwd.getpwuid(os.getuid()).pw_name, socket.getfqdn(), socket.gethostbyname(socket.gethostname())))
     # Parse command line options.
     parser = argparse.ArgumentParser(
@@ -65,7 +68,7 @@ def main():
 
             # Create a CobraBay config object.
             try:
-                coreconfig = CobraBay.config.CBCoreConfig(config_file=environment.configfile, environment=environment)
+                coreconfig = cobrabay.config.CBCoreConfig(config_file=environment.configfile, environment=environment)
             except BaseException as e:
                 # Relying on the config module to log details on *what* the error is.
                 print("Configuration had errors. Cannot continue!")
@@ -80,11 +83,11 @@ def main():
             q_cbsmcontrol = Queue()
 
             # Create the core system core, which will run in the main process.
-            cb = CobraBay.CBCore(config_obj=coreconfig, envoptions=environment, q_cbsmdata=q_cbsmdata,
+            cb = cobrabay.CBCore(config_obj=coreconfig, envoptions=environment, q_cbsmdata=q_cbsmdata,
                                  q_cbsmcontrol=q_cbsmcontrol)
 
             # Start the Sensor Manager process.
-            # cbsm_process = Process(target=CobraBay.sensormgr.CBSensorMgr, args=(sensorconfig, q_cbsmdata=q_cbsmdata, q_cbsmcontrol=q_cbsmcontrol))
+            # cbsm_process = Process(target=cobrabay.sensormgr.CBSensorMgr, args=(sensorconfig, q_cbsmdata=q_cbsmdata, q_cbsmcontrol=q_cbsmcontrol))
             # cbsm_process.start()
             
 
