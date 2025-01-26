@@ -6,14 +6,14 @@
 # Note that this sensor always ranges as long as it's powered, so
 
 # The SerialSensor class
-from CobraBay.sensors import SerialSensor
-# Required CobraBay datatypes
-from CobraBay.datatypes import SensorResponse, SensorReading, TFMPData
+from cobrabay.sensors import SerialSensor
+# Required Cobra Bay datatypes
+from cobrabay.datatypes import SensorResponse, SensorReading, TFMPData
 # General libraries
 from pint import Quantity
 from time import monotonic
 from .tfmp import TFMP
-import CobraBay.const
+import cobrabay.const
 from numpy import datetime64
 
 class TFMini(SerialSensor):
@@ -92,19 +92,19 @@ class TFMini(SerialSensor):
             reading = self._clustered_read(self._clustering)
         except BaseException as e:
             self._logger.error("Reading received exception - '{}: {}'".format(type(e).__name__, e))
-            self._state = CobraBay.const.SENSTATE_DISABLED
+            self._state = cobrabay.const.SENSTATE_DISABLED
             return SensorReading(
                 state=self.state,
                 status=self.status,
                 fault=self._fault,
-                response_type=CobraBay.const.SENSTATE_FAULT,
+                response_type=cobrabay.const.SENSTATE_FAULT,
                 range=None,
                 temp=None,
                 fault_reason=e
             )
         else:
 
-            # self._state = CobraBay.const.SENSTATE_RANGING
+            # self._state = cobrabay.const.SENSTATE_RANGING
             self._logger.debug("TFmini read values: {}".format(reading))
             # Check the status to see if we got a value, or some kind of non-OK state.
             if reading.status == "OK":
@@ -112,7 +112,7 @@ class TFMini(SerialSensor):
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSOR_RESP_OK,
+                    response_type=cobrabay.const.SENSOR_RESP_OK,
                     range=reading.distance,
                     temp=reading.temperature,
                     fault_reason=None
@@ -122,7 +122,7 @@ class TFMini(SerialSensor):
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSOR_RESP_WEAK,
+                    response_type=cobrabay.const.SENSOR_RESP_WEAK,
                     range=None,
                     temp=None,
                     fault_reason=None
@@ -132,7 +132,7 @@ class TFMini(SerialSensor):
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSOR_RESP_FLOOD,
+                    response_type=cobrabay.const.SENSOR_RESP_FLOOD,
                     range=None,
                     temp=None,
                     fault_reason=None
@@ -142,7 +142,7 @@ class TFMini(SerialSensor):
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSOR_RESP_STRONG,
+                    response_type=cobrabay.const.SENSOR_RESP_STRONG,
                     range=None,
                     temp=None,
                     fault_reason=None
@@ -152,7 +152,7 @@ class TFMini(SerialSensor):
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSTATE_FAULT,
+                    response_type=cobrabay.const.SENSTATE_FAULT,
                     range=None,
                     temp=None,
                     fault_reason="Unknown reading '{}'".format(reading)
@@ -182,7 +182,7 @@ class TFMini(SerialSensor):
         State of the sensor.
         :return: str
         """
-        return CobraBay.const.SENSTATE_RANGING
+        return cobrabay.const.SENSTATE_RANGING
 
     @property
     def status(self):
@@ -194,7 +194,7 @@ class TFMini(SerialSensor):
         :return:
         """
         # The TFMini always ranges, so we can just return ranging.
-        return CobraBay.const.SENSTATE_RANGING
+        return cobrabay.const.SENSTATE_RANGING
 
     @status.setter
     def status(self, target_status):

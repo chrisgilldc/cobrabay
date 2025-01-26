@@ -1,5 +1,5 @@
 """
-CobraBay - Configuration Handling
+Cobra Bay - Configuration Handling
 """
 
 from .validator import CBValidator

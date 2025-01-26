@@ -1,6 +1,6 @@
-####
-# Cobra Bay - Main Executor
-####
+"""
+Cobrabay Command Line executor
+"""
 
 import argparse
 import pathlib
@@ -11,23 +11,23 @@ import logging
 import os
 import pwd
 import socket
-from logging.handlers import WatchedFileHandler
+# from logging.handlers import WatchedFileHandler
 # from collections import namedtuple
 from pid import PidFile
 from cobrabay.datatypes import ENVOPTIONS
 # from Queue import Empty
-from multiprocessing import Queue, Process
+from multiprocessing import Queue # , Process
 
 
-def main():
+def cbcli():
     """
-    Main CobraBay CLI Invoker
+    Main Cobra Bay CLI Invoker
     """
     print("cobrabay Parking System - {}".format(cobrabay.__version__))
     print("User: {}'\tHost: {}\tIP: {}".format(pwd.getpwuid(os.getuid()).pw_name, socket.getfqdn(), socket.gethostbyname(socket.gethostname())))
     # Parse command line options.
     parser = argparse.ArgumentParser(
-        description="CobraBay Parking System"
+        description="Cobra Bay Parking System"
     )
     parser.add_argument("-b", "--base", default=".", help="Base directory, for all other paths")
     parser.add_argument("-c", "--config", default="./config.yaml", help="Config file location.")
@@ -57,16 +57,16 @@ def main():
 
     # Start the main operating loop.
     try:
-        with PidFile('CobraBay', piddir=environment.rundir) as p:
+        with PidFile('cobrabay', piddir=environment.rundir) as p:
             # Create the Master logger.
-            master_logger = logging.getLogger("CobraBay")
+            master_logger = logging.getLogger("cobrabay")
             master_logger.setLevel(logging.DEBUG)
             console_handler = logging.StreamHandler()
             console_handler.setLevel(logging.DEBUG)
             master_logger.addHandler(console_handler)
             master_logger.info("Main process running as PID {}".format(p.pid))
 
-            # Create a CobraBay config object.
+            # Create a Cobra Bay config object.
             try:
                 coreconfig = cobrabay.config.CBCoreConfig(config_file=environment.configfile, environment=environment)
             except BaseException as e:
@@ -210,4 +210,4 @@ def _validate_environment(input_base,
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cbcli())

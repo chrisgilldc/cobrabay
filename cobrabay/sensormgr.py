@@ -1,5 +1,5 @@
 """
-CobraBay - Sensor Manager
+Cobra Bay - Sensor Manager
 """
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import busio
 import logging
 import time
 import digitalio
-import CobraBay.sensors
-from CobraBay.const import *
-from CobraBay.datatypes import SensorResponse, SensorReading
+import cobrabay.sensors
+from cobrabay.const import *
+from cobrabay.datatypes import SensorResponse, SensorReading
 from numpy import datetime64
 import threading
 import multiprocessing
@@ -22,7 +22,7 @@ import queue
 
 class CBSensorMgr:
     """
-    CobraBay Sensor Manager. Creates sensor objects, polls them, keeps them in line. Also manages base I2C and
+    Cobra Bay Sensor Manager. Creates sensor objects, polls them, keeps them in line. Also manages base I2C and
     AW9523 objects.
     """
 
@@ -81,7 +81,7 @@ class CBSensorMgr:
             # If no parent detector is given this sensor is being used in a testing capacity. Create a null logger.
             self._logger = logging.getLogger(self._name)
             console_handler = logging.StreamHandler()
-            console_handler.setFormatter(logging.Formatter(CobraBay.const.LOG_FORMAT))
+            console_handler.setFormatter(logging.Formatter(cobrabay.const.LOG_FORMAT))
             console_handler.setLevel(log_level)
             self._logger.addHandler(console_handler)
             self._logger.setLevel(log_level)
@@ -129,7 +129,7 @@ class CBSensorMgr:
         Return a given sensor object by ID. Should only be used in rare cases, usually let the manager do it's thing.
 
         :param sensor_id:
-        :return: CobraBay.sensors.basesensor
+        :return: cobrabay.sensors.basesensor
         """
         return self._sensors[sensor_id]
 
@@ -165,16 +165,16 @@ class CBSensorMgr:
         start_time = time.monotonic_ns()
         for sensor_id in self._sensors.keys():
             self._logger.debug("Checking sensor '{}'".format(sensor_id))
-            if isinstance(self._sensors[sensor_id], CobraBay.sensors.BaseSensor):
+            if isinstance(self._sensors[sensor_id], cobrabay.sensors.BaseSensor):
                 self._latest_state[sensor_id] = self._sensors[sensor_id].reading()
-            elif self._sensors[sensor_id] == CobraBay.const.SENSTATE_FAULT:
+            elif self._sensors[sensor_id] == cobrabay.const.SENSTATE_FAULT:
                 # If the sensor faulted on creation, it doesn't have a reading method, construct a fault response.
                 self._latest_state[sensor_id] = SensorReading(
-                    state=CobraBay.const.SENSTATE_FAULT,
-                    status=CobraBay.const.SENSTATE_FAULT,
+                    state=cobrabay.const.SENSTATE_FAULT,
+                    status=cobrabay.const.SENSTATE_FAULT,
                     fault=True,
-                    response_type=CobraBay.const.SENSTATE_FAULT,
-                    range=CobraBay.const.GEN_UNAVAILABLE, temp=CobraBay.const.GEN_UNAVAILABLE,
+                    response_type=cobrabay.const.SENSTATE_FAULT,
+                    range=cobrabay.const.GEN_UNAVAILABLE, temp=cobrabay.const.GEN_UNAVAILABLE,
                     fault_reason="Did not initialize.")
         # Calculate the run_time.
         run_time = time.monotonic_ns() - start_time
@@ -257,7 +257,7 @@ class CBSensorMgr:
 
     def sensors_activate(self):
         for sensor_id in self._sensors:
-            if isinstance(self._sensors[sensor_id], CobraBay.sensors.BaseSensor):
+            if isinstance(self._sensors[sensor_id], cobrabay.sensors.BaseSensor):
                 self._sensors[sensor_id].status = 'ranging'
 
     def set_sensor_state(self, target_state, target_sensor=None):
@@ -274,7 +274,7 @@ class CBSensorMgr:
             for sensor in self._sensors:
                 if ( target_sensor is None or sensor == target_sensor):
                     self._logger.debug("Sensor is of type: {}".format(type(self._sensors[sensor])))
-                    if self._sensors[sensor] == CobraBay.const.SENSTATE_FAULT:
+                    if self._sensors[sensor] == cobrabay.const.SENSTATE_FAULT:
                         self._logger.warning("Cannot set state of sensor '{}' before it is initialized.".
                                              format(target_sensor))
                     else:
@@ -307,7 +307,7 @@ class CBSensorMgr:
             except BaseException as e:
                 if self._gr:
                     self._logger.exception("Could not create object for sensor '{}'".format(sensor_id), exc_info=e)
-                    sensors[sensor_id] = CobraBay.const.SENSTATE_FAULT
+                    sensors[sensor_id] = cobrabay.const.SENSTATE_FAULT
                 else:
                     raise e
             else:
@@ -318,7 +318,7 @@ class CBSensorMgr:
         if sensor_config['hw_type'] == 'TFMini':
             # Create the sensor object.
             try:
-                sensor_obj = CobraBay.sensors.TFMini(
+                sensor_obj = cobrabay.sensors.TFMini(
                     name=sensor_config['name'],
                     port=sensor_config['port'],
                     baud=sensor_config['baud'],
@@ -348,7 +348,7 @@ class CBSensorMgr:
             self._logger.debug("Will pass IO Expander: {} ({})".format(enable_board, type(enable_board)))
             # Now create the actual sensor object.
             try:
-                sensor_obj = CobraBay.sensors.CBVL53L1X(
+                sensor_obj = cobrabay.sensors.CBVL53L1X(
                     name=sensor_config['name'],
                     i2c_address=sensor_config['i2c_address'],
                     i2c_bus=self._i2c_bus,
@@ -467,7 +467,7 @@ class CBSensorMgr:
     #     enqueue = False
     #     for sensor_id in self._sensors:
     #         sensor_data = self._data_internal[sensor_id]
-    #         if sensor_data.response_type is not CobraBay.const.SENSOR_RESP_INR:
+    #         if sensor_data.response_type is not cobrabay.const.SENSOR_RESP_INR:
     #             outbound_data[sensor_id] = sensor_data
     #             enqueue = True
     #     if enqueue:

@@ -1,29 +1,35 @@
-####
-# Cobra Bay - Trigger
-####
+"""
+Cobra Bay Triggers
+"""
 
-from json import loads as json_loads
+# from json import loads as json_loads
 import logging
 
 class Trigger:
-    def __init__(self, id, log_level="DEBUG", **kwargs):
+    """
+    Base CobraBay Trigger Class
+    """
+    def __init__(self, trigger_id, log_level="DEBUG", **kwargs):
         """
-        :param id: str
+        :param trigger_id: ID for this trigger
+        :type trigger_id: str
         :param log_level: Log level for the bay, must be a Logging level.
         :param kwargs:
         """
-        self.id = id
+        self.id = trigger_id
         # Create a logger.
-        self._logger = logging.getLogger("CobraBay").getChild("Trigger").getChild(self.id)
+        self._logger = logging.getLogger("cobrabay").getChild("Trigger").getChild(self.id)
         self._logger.setLevel(log_level.upper())
         self._logger.info("Initializing trigger: {}".format(self.id))
 
         # Initialize command stack.
         self._cmd_stack = []
 
-    # Flag to enable quick boolean checks if there are waiting commands.
     @property
     def triggered(self):
+        """
+        Used to see if there are waiting commands.
+        """
         if len(self._cmd_stack) > 0:
             return True
         else:
@@ -31,16 +37,24 @@ class Trigger:
 
     @property
     def cmd_stack(self):
+        """
+        The stack of waiting commands.
+        """
         return self._cmd_stack
 
-    # Store a trigger ID internally for reference.
     @property
     def id(self):
+        """
+        The trigger ID.
+        """
         return self._id
 
     @id.setter
-    def id(self, input):
-        self._id = input.replace(" ","_").lower()
+    def id(self, the_input):
+        """
+        Setter for the trigger ID.
+        """
+        self._id = the_input.replace(" ","_").lower()
 
     # @property
     # def type(self):
@@ -48,21 +62,24 @@ class Trigger:
 
 # Subclass for common MQTT elements
 class MQTTTrigger(Trigger):
-    def __init__(self, id, topic, topic_mode="full", topic_prefix = None, log_level="DEBUG"):
+    """
+    MQTT-based Triggers
+    """
+    def __init__(self, trigger_id, topic, topic_mode="full", topic_prefix = None, log_level="DEBUG"):
         """
         General class for MQTT-based triggers.
 
-        :param id: ID of this trigger. Case-insensitive, no spaces.
-        :type id: str
+        :param trigger_id: ID of this trigger. Case-insensitive, no spaces.
+        :type trigger_id: str
         :param topic: Topic for the trigger. If topic_mode is 'full', this will be the complete topic used.
         :param topic_mode: Use topic as-is or construct from elements. May be 'full' or 'suffix'.
         :type topic_mode: str
         :param topic_prefix: If using suffix topic mode, the topic prefix to use.
-        :type topic_prefix: str
+        :type topic_prefix: str|None
         :param log_level: Logging level for the trigger. Defaults to 'Warning'.
         :type log_level: str
         """
-        super().__init__(id, log_level.upper())
+        super().__init__(trigger_id, log_level.upper())
 
         self._outbound_messages = []
         self._topic = topic
@@ -75,10 +92,16 @@ class MQTTTrigger(Trigger):
 
     # This will need to be attached to a subscription.
     def callback(self, client, userdata, message):
+        """
+        Callback the network module will call when a message is received.
+        """
         raise NotImplemented("MQTT Trigger callback should be implemented by a subclass.")
 
     @property
     def topic_prefix(self):
+        """
+        Topic prefix to use. Defaults to 'cobrabay/'
+        """
         return self._topic_prefix
 
     @topic_prefix.setter
@@ -88,14 +111,23 @@ class MQTTTrigger(Trigger):
 
     @property
     def outbound_messages(self):
+        """
+        Messages to send out. Should always be empty because this is a trigger.
+        """
         return self._outbound_messages
 
     @property
     def topic_mode(self):
+        """
+        Topic mode we are in.
+        """
         return self._topic_mode
 
     @topic_mode.setter
     def topic_mode(self, mode):
+        """
+        Set the topic mode. May be 'full' or 'suffix'.
+        """
         if mode.lower() not in ('full','suffix'):
             raise ValueError("Topic mode must be 'full' or 'assemble'")
         else:
@@ -103,15 +135,22 @@ class MQTTTrigger(Trigger):
 
     @property
     def topic(self):
+        """
+        The topic this trigger subscribes to. Will assemble appropriately depending on topic_mode setting.
+        """
         if self.topic_mode == 'full':
             return self._topic
         else:
             return self.topic_prefix + "/" + self._topic
 
-# Take System commands directly from an outside agent.
 class SysCommand(MQTTTrigger):
-    def __init__(self, id, topic, topic_prefix=None, log_level="WARNING"):
-        super().__init__(id, topic, topic_mode='suffix', topic_prefix = topic_prefix, log_level = log_level)
+    """
+    System Command Trigger
+    Used alert the overall system it needs to do something.
+    See documentation for details on options.
+    """
+    def __init__(self, trigger_id, topic, topic_prefix=None, log_level="WARNING"):
+        super().__init__(trigger_id, topic, topic_mode='suffix', topic_prefix = topic_prefix, log_level = log_level)
 
         # Outbound command queues. These are separate based on their destination.
         ## Core queue
@@ -138,10 +177,16 @@ class SysCommand(MQTTTrigger):
     # Return the first command from the stack.
     @property
     def next_command(self):
+        """
+        Fetch the next system commands.
+        """
         return self._cmd_stack_core.pop(0)
 
     @property
     def next_command_network(self):
+        """
+        Fetch the next network command.
+        """
         return self._cmd_stack_network.pop(0)
 
     @property
@@ -153,6 +198,9 @@ class SysCommand(MQTTTrigger):
 
     @property
     def triggered_network(self):
+        """
+        Are there waiting network commands?
+        """
         if len(self._cmd_stack_network) > 0:
             return True
         else:
@@ -161,8 +209,11 @@ class SysCommand(MQTTTrigger):
 
 # Take and handle bay commands.
 class BayCommand(MQTTTrigger):
-    def __init__(self, id, topic, bay_obj, log_level="WARNING"):
-        super().__init__(id, topic=bay_obj.id + "/" + topic, topic_mode="suffix", log_level=log_level)
+    """
+    Bay Command Trigger. Used to take in a command for a particular bay.
+    """
+    def __init__(self, trigger_id, topic, bay_obj, log_level="WARNING"):
+        super().__init__(trigger_id, topic=bay_obj.id + "/" + topic, topic_mode="suffix", log_level=log_level)
 
         # Store the bay object reference.
         self._bay_obj = bay_obj
@@ -185,15 +236,21 @@ class BayCommand(MQTTTrigger):
         else:
             self._logger.warning("Ignoring invalid command: {}".format(message_text))
 
-    # Get the ID of the bay object to be returned. This is used by the core to find the bay object directly.
     @property
     def bay_id(self):
+        """
+        ID of the bay object to be returned.
+        This is used by the core to find the object in core._bays.
+        """
         return self._bay_obj.id
 
 
 # State-based MQTT triggers
 class MQTTSensor(MQTTTrigger):
-    def __init__(self, id, topic, bay_obj,
+    """
+    MQTT Sensor trigger. Used to track the state of an MQTT topic and trigger based on value changes.
+    """
+    def __init__(self, trigger_id, topic, bay_obj,
                  to_value=None,
                  from_value=None,
                  action=None,
@@ -204,8 +261,8 @@ class MQTTSensor(MQTTTrigger):
         to that topic. When the topic's payload changes to or from a defined state, the defined action will be executed.
 
         :rtype: object
-        :param id: ID of this trigger. Case-insensitive, no spaces.
-        :type id: str
+        :param trigger_id: ID of this trigger. Case-insensitive, no spaces.
+        :type trigger_id: str
         :param topic: Topic for the trigger. If topic_mode is 'full', this will be the complete topic used.
         :param topic_mode: Use topic as-is or construct from elements. May be 'full' or 'suffix'.
         :type topic_mode: str
@@ -219,7 +276,7 @@ class MQTTSensor(MQTTTrigger):
         :param log_level: Logging level for the trigger. Defaults to 'Warning'.
         :type log_level: str
         """
-        super().__init__(id, topic, topic_mode, topic_prefix, log_level)
+        super().__init__(trigger_id, topic, topic_mode, topic_prefix, log_level)
 
         # Save settings
         if to_value is not None and from_value is not None:

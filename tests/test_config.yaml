@@ -1,0 +1,117 @@
+system:
+  unit_system: imperial  # Defaults to 'metric' if set to anything other than 'imperial'.
+  system_name: TestConfig  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
+  mqtt:
+    broker: 127.0.0.1
+    username: testconfig
+    password: "noapassword"
+    chattiness:
+      sensors_raw: False
+      sensors_always_send: False
+  interface: eth0  # Interface used to uplink. Used to show status on the display.
+  i2c:
+    bus: 1
+    enable: D20
+    ready: D21
+    wait_ready: 10
+    wait_reset: 10
+# Logging definition
+  logging:
+    console: True
+    file: True
+    default_level: debug
+
+# Triggers for actions. Need to have some enabled otherwise nothing ever happens!
+triggers:
+  # "Sensor" monitors an MQTT topic for a topic changes. Sensors are expected to be a single
+  # string, ie: "on"/"off" or "True"/"False"
+  garage_door:
+    topic: homeassistant/binary_sensor/door_garage/state
+    type: mqtt_state
+    bay: bay1
+    from: "off"
+    action: occupancy
+  dummy_garage:
+    topic: homeassistant/input_select/dummy_garage/state
+    type: mqtt_state
+    bay: bay1
+    from: "off"
+    action: occupancy
+
+# Settings for the display. Only one is supported! If you want to build a multi-panel display, treat it as one and do it
+# in hardware.
+display:
+  width: 64  # Columns on the Matrix
+  height: 32  # Rows on the Matrix
+  gpio_slowdown: 5  # How much to slow down the matrix to prevent flicker.
+  strobe_speed: 100 ms
+  font_size_clock: 24
+  font_size_range: 24
+#  mqtt_image: True  # Should image updates be sent via MQTT
+#  mqtt_update_interval: 5 s  # How often should a new image be spent. Keeps from spamming the server.
+
+# Define sensors. These are individual sensing units that then get assigned to a bay later.
+sensors:
+  range:
+    name: Range
+    hw_type: TFMini
+    port: serial0  # System will automatically prefix /dev if not included.
+    baud: 115200
+    clustering: 3
+  front:
+    name: Front
+    hw_type: VL53L1X
+    i2c_bus: 1
+    i2c_address: 0x31
+    enable_board: 0x58
+    enable_pin: 11
+    distance_mode: long
+    timing: 200 ms
+  middle:
+    name: Middle
+    hw_type: VL53L1X
+    i2c_bus: 1
+    i2c_address: 0x32
+    enable_board: 0x58
+    enable_pin: 10
+    distance_mode: long
+    timing: 200 ms
+  rear:
+    name: Rear
+    hw_type: VL53L1X
+    i2c_bus: 1
+    i2c_address: 0x33
+    enable_board: 0x58
+    enable_pin: 9
+    distance_mode: long
+    timing: 200 ms
+
+bays:
+  baytest:
+    name: "Bay Test"
+    depth: 236.61 in
+    timeouts:
+      # dock: "120s"
+      # undock: "120s"
+      dock: "180s"
+      undock: "120s"
+    longitudinal:
+      defaults:
+        spread_park: 2 in
+        zero_point: 40 in
+      sensors:
+        - name: range
+    lateral:
+      defaults:
+        zero_point: 25 in
+        spread_ok: 2 in
+        spread_warn: 5 in
+        side: R
+      sensors:
+        - name: front
+          intercept: 40 in
+        - name: middle
+          intercept: 77.5 in
+        - name: rear
+          intercept: 150 in
+

@@ -8,10 +8,10 @@ import board
 import busio
 import digitalio
 # The I2CSensor class
-from CobraBay.sensors import I2CSensor
-# Required CobraBay datatypes
-from CobraBay.datatypes import SensorReading
-import CobraBay.util
+from cobrabay.sensors import I2CSensor
+# Required Cobra Bay datatypes
+from cobrabay.datatypes import SensorReading
+import cobrabay.util
 # Import WeakSet so we can track other instances.
 from weakref import WeakSet
 # Core sensor library.
@@ -112,7 +112,7 @@ class CBVL53L1X(I2CSensor):
         """
         self._logger.debug("Range requested. Sensor state is: {}".format(self.state))
         if self.state != 'ranging':
-            return CobraBay.const.SENSTATE_NOTRANGING
+            return cobrabay.const.SENSTATE_NOTRANGING
         start = monotonic_ns()
         # Check the interrupt to see if the sensor has new data.
         while not self._sensor_obj.data_ready:
@@ -121,11 +121,11 @@ class CBVL53L1X(I2CSensor):
                 sleep(0.001)
             else:
                 # If waiting for the sensor, return Interrupt Not Ready immediately.
-                return CobraBay.datatypes.SensorReading(
+                return cobrabay.datatypes.SensorReading(
                     state=self.state,
                     status=self.status,
                     fault=self._fault,
-                    response_type=CobraBay.const.SENSOR_RESP_INR,
+                    response_type=cobrabay.const.SENSOR_RESP_INR,
                     range=None,
                     temp=None,
                     fault_reason=None
@@ -137,23 +137,23 @@ class CBVL53L1X(I2CSensor):
         except OSError as oe:
             self._fault=True
             self._lifetime_faults += 1
-            response_type=CobraBay.const.SENSTATE_FAULT
+            response_type=cobrabay.const.SENSTATE_FAULT
             range=None
             fault_reason=oe
         else:
             if sensor_response is None:
                 # The Adafruit VL53L1X wraps up all invalid statuses with a 'None' return. See
                 # https://github.com/adafruit/Adafruit_CircuitPython_VL53L1X/pull/8 for details.
-                response_type=CobraBay.const.SENSOR_RESP_NOTOK
+                response_type=cobrabay.const.SENSOR_RESP_NOTOK
                 range = None
                 fault_reason = None
             # Check for minimum and maximum ranges.
             elif sensor_response <= 4:
-                response_type = CobraBay.const.SENSOR_RESP_TOOCLOSE
+                response_type = cobrabay.const.SENSOR_RESP_TOOCLOSE
                 range=None
                 fault_reason=None
             else:
-                response_type=CobraBay.const.SENSOR_RESP_OK
+                response_type=cobrabay.const.SENSOR_RESP_OK
                 range=Quantity(sensor_response, 'cm')
                 fault_reason=None
         # Clear the interrupt.
@@ -261,7 +261,7 @@ class CBVL53L1X(I2CSensor):
         #             sleep(1)
         #             self._logger.debug("Setting all to outputs with value off.")
         #             try:
-        #                 CobraBay.util.aw9523_reset(self.__class__.aw9523_boards[awkey])
+        #                 cobrabay.util.aw9523_reset(self.__class__.aw9523_boards[awkey])
         #             except OSError as e:
         #                 self._logger.error("Error while resetting pins on AW9523 board on bus '{}', address "
         #                                    "'0x{:x}'. Base error was: '{} - {}'".
@@ -286,22 +286,22 @@ class CBVL53L1X(I2CSensor):
         if self._fault is True:
             # Fault while enabling.
             self._logger.debug("Fault found.")
-            return CobraBay.const.SENSTATE_FAULT
+            return cobrabay.const.SENSTATE_FAULT
         elif self._enable_pin.value is True:
             self._logger.debug("Enable pin is on.")
             if self._ranging is True:
                 self._logger.debug("Sensor has been recorded as ranging.")
-                return CobraBay.const.SENSTATE_RANGING
+                return cobrabay.const.SENSTATE_RANGING
             else:
                 self._logger.debug("Enabled, not ranging.")
-                return CobraBay.const.SENSTATE_ENABLED
+                return cobrabay.const.SENSTATE_ENABLED
         elif self._enable_pin.value is False:
             self._logger.debug("Enable pin is off.")
-            return CobraBay.const.SENSTATE_DISABLED
+            return cobrabay.const.SENSTATE_DISABLED
         else:
             self._logger.critical("Unknown sensor fault state '{}', Enable pin '{}'".
                                   format(self._fault, self._enable_pin.value))
-            return CobraBay.const.SENSTATE_FAULT
+            return cobrabay.const.SENSTATE_FAULT
 
     @property
     def timing_budget(self):
@@ -358,13 +358,13 @@ class CBVL53L1X(I2CSensor):
         """ Enable the sensor. This puts the sensor on the I2C Bus, ready to range, but not ranging yet. """
 
         self._enable_pin.value = False
-        devices_prior = CobraBay.util.scan_i2c()
+        devices_prior = cobrabay.util.scan_i2c()
         self._logger.debug("I2C devices before enable: {}".format(devices_prior))
         # Turn the sensor back on.
         self._enable_pin.value = True
         # Wait one second for the bus to stabilize
         sleep(1)
-        devices_subsequent = CobraBay.util.scan_i2c()
+        devices_subsequent = cobrabay.util.scan_i2c()
         self._logger.debug("I2C devices after enable: {}".format(devices_subsequent))
         if len(devices_subsequent) > len(devices_prior):
             # Create the sensor at the default address.

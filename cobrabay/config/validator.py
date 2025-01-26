@@ -10,7 +10,7 @@ import cerberus
 from pprint import pformat
 import importlib.resources
 from datetime import datetime
-from CobraBay.datatypes import CBValidation, ENVOPTIONS_EMPTY
+from cobrabay.datatypes import CBValidation, ENVOPTIONS_EMPTY
 
 class CBValidator(cerberus.Validator):
     """

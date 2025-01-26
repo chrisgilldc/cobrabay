@@ -1,5 +1,5 @@
 """
-CobraBay Config Schemas
+Cobra Bay Config Schemas
 """
 
 from pathlib import Path
@@ -54,7 +54,7 @@ CB_CORE = {
                     'port': {'type': 'integer', 'default': 1883},
                     'username': {'type': 'string'},
                     'password': {'type': 'string'},
-                    'base': {'type': 'string', 'default': 'CobraBay'},
+                    'base': {'type': 'string', 'default': 'cobrabay'},
                     # 'accept_commands': {'type': 'boolean', 'default': True},
                     'ha': {'type': 'dict',
                            'schema': {
@@ -162,7 +162,7 @@ CB_CORE = {
             'font': {'type': 'string',
                      'default_setter':
                          lambda doc: str(
-                             importlib.resources.files('CobraBay.data').joinpath('OpenSans-Light.ttf'))},
+                             importlib.resources.files('cobrabay.data').joinpath('OpenSans-Light.ttf'))},
             'font_size_clock': {'type': 'integer'},
             'font_size_range': {'type': 'integer'},
             'strobe_speed': {'type': 'quantity', 'coerce': 'pint_seconds'}

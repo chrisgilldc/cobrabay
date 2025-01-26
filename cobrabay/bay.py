@@ -1,8 +1,8 @@
-####
-# Cobra Bay - The Bay!
-####
+"""
+Cobrabay Bay Object
+"""
 
-import copy
+
 import time
 
 import pint.errors
@@ -14,8 +14,8 @@ from numpy import int32 as np_int32
 import logging
 from pprint import pformat
 from operator import attrgetter
-from CobraBay.const import *
-from CobraBay.datatypes import Intercept, Vector
+from cobrabay.const import *
+from cobrabay.datatypes import Intercept, Vector
 
 
 class CBBay:
@@ -41,8 +41,8 @@ class CBBay:
         :type longitudinal: dict
         :param lateral: Detectors which are arranged as lateral.
         :type lateral: dict
-        :param cbcore: Object reference to the CobraBay core.
-        :type cbcore: CobraBay.core.CBCore
+        :param cbcore: Object reference to the Cobra Bay core.
+        :type cbcore: cobrabay.core.CBCore
         :param q_cbsmcontrol: Sensor Manager control queue.
         :type q_cbsmcontrol: Queue
         :param timeouts: Dict with timeouts for 'dock','undock' and 'postroll' times.
@@ -54,7 +54,7 @@ class CBBay:
         """
         # Must set ID before we can create the logger.
         self.id = id
-        self._logger = logging.getLogger("CobraBay").getChild(self.id)
+        self._logger = logging.getLogger("cobrabay").getChild(self.id)
         self._logger.setLevel(log_level.upper())
         self._logger.info("Initializing bay: {}".format(id))
 
@@ -511,7 +511,7 @@ class CBBay:
             self._logger.info("Entering state: {} (Previously '{}')".format(m_input, self.state))
             # Reset some variables.
             # Make the mark none to be sure there's not a stale value in here.
-            self._current_motion['mark'] = None
+            self._current_motion['mark'] = 0
             # self._sensor_log = []
         # Now store the state.
         self._state = m_input
@@ -529,7 +529,7 @@ class CBBay:
         # TODO: Rework vector calculation. Need to bring this inboard since detectors are gone.
         # return Vector(speed=Quantity('0kph'), direction='still')
         # Return variable for unknown movement.
-        vector_unknown = Vector(speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
+        vector_unknown = Vector(timestamp=datetime64('now','ns'), speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
 
         # Have to have at least two elements.
         if len(self._cbcore.sensor_log) < 2:
@@ -590,7 +590,7 @@ class CBBay:
                 self._logger.debug("Vector - Raw speed is '{}'".format(speed))
                 speed = speed.to("kph")
                 self._logger.debug("Vector - Converted speed '{}'".format(speed))
-                return Vector(speed=speed, direction=direction)
+                return Vector(timestamp=datetime64('now', 'ns'), speed=speed, direction=direction)
             # Increment
             i += 1
 
@@ -659,7 +659,7 @@ class CBBay:
     #         self._ranges['lat'][sensor_config['name']] = lat_ranges
 
     def _calculate_quality_ranges(self, longitudinal, lateral):
-        ''' Calculate ranges for each sensor.'''
+        """ Calculate ranges for each sensor."""
         # Output dictionary.
         configured_detectors = {}
         self._logger.debug("Bay Longitudinal settings: {}".format(longitudinal))
@@ -928,7 +928,7 @@ class CBBay:
     ## Private Properties
     @property
     def _active_timeout(self):
-        ''' Utility method to determine which timeout to use.'''
+        """ Utility method to determine which timeout to use."""
         if self.state == BAYSTATE_DOCKING:
             return self._timeouts['dock']
         elif self.state == BAYSTATE_UNDOCKING:

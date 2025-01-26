@@ -7,7 +7,7 @@ import importlib
 import time
 import pint
 import serial
-from CobraBay.datatypes import TFMPData
+from cobrabay.datatypes import TFMPData
 
 class TFMP:
     ####

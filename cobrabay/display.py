@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor
 from base64 import b64encode
 from io import BytesIO
 import math
-from CobraBay.const import *
+from cobrabay.const import *
 
 
 # Class definition
@@ -55,7 +55,7 @@ class CBDisplay:
         """
 
         # Set up our logger.
-        self._logger = logging.getLogger("CobraBay").getChild("Display")
+        self._logger = logging.getLogger("cobrabay").getChild("Display")
         self._logger.setLevel(log_level.upper())
         self._logger.info("Display initializing...")
         self._logger.info("Display unit system: {}".format(unit_system))
@@ -206,7 +206,7 @@ class CBDisplay:
                     # Put this in the right place in the lookup.
                     self._layers[bay_obj.id][sensor_id][side][item['status']] = img
                     # Write for debugging
-                    # img.save("/tmp/CobraBay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
+                    # img.save("/tmp/cobrabay-{}-{}-{}.png".format(lateral,side,status[0]), format='PNG')
                     del (draw)
                     del (img)
 

@@ -3,15 +3,15 @@ Cobra Bay
 """
 
 # Configuration processors
-import CobraBay.config
+import cobrabay.config
 # Constants
-import CobraBay.const
+import cobrabay.const
 # Datatypes
-import CobraBay.datatypes
+import cobrabay.datatypes
 # Sensor objects
-import CobraBay.sensors
+import cobrabay.sensors
 # Triggers
-import CobraBay.triggers
+import cobrabay.triggers
 
 # Unitary Classes
 from .bay import CBBay

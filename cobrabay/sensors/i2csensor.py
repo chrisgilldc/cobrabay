@@ -6,7 +6,7 @@
 #
 
 # Import the base sensor.
-from CobraBay.sensors import BaseSensor
+from cobrabay.sensors import BaseSensor
 import board
 import busio
 

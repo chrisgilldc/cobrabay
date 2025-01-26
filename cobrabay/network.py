@@ -12,10 +12,10 @@ import time
 import psutil
 from paho.mqtt.client import Client
 
-import CobraBay.const
+import cobrabay.const
 from .util import Convertomatic
 from .version import __version__
-from CobraBay.const import *
+from cobrabay.const import *
 
 # TODO: Reorganize class to standard.
 # FixMe: Maybe MQTT server reconnect issue.
@@ -54,12 +54,12 @@ class CBNetwork:
         """
 
         # Set up logger.
-        self._logger = logging.getLogger("CobraBay").getChild("Network")
+        self._logger = logging.getLogger("cobrabay").getChild("Network")
         self._logger.setLevel(log_level.upper())
         self._logger.info("Network initializing...")
 
         # Save parameters.
-        # Reference to the CobraBay Core.
+        # Reference to the Cobra Bay Core.
         self._cbcore = cbcore
         # How chatty sending should be
         if chattiness is None:
@@ -96,7 +96,7 @@ class CBNetwork:
         self._pistatus = None
 
         # Create a sublogger for the MQTT client.
-        self._logger_mqtt = logging.getLogger("CobraBay").getChild("MQTT")
+        self._logger_mqtt = logging.getLogger("cobrabay").getChild("MQTT")
         # If MQTT logging is disabled, send it to a null logger.
         if mqtt_log_level == 'DISABLE':
             self._logger.info("MQTT client logging is disabled. Set 'mqtt' in logging section if you want it enabled.")
@@ -138,7 +138,7 @@ class CBNetwork:
             identifiers=[self._client_id],
             suggested_area='Garage',
             manufacturer='ConHugeCo',
-            model='CobraBay Parking System',
+            model='Cobra Bay Parking System',
             sw_version=str(__version__)
         )
 
@@ -191,7 +191,7 @@ class CBNetwork:
         self._trigger_registry[trigger_obj.id] = trigger_obj
         self._logger.info("Stored trigger object '{}'".format(trigger_obj.id))
         # Add the MQTT Prefix to use to the object. Triggers set to override this will just ignore it.
-        # trigger_obj.topic_prefix = "CobraBay/" + self._client_id
+        # trigger_obj.topic_prefix = "cobrabay/" + self._client_id
         trigger_obj.topic_prefix = f"{self._mqtt_base}/{self._client_id}"
         # Since it's possible we're already connected to MQTT, we call subscribe here separately.
         self._trigger_subscribe(trigger_obj.id)
@@ -268,7 +268,7 @@ class CBNetwork:
             message_out = {}
             for key in message_in:
                 message_out[key] = self._outbound_conversion(message_in[key])
-        elif message_in is CobraBay.const.GEN_UNKNOWN:
+        elif message_in is cobrabay.const.GEN_UNKNOWN:
             # Home Assistant expects unknown values to be "Null"
             message_out = None
             self._logger.debug(f"Converted internal message '{message_in}' to '{message_out}' for HA.")
@@ -428,7 +428,7 @@ class CBNetwork:
         # Set the last will prior to connecting.
         self._logger.info("Creating last will.")
         # self._mqtt_client.will_set(
-        #     "CobraBay/" + self._client_id + "/connectivity",
+        #     "cobrabay/" + self._client_id + "/connectivity",
         #     payload='offline', qos=0, retain=True)
         self._mqtt_client.will_set(f"{self._mqtt_base}/{self._client_id}/connectivity",
                                    payload='offline', qos=0, retain=True)
@@ -507,14 +507,14 @@ class CBNetwork:
 
     # Quick helper methods to send online/offline messages correctly.
     def _send_online(self):
-        # self._mqtt_client.publish("CobraBay/" + self._client_id + "/connectivity",
+        # self._mqtt_client.publish("cobrabay/" + self._client_id + "/connectivity",
         #                           payload="online",
         #                           retain=True)
         self._mqtt_client.publish(f"{self._mqtt_base}/{self._client_id}/connectivity",payload="online",retain=True)
 
 
     def _send_offline(self):
-        # self._mqtt_client.publish("CobraBay/" + self._client_id + "/connectivity",
+        # self._mqtt_client.publish("cobrabay/" + self._client_id + "/connectivity",
         #                           payload="offline", retain=True)
         self._mqtt_client.publish(f"{self._mqtt_base}/{self._client_id}/connectivity",payload="offline", retain=True)
 
@@ -573,7 +573,7 @@ class CBNetwork:
         """
 
         :param input_obj:
-        :type input_obj: CobraBay.CBBay
+        :type input_obj: cobrabay.CBBay
         :return:
         """
         outbound_messages = []
@@ -663,7 +663,7 @@ class CBNetwork:
     #         return
     #
     #     sensor_messages = []
-    #     topic_base = 'CobraBay/' + self._client_id + '/' + bay_obj.id + '/'
+    #     topic_base = 'cobrabay/' + self._client_id + '/' + bay_obj.id + '/'
     #     #TODO: Update this to handle bay-adjusted sensor values.
     #     # for sensor in bay_obj.detectors:
     #     #     sensor_messages.extend(
@@ -853,9 +853,9 @@ class CBNetwork:
             discovery_dict['availability_mode'] = avail_mode
 
         discovery_json = json_dumps(discovery_dict)
-        # discovery_topic = "homeassistant/{}/CobraBay_{}/{}/config". \
+        # discovery_topic = "homeassistant/{}/cobrabay_{}/{}/config". \
         #     format(entity_type, self._client_id, discovery_dict['object_id'])
-        discovery_topic = (f"{self._ha_settings['base']}/{entity_type}/CobraBay_{self._client_id}/"
+        discovery_topic = (f"{self._ha_settings['base']}/{entity_type}/cobrabay_{self._client_id}/"
                            f"{discovery_dict['object_id']}/config")
         self._logger.info("Publishing HA discovery to topic '{}'\n\t{}".format(discovery_topic, discovery_json))
         # All discovery messages should be retained.

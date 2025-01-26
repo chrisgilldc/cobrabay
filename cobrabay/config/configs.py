@@ -1,3 +1,6 @@
+"""
+Cobra Bay configuration management
+"""
 import logging
 import yaml
 from pathlib import Path
@@ -5,14 +8,14 @@ import cerberus
 from pprint import pformat
 from datetime import datetime
 
-import CobraBay.config.schemas
-from CobraBay.config import CBValidator
-from CobraBay.datatypes import CBValidation, ENVOPTIONS_EMPTY
+import cobrabay.config.schemas
+from cobrabay.config import CBValidator
+from cobrabay.datatypes import CBValidation, ENVOPTIONS_EMPTY
 
 
 class CBConfig:
     """
-    Configuration management for CobraBay.
+    Configuration management for Cobra Bay.
     """
 
     def __init__(self, config_file=None, schema=None, auto_load=False, log_level="WARNING",
@@ -37,7 +40,7 @@ class CBConfig:
         else:
             self._schema = schema
         self._environment = environment
-        self._logger = logging.getLogger("CobraBay").getChild("Config")
+        self._logger = logging.getLogger("cobrabay").getChild("Config")
         if environment.loglevel is not None:
             self._logger.setLevel(environment.loglevel)
         else:
@@ -138,6 +141,9 @@ class CBConfig:
                     return False
 
     def get_loglevel(self, item_id, item_type=None):
+        """
+        Get the log level for a specific item.
+        """
         # If a loglevel was set at the command line, that overrides everything else, return it.
         if self._environment.loglevel is not None:
             return self._environment.loglevel
@@ -200,7 +206,7 @@ class CBConfig:
 
     def _validator(self, validation_target):
         """
-        Validate the validation target against the CobraBay Schema.
+        Validate the validation target against the Cobra Bay Schema.
 
         :param validation_target:
         :return:
@@ -243,9 +249,9 @@ class CBConfig:
             # for sensor_name in returnval['sensors']:
             #     # Select the correct target schema based on the sensor type.
             #     if returnval['sensors'][sensor_name]['hw_type'] == 'VL53L1X':
-            #         target_schema = CobraBay.config.schemas.SCHEMA_SENSOR_VL53L1X
+            #         target_schema = cobrabay.config.schemas.SCHEMA_SENSOR_VL53L1X
             #     elif returnval['sensors'][sensor_name]['hw_type'] == 'TFMini':
-            #         target_schema = CobraBay.config.schemas.SCHEMA_SENSOR_TFMINI
+            #         target_schema = cobrabay.config.schemas.SCHEMA_SENSOR_TFMINI
             #     else:
             #         # Trap unknown sensor types. This should never happen!
             #         return CBValidation(False, "Incorrect sensor type during detector normalization '{}'".format(
@@ -301,7 +307,7 @@ class CBConfig:
 class CBCoreConfig(CBConfig):
     def __init__(self, config_file=None, auto_load=True, log_level="WARNING", environment=ENVOPTIONS_EMPTY):
         # Call the super init with the schema set.
-        super().__init__(config_file, CobraBay.config.schemas.CB_CORE, auto_load, log_level, environment)
+        super().__init__(config_file, cobrabay.config.schemas.CB_CORE, auto_load, log_level, environment)
 
     # Enumeration methods.
     @property
@@ -388,9 +394,9 @@ class CBCoreConfig(CBConfig):
 
     def sensor(self, sensor_name):
         """
-        Retrieve configuration for a specific detector
+        Retrieve configuration for a specific sensor
 
-        :param sensor_name: ID of the requested detector.
+        :param sensor_name: ID of the requested sensor.
         :type sensor_name: str
         :return: dict
         """

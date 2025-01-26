@@ -2,7 +2,7 @@
 Cobra Bay - Sensor Interfaces
 """
 
-# Sensor classes for the CobraBay parking system
+# Sensor classes for the Cobra Bay parking system
 
 # The base class
 from .basesensor import BaseSensor

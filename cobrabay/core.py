@@ -1,6 +1,6 @@
-####
-# Cobra Bay - Main Objects
-####
+"""
+Cobra Bay Core
+"""
 
 import copy
 import queue
@@ -9,9 +9,12 @@ import signal
 import logging
 from logging.handlers import WatchedFileHandler
 from pprint import pformat
-import CobraBay
+import cobrabay
 
 class CBCore:
+    """
+    Cobra Bay Core object. Only one is needed. Handles interaction among other modules and shutdown.
+    """
     def __init__(self, config_obj, envoptions, q_cbsmdata=None, q_cbsmcontrol=None):
         """
         Cobra Bay Core Class Initializer.
@@ -34,7 +37,7 @@ class CBCore:
         self.system_state = 'init'
 
         # Get the master handler. This may have already been started by the command line invoker.
-        self._master_logger = logging.getLogger("CobraBay")
+        self._master_logger = logging.getLogger("cobrabay")
         # Set the master logger to Debug, so all other messages will pass up through it.
         self._master_logger.setLevel(logging.DEBUG)
         # If console handler isn't already on the master logger, add it by default. Will be removed later if the
@@ -44,7 +47,7 @@ class CBCore:
             console_handler.setLevel(logging.DEBUG)
             self._master_logger.addHandler(console_handler)
         # Create a "core" logger, for just this module.
-        self._logger = logging.getLogger("CobraBay").getChild("Core")
+        self._logger = logging.getLogger("cobrabay").getChild("Core")
 
         self._logger.setLevel(logging.DEBUG)
         if envoptions.loglevel is not None:
@@ -80,7 +83,7 @@ class CBCore:
                 self._trigger_check()
                 # See if any of the bays checked to a motion state.
                 for bay_id in self._bays:
-                    if self._bays[bay_id].state in CobraBay.const.BAYSTATE_MOTION:
+                    if self._bays[bay_id].state in cobrabay.const.BAYSTATE_MOTION:
                         # Set the overall system state.
                         self.system_state = self._bays[bay_id].state
                         # Go into the motion loop.
@@ -105,8 +108,8 @@ class CBCore:
         self.system_state = 'offline'
         # Shut off the sensors.
         # This must be done first, otherwise the I2C bus will get cut out from underneath the sensors.
-        # Set all sensors to disabled. This won't actually disable the TFMini, but meh.
-        self._sensormgr.set_sensor_state(CobraBay.const.SENSTATE_DISABLED)
+        # Set all sensors to disable. This won't actually disable the TFMini, but meh.
+        self._sensormgr.set_sensor_state(cobrabay.const.SENSTATE_DISABLED)
         self._logger.critical("Terminated.")
         sys.exit(exit_code)
 
@@ -138,15 +141,20 @@ class CBCore:
 
         # If the bay is in UNDOCKING, show 'UNDOCKING' on the display until there is motion. If there is no motion by
         # the undock timeout, return to READY.
-        if self._bays[bay_id].state == CobraBay.const.BAYSTATE_UNDOCKING:
+        if self._bays[bay_id].state == cobrabay.const.BAYSTATE_UNDOCKING:
             self._logger.debug("{} ({})".format(self._bays[bay_id].vector, type(self._bays[bay_id].vector)))
-            while (self._bays[bay_id].vector.direction in (CobraBay.const.DIR_STILL, CobraBay.const.GEN_UNKNOWN) and
-                   self._bays[bay_id].state == CobraBay.const.BAYSTATE_UNDOCKING):
+            while (self._bays[bay_id].vector.direction in (cobrabay.const.DIR_STILL, cobrabay.const.GEN_UNKNOWN) and
+                   self._bays[bay_id].state == cobrabay.const.BAYSTATE_UNDOCKING):
                 # Update local sensor variable.
                 self._sensor_update()
                 # Update bays with sensor data.
                 for bay_id in self._bays:
-                    self._bays[bay_id].update()
+                    try:
+                        self._bays[bay_id].update()
+                    except IndexError as e:
+                        self._logger.error("Bay {} threw index error. Trace details...".format(bay_id))
+                        self._logger.exception(e)
+                        self._logger.debug("Sensor log at time of exception: {}".format(self.sensor_log))
                 self._display.show(mode='message', message="UNDOCK", color="orange", icons=False)
                 # Timeout and go back to ready if the vehicle hasn't moved by the timeout.
                 # Kids are probably running around.
@@ -158,19 +166,19 @@ class CBCore:
                 self._trigger_check()
 
         # As long as the bay is in the desired state, keep running.
-        while self._bays[bay_id].state in CobraBay.const.BAYSTATE_MOTION:
-            self._logger.debug("{} motion - Displaying".format(CobraBay.const.BAYSTATE_MOTION))
+        while self._bays[bay_id].state in cobrabay.const.BAYSTATE_MOTION:
+            self._logger.debug("{} motion - Displaying".format(cobrabay.const.BAYSTATE_MOTION))
             # Send the bay object reference to the display method.
             #TODO: Redo how the display gets its data.
-            self._display.show_motion(CobraBay.const.BAYSTATE_MOTION, self._bays[bay_id])
+            self._display.show_motion(cobrabay.const.BAYSTATE_MOTION, self._bays[bay_id])
             # Update local sensor variable.
-            self._logger.debug("{} motion - Updating local sensor values.".format(CobraBay.const.BAYSTATE_MOTION))
+            self._logger.debug("{} motion - Updating local sensor values.".format(cobrabay.const.BAYSTATE_MOTION))
             self._sensor_update()
             # Update bays with sensor data.
             for bay_id in self._bays:
                 self._bays[bay_id].update()
             # Poll the network.
-            self._logger.debug("{} motion - Polling network.".format(CobraBay.const.BAYSTATE_MOTION))
+            self._logger.debug("{} motion - Polling network.".format(cobrabay.const.BAYSTATE_MOTION))
             self._network_handler()
             # Check for completion
             #self._bays[bay_id].check_timer()
@@ -206,7 +214,7 @@ class CBCore:
             # self._q_cbsmstatus.task_done()
             if len(self.sensor_log) > 0:
                 if latest_data.timestamp != self.sensor_log[0].timestamp:
-                    # If timestamps are different, sensor manager has updated the data and it's new to fetch.
+                    # If timestamps are different, sensor manager has updated the data, and it's new to fetch.
                     self._sensor_log_add(latest_data)
                 else:
                     self._logger.debug("No change to latest sensor data, nothing to update.")
@@ -232,7 +240,7 @@ class CBCore:
         # Pull out the most recent data and put it in the sensor_most_recent dict.
         for sensor_id in self.sensor_log[0].sensors:
             # Don't update when waiting for an interrupt.
-            if self.sensor_log[0].sensors[sensor_id].response_type == CobraBay.const.SENSOR_RESP_INR:
+            if self.sensor_log[0].sensors[sensor_id].response_type == cobrabay.const.SENSOR_RESP_INR:
                 self._logger.debug("Sensor '{}' is waiting for interrupt. Keeping previous latest value.")
             else:
                 self._sensor_latest_data[sensor_id] = self.sensor_log[0].sensors[sensor_id]
@@ -310,7 +318,7 @@ class CBCore:
             self._logger.debug("Using settings: {}".format(sensor_config))
             # Create the correct type of sensor object based on defined type.
             if sensor_config['hw_type'] == 'VL53L1X':
-                # return_dict[sensor_id] = CobraBay.sensors.CBVL53L1X(
+                # return_dict[sensor_id] = cobrabay.sensors.CBVL53L1X(
                 #     name=sensor_config['name'], i2c_address=sensor_config['hw_settings']['i2c_address'],
                 #     i2c_bus=sensor_config['hw_settings']['i2c_bus'],
                 #     enable_board=sensor_config['hw_settings']['enable_board'],
@@ -319,16 +327,16 @@ class CBCore:
                 #     distance_mode=sensor_config['hw_settings']['distance_mode'],
                 #     parent_logger=self._logger,
                 #     log_level=sensor_config['log_level'])
-                return_dict[sensor_id] = CobraBay.sensors.CBVL53L1X(name=sensor_config['name'],
+                return_dict[sensor_id] = cobrabay.sensors.CBVL53L1X(name=sensor_config['name'],
                                                                     **sensor_config['hw_settings'])
             elif sensor_config['hw_type'] == 'TFMini':
-                return_dict[sensor_id] = CobraBay.sensors.TFMini(name=sensor_config['name'],
+                return_dict[sensor_id] = cobrabay.sensors.TFMini(name=sensor_config['name'],
                                                                  **sensor_config['hw_settings'])
 
             else:
                 self._logger.error("Sensor '{}' has unknown type '{}'. Cannot configure!".
                                    format(sensor_id, sensor_config['hw_type']))
-        # self._logger.debug("VL53LX instances: {}".format(len(CobraBay.sensors.CBVL53L1X.instances)))
+        # self._logger.debug("VL53LX instances: {}".format(len(cobrabay.sensors.CBVL53L1X.instances)))
         return return_dict
 
     def _setup_signal_handlers(self):
@@ -368,8 +376,8 @@ class CBCore:
         self.system_state = 'init'
         self._logger.info("Setting up system.")
 
-        if not isinstance(config_obj, CobraBay.config.CBCoreConfig):
-            raise TypeError("CobraBay core must be passed a CobraBay Config object (CBConfig).")
+        if not isinstance(config_obj, cobrabay.config.CBCoreConfig):
+            raise TypeError("Cobra Bay core must be passed a Cobra Bay Config object (CBConfig).")
         else:
             # Save the passed CBConfig object.
             self._active_config = config_obj
@@ -382,14 +390,14 @@ class CBCore:
 
         # Create the object for checking hardware status.
         self._logger.info("Creating Pi hardware monitor...")
-        self._pistatus = CobraBay.CBPiStatus()
+        self._pistatus = cobrabay.CBPiStatus()
 
         # Create the network object.
         self._logger.info("Creating network object...")
         # Create Network object.
         network_config = self._active_config.network()
         self._logger.debug("Using network config:\n{}".format(pformat(network_config)))
-        self._network = CobraBay.CBNetwork(**network_config, cbcore=self)
+        self._network = cobrabay.CBNetwork(**network_config, cbcore=self)
         # Register the hardware monitor with the network module.
         self._network.register_pistatus(self._pistatus)
 
@@ -407,7 +415,7 @@ class CBCore:
         self._q_cbsmdata = queue.Queue(maxsize=1)
         self._q_cbsmstatus = queue.Queue(maxsize=1)
         self._q_cbsmcontrol = queue.Queue(maxsize=1)
-        self._sensormgr = CobraBay.CBSensorMgr(sensor_config=sensor_config, i2c_config=self._active_config.i2c_config(),
+        self._sensormgr = cobrabay.CBSensorMgr(sensor_config=sensor_config, i2c_config=self._active_config.i2c_config(),
                                                log_level=self._active_config.get_loglevel('sensors'),
                                                q_cbsmdata=self._q_cbsmdata, q_cbsmstatus=self._q_cbsmstatus,
                                                q_cbsmcontrol=self._q_cbsmcontrol)
@@ -416,7 +424,7 @@ class CBCore:
         self._network.register_sensormgr(self._sensormgr)
         # Activate the sensors.
         #TODO: Convert to using the command queue to be threading safe.
-        self._sensormgr.set_sensor_state(target_state=CobraBay.const.SENSTATE_RANGING)
+        self._sensormgr.set_sensor_state(target_state=cobrabay.const.SENSTATE_RANGING)
         # Loop once and get initial latest data.
         #TODO: Add config option for threading vs. not and make conditional.
         self._sensormgr.loop()
@@ -435,13 +443,13 @@ class CBCore:
             bay_config = self._active_config.bay(bay_id)
             self._logger.debug("Bay config:")
             self._logger.debug(pformat(bay_config))
-            self._bays[bay_id] = CobraBay.CBBay(id=bay_id, cbcore=self, q_cbsmcontrol=self._q_cbsmcontrol, **bay_config)
+            self._bays[bay_id] = cobrabay.CBBay(id=bay_id, cbcore=self, q_cbsmcontrol=self._q_cbsmcontrol, **bay_config)
 
         self._logger.info('Creating display...')
         display_config = self._active_config.display()
         self._logger.debug("Using display config:")
         self._logger.debug(pformat(display_config))
-        self._display = CobraBay.CBDisplay(**display_config, cbcore=self)
+        self._display = cobrabay.CBDisplay(**display_config, cbcore=self)
         # Inform the network about the display. This is so the network can send display images. Nice to have, very
         # useful for debugging!
         self._network.display = self._display
@@ -474,7 +482,7 @@ class CBCore:
     def _setup_triggers(self):
         """ Setup triggers based on the configuration. """
         # Set the logging level for the trigger group.
-        trigger_logger = logging.getLogger("CobraBay").getChild("Trigger")
+        trigger_logger = logging.getLogger("cobrabay").getChild("Trigger")
         trigger_logger.setLevel("DEBUG")
 
         self._logger.debug("Creating triggers...")
@@ -486,8 +494,8 @@ class CBCore:
             # Create trigger object based on type.
             if trigger_config['type'] == "syscmd":
                 # Create the system command trigger. We should only do this once!
-                self._syscmd_trigger = CobraBay.triggers.SysCommand(
-                    id="syscmd",
+                self._syscmd_trigger = cobrabay.triggers.SysCommand(
+                    trigger_id="syscmd",
                     topic=trigger_config['topic'],
                     log_level=trigger_config['log_level'])
                 self._network.register_trigger(self._syscmd_trigger)
@@ -499,11 +507,11 @@ class CBCore:
                         self._logger.error("Trigger '{}' references non-existent bay '{}'. Cannot setup!".
                                            format(trigger_id, trigger_config['bay']))
                     else:
-                        trigger_obj = CobraBay.triggers.MQTTSensor(
-                            id=trigger_id,
+                        trigger_obj = cobrabay.triggers.MQTTSensor(
+                            trigger_id=trigger_id,
                             topic=trigger_config['topic'],
                             topic_mode='full',
-                            topic_prefix=None,
+                            # topic_prefix=None, Don't pass a topic_prefix, not needed here.
                             bay_obj=self._bays[trigger_config['bay']],
                             to_value=trigger_config['to_value'],
                             from_value=trigger_config['from_value'],
@@ -521,8 +529,8 @@ class CBCore:
                             self._network.register_trigger(trigger_obj)
 
                 elif trigger_config['type'] == 'baycmd':
-                    trigger_obj = CobraBay.triggers.BayCommand(
-                        id=trigger_id,
+                    trigger_obj = cobrabay.triggers.BayCommand(
+                        trigger_id=trigger_id,
                         topic=trigger_config['topic'],
                         bay_obj=self._bays[trigger_config['bay_id']],
                         log_level=trigger_config['log_level'])

@@ -1,4 +1,4 @@
-# CobraBay
+# Cobra Bay
 ## A parking guidance system
 
 ![Launch!](docs/cb_launch.gif)
@@ -10,11 +10,12 @@ just the right way.
 It has also been the primary way I have taught myself python and electronics, so there is likely a lot that can be 
 optimized, done better or redesigned here. Constructive feedback welcome!
 
+Current development version: 0.4.2a1
+
 ---
 * [Building](docs/HARDWARE.md) - How to put together the hardware
 * [Installing](docs/INSTALL.md) - How to install the software
 * [Configuration](docs/CONFIG.md) - Reference to the configuration file options.
-
 
 ## Bugs
 * System
@@ -36,6 +37,9 @@ optimized, done better or redesigned here. Constructive feedback welcome!
 * If MQTT broker is inaccessible during startup, an MQTT trigger will cause system to go into a loop.
 
 ## Enhancements:
+* Structure
+  * Separate some routines into separate libraries?
+  * Write tests
 * Performance
   * Split sensors into separate thread/process. 
 * Operations
@@ -43,7 +47,7 @@ optimized, done better or redesigned here. Constructive feedback welcome!
   * Range-based trigger. Start process based on range changes.
   * Additional diagnostics via MQTT. Min/max ranges seen, total faults, total non-numerical values on sensor, maybe more.
   * Restructure commands for cleaner HA interaction.
-  * Trigger to abort operation, ie when garage door closes.
+  * Trigger to end operation, ie when garage door closes.
 * Configuration
   * Ability to save current system settings to config file
   * Ability to soft-reload system with new config file.

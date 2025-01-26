@@ -1,11 +1,11 @@
-# CobraBay MQTT Readme
+# Cobra Bay MQTT Readme
 
-CobraBay is intended to communicate primarilly through MQTT with other systems, both to report status and take commands.
+Cobra Bay is intended to communicate primarilly through MQTT with other systems, both to report status and take commands.
 I have designed and tested it against Home Assistant but in principle another MQTT-based system should integrate.
 
 # The Base
 
-For a given CobraBay system, all other topics are relative to a base topic of `CobraBay/<MAC>`, where `<MAC>` is the MAC
+For a given Cobra Bay system, all other topics are relative to a base topic of `cobrabay/<MAC>`, where `<MAC>` is the MAC
 address of the system's network interface. The Base Topic should be stable short of network reconfigurations or hardware replacement.
 
 All other topics in this document are relative to the base topic unless otherwise noted.
