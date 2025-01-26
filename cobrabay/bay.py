@@ -9,7 +9,7 @@ import pint.errors
 from pint import UnitRegistry, Quantity
 from time import monotonic
 from math import floor
-from numpy import datetime64, timedelta64
+from numpy import datetime64
 from numpy import int32 as np_int32
 import logging
 from pprint import pformat
@@ -19,7 +19,10 @@ from cobrabay.datatypes import Intercept, Vector
 
 
 class CBBay:
-    def __init__(self, id,
+    """
+    Bay class. Contains dimensions of a place to park and calculates status of docking/undocking.
+    """
+    def __init__(self, bay_id,
                  name,
                  depth,
                  longitudinal,
@@ -31,8 +34,8 @@ class CBBay:
                  report_adjusted=True,
                  log_level="WARNING"):
         """
-        :param id: ID for the bay. Cannot have spaces.
-        :type id: str
+        :param bay_id: ID for the bay. Cannot have spaces.
+        :type bay_id: str
         :param name: Long "friendly" name for the Bay, used in MQTT messages
         :type name: str
         :param depth: Absolute distance of the bay, from the range sensor to the end. Must be a linear Quantity.
@@ -46,17 +49,16 @@ class CBBay:
         :param q_cbsmcontrol: Sensor Manager control queue.
         :type q_cbsmcontrol: Queue
         :param timeouts: Dict with timeouts for 'dock','undock' and 'postroll' times.
-        :type time_dock: dict
         :param triggers: Dictionary of Triggers for this bay. Can be modified later with register_trigger.
         :type triggers: dict
         :param log_level: Log level for the bay, must be a Logging level.
         :type log_level: str
         """
         # Must set ID before we can create the logger.
-        self.id = id
+        self.id = bay_id
         self._logger = logging.getLogger("cobrabay").getChild(self.id)
         self._logger.setLevel(log_level.upper())
-        self._logger.info("Initializing bay: {}".format(id))
+        self._logger.info("Initializing bay: {}".format(bay_id))
 
         # Save the parameters.
         self._cbcore = cbcore
@@ -144,11 +146,16 @@ class CBBay:
 
     ## Public Methods
 
-    # Abort gets called when we want to cancel a docking.
     def abort(self):
+        """
+        Stop whatever operation is in progress and return to a ready state.
+        """
         self.state = "ready"
 
     def check_timer(self):
+        """
+        Check the motion timer for expiration.
+        """
         # TODO: Fix this so it works.
         self._logger.debug("Evaluating for timer expiration.")
         # Update the dock timer.
@@ -172,20 +179,32 @@ class CBBay:
                 self.state = 'ready'
 
     def shutdown(self):
+        """
+        Shutdown the bay in preparation for system exit.
+        """
         self._logger.critical("Beginning shutdown...")
         self._logger.critical("Shutting off detectors...")
         self._q_cbsmcontrol.put((SENSTATE_DISABLED, None))
         self._logger.critical("Shutdown complete. Exiting.")
 
     def trigger_register(self, trigger_obj):
+        """
+        Register a trigger to this bay.
+        """
         self._logger.debug("Registering trigger ID '{}'".format(trigger_obj.id))
         self._triggers[trigger_obj.id] = trigger_obj
 
-    def trigger_deregister(self, trigger_id):
-        self._logger.debug("Deregistering Trigger ID '{}'".format(trigger_id))
+    def trigger_unregister(self, trigger_id):
+        """
+        Unregister a trigger from this bay.
+        """
+        self._logger.debug("Unregistering Trigger ID '{}'".format(trigger_id))
         del self._triggers[trigger_id]
 
     def triggers_check(self):
+        """
+        Check registered  triggers.
+        """
         for trigger_id in self._triggers:
             if self._triggers[trigger_id].triggered:
                 self._logger.debug("Trigger '{}' is active.".format(trigger_id))
@@ -214,7 +233,9 @@ class CBBay:
                         self._logger.debug("'{}' has no associated action as a bay command.".format(cmd))
 
     def update(self):
-        """Read in sensor values and update all derived values."""
+        """
+        Read in sensor values and update all derived values.
+        """
 
         # If the data hasn't changed, don't update.
         if len(self._cbcore.sensor_log) > 0:
@@ -295,6 +316,9 @@ class CBBay:
 
     @property
     def configured_sensors(self):
+        """
+        List the sensors configured for this bay.
+        """
         return self._configured_sensors
 
     @property
@@ -335,11 +359,18 @@ class CBBay:
 
     @property
     def id(self):
+        """
+        Get the ID of the bay.
+        """
         return self._id
 
     @id.setter
-    def id(self, input):
-        self._id = input.replace(" ", "_").lower()
+    def id(self, the_input):
+        """
+        Set the ID of the bay.
+        Any spaces are replaced with underscores.
+        """
+        self._id = the_input.replace(" ", "_").lower()
 
     # @property
     # def range(self):
@@ -356,11 +387,11 @@ class CBBay:
 
     @property
     def motion_timer(self):
-        '''
+        """
         Reports time left on the current motion in M:S format. If no active motion, returns 'Inactive'.
 
         :return: str
-        '''
+        """
         if self._active_timeout is not None:
             remaining_time = self._active_timeout - Quantity(time.monotonic() - self._current_motion['mark'], 's')
             # This catches the case were we're reporting a negative value to Home Assistant, which it reports in strange
@@ -376,10 +407,16 @@ class CBBay:
 
     @property
     def name(self):
+        """
+        Name of the bay.
+        """
         return self._name
 
     @name.setter
     def name(self, name):
+        """
+        Name of the bay.
+        """
         self._name = name
 
     @property
@@ -443,10 +480,10 @@ class CBBay:
 
     @property
     def range_pct(self):
-        '''
+        """
         Percentage of distance covered from the garage door to the stop point.
         :return: float
-        '''
+        """
         # TODO: Fix range references.
         # If it's not a Quantity, just return zero.
         self._logger.debug("Calculating range percentage")
@@ -462,7 +499,9 @@ class CBBay:
 
     @property
     def selected_range(self):
-        """ The range sensor selected to be controlling for longitudinal readings."""
+        """
+        The range sensor selected to be controlling for longitudinal readings.
+        """
         return self._selected_range
 
     @property
@@ -476,7 +515,7 @@ class CBBay:
         See const.py 'BAYSTATE_*' for valid values.
 
         :returns Bay state
-        :rtype: String
+        :rtype: str
         """
         return self._state
 
@@ -584,7 +623,7 @@ class CBBay:
                     direction = DIR_FWD
                 else:
                     self._logger.warning(
-                        "Vector - Direction spread has unhandleable value '{}'".format(spread_distance))
+                        "Vector - Direction spread has unhandled value '{}'".format(spread_distance))
                     return vector_unknown
                 # Convert the value.
                 self._logger.debug("Vector - Raw speed is '{}'".format(speed))

@@ -443,7 +443,7 @@ class CBCore:
             bay_config = self._active_config.bay(bay_id)
             self._logger.debug("Bay config:")
             self._logger.debug(pformat(bay_config))
-            self._bays[bay_id] = cobrabay.CBBay(id=bay_id, cbcore=self, q_cbsmcontrol=self._q_cbsmcontrol, **bay_config)
+            self._bays[bay_id] = cobrabay.CBBay(bay_id=bay_id, cbcore=self, q_cbsmcontrol=self._q_cbsmcontrol, **bay_config)
 
         self._logger.info('Creating display...')
         display_config = self._active_config.display()
