@@ -134,6 +134,30 @@ def aw9523_reset(aw9523_obj):
         pin_obj.value = False
 
 
+def aw9523_status(aw9523_obj, summarize=True):
+    """
+    Check status of all pins.
+    Assembles a string, tab
+    """
+    active = 0
+    inactive = 0
+    output_string = ""
+    for pin in range(15):
+        pin_obj = aw9523_obj.get_pin(pin)
+        if pin_obj.value:
+            active += 1
+        else:
+            inactive += 1
+        if pin == 0:
+            output_string = "Pin {}: {}".format(pin, pin_obj.value)
+        else:
+            output_string = output_string + "\n\tPin {}: {}".format(pin, pin_obj.value)
+    if summarize:
+        output_string = "Active: {}\tInactive:{}\n\t".format(active, inactive) + output_string
+    return output_string
+
+
+
 def scan_i2c():
     """
     Scan the I2C Bus.

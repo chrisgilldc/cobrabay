@@ -26,12 +26,12 @@ imperial_to_metric = [
     (Quantity("5"),5)
 ]
 @pytest.fixture
-def newConvertomatic_i():
+def new_Convertomatic_i():
     ConvertomaticInstance = Convertomatic("imperial")
     return ConvertomaticInstance
 
 @pytest.fixture
-def newConvertomatic_m():
+def new_Convertomatic_m():
     ConvertomaticInstance = Convertomatic("metric")
     return ConvertomaticInstance
 
