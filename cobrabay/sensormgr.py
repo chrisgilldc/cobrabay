@@ -3,7 +3,10 @@ Cobra Bay - Sensor Manager
 """
 from __future__ import annotations
 
+import pprint
+
 from adafruit_aw9523 import AW9523
+import atexit
 import board
 import busio
 import logging
@@ -76,6 +79,9 @@ class CBSensorMgr:
         self._q_cbsmstatus = q_cbsmstatus
         self._q_cbsmcontrol = q_cbsmcontrol
 
+        # Register the cleanup method.
+        atexit.register(self.cleanup)
+
         # Set up the logger.
         if parent_logger is None:
             # If no parent detector is given this sensor is being used in a testing capacity. Create a null logger.
@@ -88,6 +94,9 @@ class CBSensorMgr:
         else:
             self._logger = parent_logger.getChild(self._name)
 
+        self._logger.debug("Received sensor config: {}".format(pprint.pformat(sensor_config)))
+        self._logger.debug("Received I2C config: {}".format(pprint.pformat(i2c_config)))
+
         # If I2C config is given, do it.
         if self._i2c_config is not None:
             try:
@@ -99,7 +108,7 @@ class CBSensorMgr:
                 pass
             else:
                 # Do a reset on the bus.
-                self._reset_i2cbus()
+                self._reset_i2c_bus()
                 # If resetting hits an error, it will set the _i2c_available to false and we skip this setup.
                 if self._i2c_available:
                     for addr in self._scan_aw9523s():
@@ -115,8 +124,9 @@ class CBSensorMgr:
 
         # self._q_cbsmdata = queue.Queue(maxsize=1)
 
-    # Destructor!
-    def __del__(self):
+    # Cleanup
+    def cleanup(self):
+        """ Shut off all sensors when exiting. """
         # Disable all sensors when shutting down.
         self._logger.debug("Disabling all sensors before deletion.")
         for sensor_id in self._sensors:
@@ -180,11 +190,10 @@ class CBSensorMgr:
         run_time = time.monotonic_ns() - start_time
         self._scan_speed_log.append(run_time)
         self._scan_speed_log = self._scan_speed_log[:100]
-        self._logger.debug("Enqueing scan data.")
+        scan_data = SensorResponse(timestamp=datetime64('now','ns'), sensors=self._latest_state, scan_time = run_time)
+        self._logger.debug("Enqueing scan data - {}".format(scan_data))
         # Enqueue a SensorResponse.
-        self._q_cbsmdata.put(
-            SensorResponse(timestamp=datetime64('now','ns'), sensors=self._latest_state, scan_time = run_time),
-            timeout=1)
+        self._q_cbsmdata.put(scan_data,timeout = 1)
         self._logger.debug("Loop complete.")
 
     def loop_forever(self):
@@ -256,6 +265,9 @@ class CBSensorMgr:
             del self._sensors[sensor_obj]
 
     def sensors_activate(self):
+        """
+        Set all sensors to ranging.
+        """
         for sensor_id in self._sensors:
             if isinstance(self._sensors[sensor_id], cobrabay.sensors.BaseSensor):
                 self._sensors[sensor_id].status = 'ranging'
@@ -272,7 +284,7 @@ class CBSensorMgr:
             # self._logger.debug("Traversing detectors to set status to '{}'".format(target_state))
             # Traverse the dict looking for detectors that need activation.
             for sensor in self._sensors:
-                if ( target_sensor is None or sensor == target_sensor):
+                if target_sensor is None or sensor == target_sensor:
                     self._logger.debug("Sensor is of type: {}".format(type(self._sensors[sensor])))
                     if self._sensors[sensor] == cobrabay.const.SENSTATE_FAULT:
                         self._logger.warning("Cannot set state of sensor '{}' before it is initialized.".
@@ -379,7 +391,7 @@ class CBSensorMgr:
 
         # If the bus doesn't start ready, reset it.
         if not ready.value:
-            self._reset_i2cbus()
+            self._reset_i2c_bus()
 
         # Determine what to do for I2C creation.
         if i2c_bus is not None:
@@ -402,7 +414,8 @@ class CBSensorMgr:
             self._logger.critical("Unknown exception in accessing I2C bus!")
             raise e
 
-    def _flush_queue(self, q):
+    @staticmethod
+    def _flush_queue(q):
         """ Flush a given queue """
         while not q.empty():
             try:
@@ -411,21 +424,44 @@ class CBSensorMgr:
                 continue
             q.task_done()
 
-    def _reset_i2cbus(self):
+    def _reset_i2c_bus(self):
         self._logger.info("Resetting I2C bus on request.")
-        self._ctrl_enable.value = False
-        self._logger.info("Bus is now disabled. Waiting {}s before enablement.".format(self._wait_reset))
-        time.sleep(self._wait_reset)
-        self._ctrl_enable.value = True
-        self._logger.info("Bus enable. Waiting {}s for ready.".format(self._wait_ready))
-        mark = time.monotonic()
-        while not self._ctrl_ready.value:
-            if time.monotonic() - mark >= self._wait_ready:
-                self._logger.error("I2C Bus did not become ready in time. Will not set up I2C-based sensors.")
-                self._i2c_available = False
-                break
-            time.sleep(0.1)
+        self._disable_i2c_bus()
+        self._logger.info("Waiting {}s before enablement.".format(self._wait_reset))
+        self._enable_i2c_bus()
         self._logger.info("Bus now ready.")
+
+    def _disable_i2c_bus(self):
+        if not self._ctrl_enable.value:
+            self._logger.info("I2C Bus disable requested, already disabled.")
+        else:
+            self._logger.info("Disabling I2C Bus")
+            self._ctrl_enable.value = False
+            mark = time.monotonic()
+            while self._ctrl_ready.value:
+                if time.monotonic() - mark >= self._wait_ready:
+                    self._logger.error("I2C Bus not disabled within timeout. May be stuck.")
+                    self._i2c_available = True
+                    return
+                time.sleep(0.1)
+            self._logger.info("I2C Bus reports disabled.")
+            self._i2c_available = False
+
+    def _enable_i2c_bus(self):
+        if self._ctrl_enable.value:
+            self._logger.info("I2C Bus enable requested, already enabled.")
+        else:
+            self._logger.info("Enabling I2C Bus")
+            self._ctrl_enable.value = True
+            mark = time.monotonic()
+            while not self._ctrl_ready.value:
+                if time.monotonic() - mark >= self._wait_ready:
+                    self._logger.error("I2C Bus did not become ready in time. Will not set up I2C-based sensors.")
+                    self._i2c_available = False
+                    return
+                time.sleep(0.1)
+            self._logger.info("I2C Bus reports ready.")
+            self._i2c_available = True
 
     def _scan_aw9523s(self):
         """

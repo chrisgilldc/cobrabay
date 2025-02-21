@@ -111,7 +111,8 @@ class CBVL53L1X(I2CSensor):
         :return: SensorResponse(response_type, reading)
         """
         self._logger.debug("Range requested. Sensor state is: {}".format(self.state))
-        if self.state != 'ranging':
+        self._logger.debug("Pin is type: {}".format(type(self._enable_pin)))
+        if self.state != cobrabay.const.SENSTATE_RANGING:
             return cobrabay.const.SENSTATE_NOTRANGING
         start = monotonic_ns()
         # Check the interrupt to see if the sensor has new data.

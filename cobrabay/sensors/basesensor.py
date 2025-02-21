@@ -81,7 +81,7 @@ class BaseSensor:
 
     @property
     def state(self):
-        """Current state of the sensor."""
+        """Current operating state of the sensor. What *is*, regardless of what has been requested."""
         raise NotImplementedError("State should be overridden by specific sensor class.")
 
     @property

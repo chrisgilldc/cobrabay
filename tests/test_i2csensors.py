@@ -121,17 +121,17 @@ def test_state_disabled(new_cbvl53l1x):
 @pytest.mark.vl53l1x
 def test_state_ranging(new_cbvl53l1x):
     """ Make sure the sensor returns a SensorReading"""
-    sensor = new_cbvl53l1x
-    sensor.status = cobrabay.const.SENSTATE_RANGING
-    reading = sensor.reading()
+    sensor1 = new_cbvl53l1x("sensor1", 0x31, 1)
+    sensor1.status = cobrabay.const.SENSTATE_RANGING
+    reading = sensor1.reading()
     assert isinstance(reading, cobrabay.datatypes.SensorReading)
 
 @pytest.mark.i2c
 @pytest.mark.vl53l1x
 def test_state_ranging_notranging(new_cbvl53l1x):
     """ A sensor in any state other than ranging should return the 'not_ranging' string as its reading."""
-    sensor = new_cbvl53l1x
-    reading = sensor.reading()
+    sensor1 = new_cbvl53l1x("sensor1", 0x31, 1)
+    reading = sensor1.reading()
     assert reading == cobrabay.const.SENSTATE_NOTRANGING
 
 ### VL53L1X Sensor in full array.
