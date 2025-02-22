@@ -587,14 +587,17 @@ class CBBay:
 
         # If we haven't returned yet, we can calculate.
         i = 1
-        while i <= len(self._cbcore.sensor_log):
+        while i < len(self._cbcore.sensor_log):
             # Find the element in the log where the selected range sense returned a Quantity, and is either
             # 250ms (0.25s) ago OR is the last reading (good enough)
             self._logger.debug("Bay: Sensor log has {} elements".format(len(self._cbcore.sensor_log)))
             self._logger.debug("Bay: Will try log element {}".format(i))
-            if ((((self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(np_int32)
-                  >= 250000000) or i == len(self._cbcore.sensor_log))
-                    and type(self._cbcore.sensor_log[i].sensors[self._selected_range].range) is Quantity):
+            if ((
+                ((self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(np_int32) >= 250000000)
+                or
+                i == len(self._cbcore.sensor_log)
+                ) and
+                    type(self._cbcore.sensor_log[i].sensors[self._selected_range].range) is Quantity):
                 self._logger.debug("Vector - Comparing to reading {}".format(i))
                 # TODO: Account for a dead zone so tiny changes don't result in a motion.
                 # FIXME: Returns unknown sometimes, don't know why.

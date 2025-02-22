@@ -113,7 +113,15 @@ class CBVL53L1X(I2CSensor):
         self._logger.debug("Range requested. Sensor state is: {}".format(self.state))
         self._logger.debug("Pin is type: {}".format(type(self._enable_pin)))
         if self.state != cobrabay.const.SENSTATE_RANGING:
-            return cobrabay.const.SENSTATE_NOTRANGING
+            return cobrabay.datatypes.SensorReading(
+                state=self.state,
+                status=self.status,
+                fault=self._fault,
+                response_type=cobrabay.const.SENSOR_RESP_NOTOK,
+                range=None,
+                temp=None,
+                fault_reason=None
+            )
         start = monotonic_ns()
         # Check the interrupt to see if the sensor has new data.
         while not self._sensor_obj.data_ready:

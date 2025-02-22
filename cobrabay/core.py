@@ -9,6 +9,7 @@ import signal
 import logging
 from logging.handlers import WatchedFileHandler
 from pprint import pformat
+
 import cobrabay
 
 class CBCore:
@@ -241,7 +242,7 @@ class CBCore:
         for sensor_id in self.sensor_log[0].sensors:
             # Don't update when waiting for an interrupt.
             if self.sensor_log[0].sensors[sensor_id].response_type == cobrabay.const.SENSOR_RESP_INR:
-                self._logger.debug("Sensor '{}' is waiting for interrupt. Keeping previous latest value.")
+                self._logger.debug("Sensor '{}' is waiting for interrupt. Keeping previous latest value.".format(sensor_id))
             else:
                 self._sensor_latest_data[sensor_id] = self.sensor_log[0].sensors[sensor_id]
                 self._logger.debug("Adding to sensor data as latest. Latest data now has: {}".format(
@@ -344,7 +345,7 @@ class CBCore:
         Sets up POSIX signal handlers.
         :return:
         """
-        print("Registering signal handlers.")
+        self._logger.info("Registering signal handlers.")
         # Reload configuration.
         # signal.signal(signal.SIGHUP, self._reload_config)
         # Terminate cleanly.
@@ -424,7 +425,10 @@ class CBCore:
         self._network.register_sensormgr(self._sensormgr)
         # Activate the sensors.
         #TODO: Convert to using the command queue to be threading safe.
-        self._sensormgr.set_sensor_state(target_state=cobrabay.const.SENSTATE_RANGING)
+        self._q_cbsmcontrol.put(
+            (cobrabay.const.SENSTATE_RANGING,None)
+        )
+        #self._sensormgr.set_sensor_state(target_state=cobrabay.const.SENSTATE_RANGING)
         # Loop once and get initial latest data.
         #TODO: Add config option for threading vs. not and make conditional.
         self._sensormgr.loop()
@@ -554,7 +558,7 @@ class CBCore:
         """Catch incoming signals and perform the correct actions.
 
         :param signalNumber: Signal Number
-        :param frame: Frame
+        :param frame: F
         :return:
         """
 

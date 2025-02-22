@@ -48,7 +48,7 @@ def new_cbvl53l1x():
     created_objects = []
     # Statically define the I2C bus and the AW9523.
     i2c = busio.I2C(board.SCL, board.SDA)
-    aw = AW9523(i2c, 0x58)
+    aw = AW9523(i2c, 0x59)
     # Reset all pins to be false. Initialization of the AW9523 can be wonky and depend on the address.
     cobrabay.util.aw9523_reset(aw)
 
@@ -67,22 +67,6 @@ def new_cbvl53l1x():
     for object in created_objects:
         del(object)
 
-
-# @pytest.fixture
-# def new_cbvl53l1x():
-#     """ Fixture used to get a new CBVL53L1X instance """
-#     i2c = busio.I2C(board.SCL, board.SDA)
-#     aw = AW9523(i2c, 0x58)
-#     # Reset all pins to be false. Initialization of the AW9523 can be wonky and depend on the address.
-#     cobrabay.util.aw9523_reset(aw)
-#     CBVL53L1X_Instance = CBVL53L1X(
-#         name="vl53l1x_test",
-#         i2c_address=0x61,
-#         enable_board=aw,
-#         enable_pin=1,
-#         i2c_bus=i2c)
-#     return CBVL53L1X_Instance
-#
 @pytest.mark.i2c
 @pytest.mark.vl53l1x
 def test_single_state_after_init(new_cbvl53l1x):
@@ -133,6 +117,18 @@ def test_state_ranging_notranging(new_cbvl53l1x):
     sensor1 = new_cbvl53l1x("sensor1", 0x31, 1)
     reading = sensor1.reading()
     assert reading == cobrabay.const.SENSTATE_NOTRANGING
+
+@pytest.mark.i2c
+@pytest.mark.vl53l1x
+@pytest.mark.hwstress
+def test_state_stress(new_cbvl53l1x):
+    """ A sensor in any state other than ranging should return the 'not_ranging' string as its reading."""
+    sensor1 = new_cbvl53l1x("sensor1", 0x31, 1)
+    result_array = []
+    while len(result_array) < 100:
+        result_array.append(sensor1.state)
+
+    assert len(result_array) == 100
 
 ### VL53L1X Sensor in full array.
 @pytest.mark.i2c

@@ -148,23 +148,24 @@ class CBSensorMgr:
         Check the status of sensors.
         :return:
         """
-        # Check for commands in the command queue.
+        self._logger.debug("Beginning action loop.")
 
+        # Check for commands in the command queue.
         while not self._q_cbsmcontrol.empty():
+            self._logger.debug("Processing commands in queue...")
             # Get the command from the queue.
             try:
                 command = self._q_cbsmcontrol.get_nowait()
             except queue.Empty:
+                self._logger.warning("Command disappeared before it could be fetched.")
                 continue
             try:
+                self._logger.debug("Setting state based on command '{}'".format(command))
                 self.set_sensor_state(target_state=command[0], target_sensor=command[1])
             except BaseException as e:
                 self._logger.error("Could not process command '{}".format(command))
                 self._logger.exception(e)
             self._q_cbsmcontrol.task_done()
-
-        # If data is still in the queue from the previous loop, junk it.
-        self._logger.debug("Beginning sensor scan loop.")
 
         # Flush the Data and Status queues.
         self._flush_queue(self._q_cbsmdata)
@@ -286,6 +287,8 @@ class CBSensorMgr:
             for sensor in self._sensors:
                 if target_sensor is None or sensor == target_sensor:
                     self._logger.debug("Sensor is of type: {}".format(type(self._sensors[sensor])))
+                    if isinstance(self._sensors[sensor], str):
+                        self._logger.debug("Sensor is actually string: '{}'".format(self._sensors[sensor]))
                     if self._sensors[sensor] == cobrabay.const.SENSTATE_FAULT:
                         self._logger.warning("Cannot set state of sensor '{}' before it is initialized.".
                                              format(target_sensor))
@@ -328,6 +331,7 @@ class CBSensorMgr:
 
     def _create_sensor_single(self, sensor_config):
         if sensor_config['hw_type'] == 'TFMini':
+            self._logger.info("Creating TFMini '{}' sensor...".format(sensor_config['name']))
             # Create the sensor object.
             try:
                 sensor_obj = cobrabay.sensors.TFMini(
@@ -343,6 +347,7 @@ class CBSensorMgr:
             else:
                 return sensor_obj
         elif sensor_config['hw_type'] == 'VL53L1X':
+            self._logger.info("Creating VL53L1X '{}' sensor...".format(sensor_config['name']))
             if self._i2c_bus is None:
                 raise ValueError("Using I2C Sensor without I2C bus defined!")
             if self._i2c_available is False:
