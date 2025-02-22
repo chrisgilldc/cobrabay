@@ -116,6 +116,7 @@ class CBSensorMgr:
                         self._ioexpanders[str(addr)] = AW9523(self._i2c_bus, addr, reset=True)
                         self._logger.info("Resetting all outputs on board...")
                         self._reset_aw9523(self._ioexpanders[str(addr)])
+                        self._logger.info("Devices on I2C Bus: {}".format(self._i2c_bus.scan()))
                 else:
                     self._logger.warning("Skipping IO expander setup, I2C bus is not available.")
 
