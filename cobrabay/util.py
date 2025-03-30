@@ -156,8 +156,6 @@ def aw9523_status(aw9523_obj, summarize=True):
         output_string = "Active: {}\tInactive:{}\n\t".format(active, inactive) + output_string
     return output_string
 
-
-
 def scan_i2c():
     """
     Scan the I2C Bus.
@@ -171,6 +169,21 @@ def scan_i2c():
     sleep(2)
     i2c.unlock()
     return found_addresses
+
+def typeconv(payload, tgt_type):
+    """ Convert a string to another type based on target name. Is there a built-in for this? IDK. """
+    if not isinstance(payload, str):
+        raise TypeError("Payload must be a string.")
+    else:
+        if tgt_type == 'int':
+            return int(payload)
+        elif tgt_type == 'float':
+            return float(payload)
+        elif tgt_type == 'str':
+            # This is silly, but support it.
+            return payload
+        else:
+            raise ValueError("Target type '{}' not supported.".format(tgt_type))
 
 
 def default_logger(name, parent_logger=None, log_level="WARNING"):

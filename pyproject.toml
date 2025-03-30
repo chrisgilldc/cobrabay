@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 requires-python = ">=3.11"
 name = "Cobrabay"
-version = "0.4.2a0"
+version = "0.4.2a5"
 description = "Cobrabay Parking Guidance System"
 authors = [{name="Chris Gill", email="chris@chrisgill.net"}]
 readme = "README.md"
@@ -34,7 +34,8 @@ dependencies = [
     "rpi-bad-power~=0.1.0",
     "smbus2~=0.5.0",
     # Replace once published
-    "rgbmatrix@git+https://github.com/chrisgilldc/rpi-rgb-led-matrix"
+    "rgbmatrix@git+https://github.com/chrisgilldc/rpi-rgb-led-matrix",
+    "rgbmultitool@git+https://github.com/chrisgilldc/rgbmultitool"
 ]
 
 [project.urls]
@@ -48,4 +49,4 @@ test = [
 ]
 
 [project.scripts]
-cobrabay = "cobrabay.cli:cbcli"
+cobrabay = "cobrabay.tools.cli:cbcli"

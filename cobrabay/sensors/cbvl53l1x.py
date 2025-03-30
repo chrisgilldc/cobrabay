@@ -117,7 +117,7 @@ class CBVL53L1X(I2CSensor):
                 state=self.state,
                 status=self.status,
                 fault=self._fault,
-                response_type=cobrabay.const.SENSOR_RESP_NOTOK,
+                response_type=cobrabay.const.SENSOR_RESP_NOTRANGING,
                 range=None,
                 temp=None,
                 fault_reason=None
@@ -153,7 +153,7 @@ class CBVL53L1X(I2CSensor):
             if sensor_response is None:
                 # The Adafruit VL53L1X wraps up all invalid statuses with a 'None' return. See
                 # https://github.com/adafruit/Adafruit_CircuitPython_VL53L1X/pull/8 for details.
-                response_type=cobrabay.const.SENSOR_RESP_NOTOK
+                response_type=cobrabay.const.SENSOR_RESP_NOTRANGING
                 range = None
                 fault_reason = None
             # Check for minimum and maximum ranges.

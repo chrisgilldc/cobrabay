@@ -4,7 +4,6 @@ Cobra Bay Config Schemas
 
 from pathlib import Path
 import importlib
-import pint
 
 SCHEMA_SENSOR_COMMON = {
     'name': {'type': 'string'},
@@ -24,7 +23,7 @@ SCHEMA_SENSOR_VL53L1X = {**SCHEMA_SENSOR_COMMON,
     'enable_board': {'type': 'integer', 'required': True},
     'enable_pin': {'type': 'integer', 'required': True},
     'distance_mode': {'type': 'string', 'allowed': ['long', 'short'], 'default': 'long'},
-    #TODO: Fix type coersion.
+    #TODO: Fix type coercion.
     # Ideally this would get coerced to pint_ms, but this raises complications because of the subvalidation.
     'timing': {'type': 'string', 'default': '200ms'}
 }
@@ -60,13 +59,27 @@ CB_CORE = {
                            'schema': {
                                'discover': {'type': 'boolean', 'default': True},
                                'pdsend': {'type': 'integer', 'default': 15},
-                               'base': {'type': 'string', 'default': 'homeassistant'}
+                               'base': {'type': 'string', 'default': 'homeassistant'},
+                               'suggested_area': {'type': 'string', 'default': 'Garage'}
                            },
                            'default': {
                                'discover': True,
                                'pdsend': 15,
-                               'base': 'homeassistant'
+                               'base': 'homeassistant',
+                               'suggested_area': 'Garage'
                            }
+                    },
+                    'subscribe': {
+                        'type': 'list',
+                        'required': False,
+                        'schema': {
+                            'type': 'dict',
+                            'schema': {
+                                'id': {'type': 'string', 'required': True},
+                                'topic': {'type': 'string', 'required': True},
+                                'type': {'type': 'string', 'default': 'str'}
+                            }
+                        }
                     },
                     'chattiness': {'type': 'dict',
                                    'schema': {
@@ -165,7 +178,20 @@ CB_CORE = {
                              importlib.resources.files('cobrabay.data').joinpath('OpenSans-Light.ttf'))},
             'font_size_clock': {'type': 'integer'},
             'font_size_range': {'type': 'integer'},
-            'strobe_speed': {'type': 'quantity', 'coerce': 'pint_seconds'}
+            'strobe_speed': {'type': 'quantity', 'coerce': 'pint_seconds'},
+            'icons': {
+                'type': 'dict',
+                'required': True,
+                'schema': {
+                    'network': {'type': 'boolean', 'default': True},
+                    'ev-battery': {'type': 'boolean', 'default': False},
+                    'ev-plug': {'type': 'boolean', 'default': False},
+                    'garage-door': {'type': 'boolean', 'default': False},
+                    'sensors': {'type': 'boolean', 'default': False},
+                    'mini-vehicle': {'type': 'boolean', 'default': False}
+                },
+                'default': {'network': True,'ev-battery': False, 'ev-plug': False, 'garage-door': False, 'sensors': True, 'mini-vehicle': False}
+            }
             # 'mqtt_image': {'type': 'boolean', 'default': True},
             # 'mqtt_update_interval': {'type': 'quantity', 'coerce': 'pint_seconds', 'default': '5s'}
         }

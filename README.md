@@ -10,7 +10,7 @@ just the right way.
 It has also been the primary way I have taught myself python and electronics, so there is likely a lot that can be 
 optimized, done better or redesigned here. Constructive feedback welcome!
 
-Current development version: 0.4.2a1
+Current development version: 0.4.2a3
 
 ---
 * [Building](docs/HARDWARE.md) - How to put together the hardware
@@ -56,6 +56,7 @@ Current development version: 0.4.2a1
 * Display
   * Replace strober with progress bar 
   * Micro-car graphic
+  * Sensor status graphic
   * Alternatives to clock, possibly divide the display.
 * Multiple bay support (is this needed? IDK.)
 * Documentation

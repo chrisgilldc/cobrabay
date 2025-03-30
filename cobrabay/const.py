@@ -21,6 +21,12 @@ BAYCMD_DOCK = 'dock'
 BAYCMD_UNDOCK = 'undock'
 BAYCMD_ABORT = 'abort'
 
+## MQTT State
+MQTT_DISCONNECTED = 0
+MQTT_CONNECTED = 1
+MQTT_CONNECTING = 2
+MQTT_DISCONNECTED_PLANNED = 3
+
 ## System States
 SYSSTATE_READY = 'ready'
 SYSSTATE_DOCKING = 'docking'
@@ -36,7 +42,7 @@ SENSTATE_NOTRANGING = 'not_ranging'
 
 # Sensor response types.
 SENSOR_RESP_OK = 'ok'
-SENSOR_RESP_NOTOK = 'not_ok'
+SENSOR_RESP_NOTRANGING = 'not_ranging'
 SENSOR_RESP_INR = 'inr'  ## Interrupt Not Ready. IE: sensor wasn't ready to read.
 SENSOR_RESP_WEAK = 'weak'
 SENSOR_RESP_STRONG = 'strong'

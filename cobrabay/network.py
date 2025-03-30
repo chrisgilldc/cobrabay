@@ -32,6 +32,7 @@ class CBNetwork:
                  password,
                  base,
                  cbcore,
+                 subscribe,
                  ha=None,
                  chattiness=None,
                  log_level="WARNING",
@@ -39,16 +40,25 @@ class CBNetwork:
         """
 
         :param unit_system: Unit system for sending messages. May be 'metric' or 'imperial'.
-        :param unit_system: str
-        :param system_name:
-        :param interface:
+        :type unit_system: str
+        :param system_name: System name .
+        :type system_name: str
+        :param interface: Interface to monitor for connectivity.
+        :type interface: str
         :param broker: IP or hostname of the MQTT broker.
         :param port: Port of the MQTT broker. Defaults to 1883.
-        :param username:
-        :param password:
-        :param cbcore:
-        :param ha_discover:
-        :param accept_commands:
+        :param username: MQTT Username
+        :type username: str
+        :param password: MQTT Password
+        :type password: str
+        :param cbcore: Reference to the core module.
+        :type cbcore: cobrabay.CBCore
+        :param subscribe: Topics to subscribe to.
+        :type subscribe: list
+        :param ha: Home Assistant settings
+        :type ha: dict
+        :param chattiness: Chattiness settings.
+        :type chattiness: dict
         :param log_level:
         :param mqtt_log_level:
         """
@@ -76,6 +86,7 @@ class CBNetwork:
                 self._logger.info("Sensors always send enabled! Prepare to be deluged!")
         # Interface to use.
         self._interface = interface
+        self._logger.info("Monitoring interface: '{}'".format(self._interface))
         self._mqtt_broker = broker
         self._mqtt_port = port
         self._mqtt_username = username
@@ -94,6 +105,9 @@ class CBNetwork:
         self._display_obj = None
         # Reference to the Hardware Monitor
         self._pistatus = None
+        # subscriptions
+        self._subscriptions = subscribe
+        self._logger.debug("Saved subscriptions: {}".format(self._subscriptions))
 
         # Create a sublogger for the MQTT client.
         self._logger_mqtt = logging.getLogger("cobrabay").getChild("MQTT")
@@ -109,8 +123,8 @@ class CBNetwork:
         self._cv = Convertomatic(self._unit_system)
 
         # Initialize variables
-        self._reconnect_timestamp = None
-        self._mqtt_connected = False
+        self._connect_timestamp = None
+        self._mqtt_connected = cobrabay.const.MQTT_DISCONNECTED
         self._discovery_log = {'system': False, 'sensors': False}
         self._pistatus_timestamp = 0
 
@@ -136,7 +150,7 @@ class CBNetwork:
         self._device_info = dict(
             name=self._system_name,
             identifiers=[self._client_id],
-            suggested_area='Garage',
+            suggested_area=self._ha_settings['suggested_area'],
             manufacturer='ConHugeCo',
             model='Cobra Bay Parking System',
             sw_version=str(__version__)
@@ -146,7 +160,7 @@ class CBNetwork:
 
         # Create the MQTT Client.
         self._mqtt_client = Client(
-            client_id=""
+            client_id=self._client_id
         )
         self._mqtt_client.username_pw_set(
             username=self._mqtt_username,
@@ -225,28 +239,54 @@ class CBNetwork:
 
     def _on_connect(self, userdata, flags, rc, properties=None):
         self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
-        self._mqtt_connected = True
+        # Set connection status to connected.
+        self._mqtt_connected = cobrabay.const.MQTT_CONNECTED
+        # Update the core's net_data.
+        # If MQTT is up, Interface must also be up.
+        self._cbcore.set_net_data('interface', True)
+        self._cbcore.set_net_data('mqtt', True)
+        # Send the online message.
+        self._send_online()
         # Subscribe to the Home Assistant status topic.
         self._mqtt_client.subscribe(f"{self._ha_settings['base']}/status")
         # Connect to all trigger topic callbacks.
         for trigger_id in self._trigger_registry.keys():
             self._trigger_subscribe(trigger_id)
-        # Attach the fallback message trapper.
+        # Connect to general purpose subscriptions
+        for subscription in self._subscriptions:
+            self._logger.info("Subscribing to {}:{}".format(subscription['id'],subscription['topic']))
+            self._mqtt_client.subscribe(subscription['topic'])
+        # Attach the general message callback
         self._mqtt_client.on_message = self._on_message
         # Run Home Assistant Discovery
         self._ha_discovery()
 
     def _on_disconnect(self, client, userdata, rc):
         if rc != 0:
-            self._logger.warning("Unexpected disconnect with code: {}".format(rc))
+            self._logger.warning("Unexpected disconnect with reason - '{}' ({})".format(rc.name, rc))
+            self._mqtt_connected = cobrabay.const.MQTT_DISCONNECTED
+        else:
+            self._mqtt_connected = cobrabay.const.MQTT_DISCONNECTED_PLANNED
+            # Send an HA Offline message. The will should handle this too, but let's be clean.
+            self._send_offline()
         self._reconnect_timer = time.monotonic()
-        self._mqtt_connected = False
+        self._mqtt_client.loop_stop()
 
-    # Catchall for MQTT messages. Don't act, just log.
     def _on_message(self, client, user, message):
-        self._logger.debug("Received message on topic {} with payload {}. No other handler, no action.".format(
-            message.topic, message.payload
-        ))
+        """ Catch-all callback for subscriptions."""
+
+        matching_subs = list(filter(lambda sub: sub['topic'] == message.topic, self._subscriptions))
+        if len(matching_subs) == 0:
+            self._logger.info("Received message on topic {} with payload {}. No other handler, no action.".format(
+                message.topic, message.payload
+            ))
+        elif len(matching_subs) > 1:
+            self._logger.info("Topic '{}' appears to have multiple items configured. This isn't allowed.".format(message.topic))
+        else:
+            # Convert to the configured type.
+            payload = cobrabay.util.typeconv(message.payload.decode("utf-8"), matching_subs[0]['type'])
+            # Call the method on the Core to update the net_data dict.
+            self._cbcore.set_net_data(matching_subs[0]['id'], payload)
 
     def _on_hastatus(self, client, user, message):
         """Act appropriate based on changes in Home Assistant status"""
@@ -257,8 +297,7 @@ class CBNetwork:
             # Reset the topic history.
             self._topic_history = {}
             # Retrigger discovery.
-
-
+            self._ha_discovery()
         else:
             self._logger.warning("Unknown Home Assistant status message '{message}'")
 
@@ -349,42 +388,42 @@ class CBNetwork:
     # Method to be polled by the main run loop.
     # Main loop passes in the current state of the bay.
     def poll(self, status=None):
-        # Set up the return data.
-        return_data = {
-            'online': self._iface_up(),  # Is the interface up.
-            'mqtt_status': self._mqtt_client.is_connected(),  # Are we connected to MQTT.
-            'commands': {}
-        }
-
-        # If interface isn't up, not much to do, return immediately.
+        """
+        Main network polling loop.
+        """
         if not self._iface_up():
-            return return_data
+            # If interface isn't up, not much to do. Set statuses for interface to MQTT to false.
+            self._logger.warning("Interface '{}' down.".format(self._interface))
+            self._cbcore.set_net_data('interface',False)
+            self._cbcore.set_net_data('mqtt',False)
+            return
+        else:
+            # Set interface to up.
+            self._cbcore.set_net_data('interface', True)
 
-        # If interface is up but broker is not connected, retry every 30s. This doesn't wait so that we can return data
-        # to the main loop and let other tasks get handled. Proper docking/undocking shouldn't depend on the network so
-        # we don't want to block for it.
-        if not self._mqtt_connected:
+        if self._mqtt_connected == cobrabay.const.MQTT_DISCONNECTED:
+            # If interface is up but broker is not connected, retry every 30s.
             try_reconnect = False
             # Has is been 30s since the previous attempt?
-            try:
-                if time.monotonic() - self._reconnect_timestamp > 30:
-                    self._logger.info("30s since previous connection attempt. Retrying...")
-                    try_reconnect = True
-                    self._reconnect_timestamp = time.monotonic()
-            except TypeError:
-                try_reconnect = True
-                self._reconnect_timestamp = time.monotonic()
+            if self._connect_timestamp is None:
+                self._logger.info("Making initial MQTT connection attempt...")
+                self._connect_mqtt()
+            elif time.monotonic() - self._connect_timestamp > 30:
+                self._logger.info("30s since previous MQTT connection attempt. Retrying...")
+                self._connect_mqtt()
+            # Set the mqtt status to false.
+            self._cbcore.set_net_data('interface', False)
+            return
 
-            if try_reconnect:
-                reconnect = self._connect_mqtt()
-                # If we failed to reconnect, mark it as failure and return.
-                if not reconnect:
-                    self._logger.warning("Could not connect to MQTT server. Will retry in 30s.")
-                    return return_data
+        if self._mqtt_connected == cobrabay.const.MQTT_CONNECTING:
+            # Connecting may no longer be needed since MQTT is using a separate thread.
+            wait_time = time.monotonic() - self._connect_timestamp
+            self._logger.info("Awaiting connection acknowledgement from broker for {}s".format(wait_time))
+            return
 
         # Network/MQTT is up, proceed.
-        if self._mqtt_connected:
-            # Send all the messages outbound.
+        if self._mqtt_connected == cobrabay.const.MQTT_CONNECTED:
+            # Determine if we should force outbound messages to be sent.
             # For the first 15s after HA discovery, send everything. This makes sure data arrives after HA has
             # established entities.
             if self._ha_info['override'] and self._ha_settings['discover']:
@@ -403,17 +442,20 @@ class CBNetwork:
             for message in self._mqtt_messages(force_repeat=force_repeat):
                 # self._logger_mqtt.debug("Publishing MQTT message: {}".format(message))
                 self._pub_message(**message)
-            # Check for any incoming commands.
-            self._mqtt_client.loop()
+            # Check the MQTT Client.
+            rc = self._mqtt_client.loop()
+            if rc:
+               self._logger.warning("MQTT client received error: {}".format(rc))
 
-        # Add the upward commands to the return data.
-        return_data['commands'] = self._upward_commands
-        # Remove the upward commands that are being forwarded.
-        self._upward_commands = []
-        return return_data
+        # # Add the upward commands to the return data.
+        # return_data['commands'] = self._upward_commands
+        # # Remove the upward commands that are being forwarded.
+        # self._upward_commands = []
+        return
 
     # Check the status of the network interface.
     def _iface_up(self):
+        """ Check if the designated interface is up. """
         # Pull out stats for our interface.
         stats = psutil.net_if_stats()[self._interface]
         return stats.isup
@@ -424,6 +466,8 @@ class CBNetwork:
         # will fail to catch errors on the broker side like "unauthorized".
         # See: https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html#paho.mqtt.client.Client.connect
 
+        self._logger.info("Establishing MQTT Broker connection...")
+        self._logger.debug("Broker: {}\tClient ID: {}\tUsername: {}".format(self._mqtt_broker, self._client_id, self._mqtt_username))
 
         # Set the last will prior to connecting.
         self._logger.info("Creating last will.")
@@ -439,14 +483,17 @@ class CBNetwork:
             return False
 
         # Send a discovery message and an online notification.
-        if self._ha_settings['discover']:
-            self._ha_discovery()
-            # Reset the topic history so any newly discovered entities get sent to.
-            self._topic_history = {}
-        self._send_online()
-        # Set the internal MQTT tracker to True. Surprisingly, the client doesn't have a way to track this itself!
-        self._mqtt_connected = True
-        return True
+        # if self._ha_settings['discover']:
+        #     self._ha_discovery()
+        #     # Reset the topic history so any newly discovered entities get sent to.
+        #     self._topic_history = {}
+
+        # Set the internal tracker to CONNECTING. We don't actually mark this as connected until we get the callback.
+        self._mqtt_connected = cobrabay.const.MQTT_CONNECTING
+        # Set the connect timestamp.
+        self._connect_timestamp = time.monotonic()
+        # Start the client thread.
+        self._mqtt_client.loop_start()
 
     def connect(self):
         """
@@ -473,7 +520,7 @@ class CBNetwork:
         # Disconnect from broker
         self._mqtt_client.disconnect()
         # Set the internal tracker to disconnected.
-        self._mqtt_connected = False
+        self._mqtt_connected = cobrabay.const.MQTT_DISCONNECTED_PLANNED
 
     @property
     def display(self):
@@ -857,7 +904,7 @@ class CBNetwork:
         #     format(entity_type, self._client_id, discovery_dict['object_id'])
         discovery_topic = (f"{self._ha_settings['base']}/{entity_type}/cobrabay_{self._client_id}/"
                            f"{discovery_dict['object_id']}/config")
-        self._logger.info("Publishing HA discovery to topic '{}'\n\t{}".format(discovery_topic, discovery_json))
+        self._logger.debug("Publishing HA discovery to topic '{}'\n\t{}".format(discovery_topic, discovery_json))
         # All discovery messages should be retained.
         self._mqtt_client.publish(topic=discovery_topic, payload=discovery_json, retain=True)
         # Remove this topic from the topic history if it exists.

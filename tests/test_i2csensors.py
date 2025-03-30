@@ -12,13 +12,15 @@ import cobrabay.datatypes
 import cobrabay.util
 from adafruit_aw9523 import AW9523
 
+aw_addr = 0x59
+
 ### Basic tests for the AW9523. If these fail, don't expect anything else to work.
 @pytest.mark.i2c
 @pytest.mark.aw9523
 def test_aw9523_init():
     """ Can we initialize the AW9523 """
     i2c = busio.I2C(board.SCL, board.SDA)
-    aw = AW9523(i2c)
+    aw = AW9523(i2c, aw_addr)
     assert isinstance(aw, adafruit_aw9523.AW9523)
 
 @pytest.mark.i2c
@@ -27,14 +29,14 @@ def test_aw9523_badaddr():
     """ Do we get an exception with an incorrect address """
     i2c = busio.I2C(board.SCL, board.SDA)
     with pytest.raises(ValueError):
-        aw = AW9523(i2c, 0x59)
+        aw = AW9523(i2c, aw_addr + 1)
 
 @pytest.mark.i2c
 @pytest.mark.aw9523
 def test_aw9523_pinsoff():
     """ Test the process to be sure all pins are off. That should leave only one device on the bus. """
     i2c = busio.I2C(board.SCL, board.SDA)
-    aw = AW9523(i2c)
+    aw = AW9523(i2c, aw_addr)
     cobrabay.util.aw9523_reset(aw)
     active_bus_devices = cobrabay.util.scan_i2c()
     assert len(active_bus_devices) == 1
@@ -48,7 +50,7 @@ def new_cbvl53l1x():
     created_objects = []
     # Statically define the I2C bus and the AW9523.
     i2c = busio.I2C(board.SCL, board.SDA)
-    aw = AW9523(i2c, 0x59)
+    aw = AW9523(i2c, aw_addr)
     # Reset all pins to be false. Initialization of the AW9523 can be wonky and depend on the address.
     cobrabay.util.aw9523_reset(aw)
 
@@ -113,10 +115,10 @@ def test_state_ranging(new_cbvl53l1x):
 @pytest.mark.i2c
 @pytest.mark.vl53l1x
 def test_state_ranging_notranging(new_cbvl53l1x):
-    """ A sensor in any state other than ranging should return the 'not_ranging' string as its reading."""
+    """ A sensor in any state other than ranging should return the 'not_ranging' string as its response_type."""
     sensor1 = new_cbvl53l1x("sensor1", 0x31, 1)
     reading = sensor1.reading()
-    assert reading == cobrabay.const.SENSTATE_NOTRANGING
+    assert reading.response_type == cobrabay.const.SENSTATE_NOTRANGING
 
 @pytest.mark.i2c
 @pytest.mark.vl53l1x
@@ -127,7 +129,6 @@ def test_state_stress(new_cbvl53l1x):
     result_array = []
     while len(result_array) < 100:
         result_array.append(sensor1.state)
-
     assert len(result_array) == 100
 
 ### VL53L1X Sensor in full array.
@@ -136,11 +137,14 @@ def test_state_stress(new_cbvl53l1x):
 @pytest.mark.vl53l1x_array
 def test_array_state_after_init(new_cbvl53l1x):
     """ Test a set of VL53L1X sensors"""
+    # sensor0 = new_cbvl53l1x("sensor0", 0x30, 0)
     sensor1 = new_cbvl53l1x("sensor1", 0x31, 1)
     sensor2 = new_cbvl53l1x("sensor2", 0x32, 2)
     sensor3 = new_cbvl53l1x("sensor3", 0x33, 3)
+    # sensor3 = new_cbvl53l1x("sensor3", 0x33, 3)
+
     enabled = 0
-    for obj in (sensor1, sensor2, sensor3):
+    for obj in (sensor3, sensor1, sensor2): # , sensor3):
         if obj.state == cobrabay.const.SENSTATE_ENABLED:
             enabled += 1
     assert enabled == 3

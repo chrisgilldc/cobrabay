@@ -568,9 +568,10 @@ class CBBay:
         # TODO: Rework vector calculation. Need to bring this inboard since detectors are gone.
         # return Vector(speed=Quantity('0kph'), direction='still')
         # Return variable for unknown movement.
+        self._logger.debug("Sensor log is: {}".format(self._cbcore.sensor_log))
         vector_unknown = Vector(timestamp=datetime64('now','ns'), speed=GEN_UNKNOWN, direction=GEN_UNKNOWN)
 
-        # Have to have at least two elements.
+        # Have to have at least two elements. If we don't, what they are doesn't matter, return right away.
         if len(self._cbcore.sensor_log) < 2:
             self._logger.debug("Vector - Not enough sensor readings to calculate vector.")
             return vector_unknown
@@ -585,22 +586,24 @@ class CBBay:
             self._logger.info("Vector - Most recent longitudinal reading over 750ms ago, can't determine vector.")
             return vector_unknown
 
+        # sensor_log_filtered = []
+        # for item in self.cb_core.sensor_log:
+        #     self._logger.debug("Filtering item: {}".format(item))
+        #     if item.response_type == SENSOR_RESP_OK:
+        #         sensor_log_filtered.append(item)
+
         # If we haven't returned yet, we can calculate.
         i = 1
         while i < len(self._cbcore.sensor_log):
             # Find the element in the log where the selected range sense returned a Quantity, and is either
             # 250ms (0.25s) ago OR is the last reading (good enough)
             self._logger.debug("Bay: Sensor log has {} elements".format(len(self._cbcore.sensor_log)))
-            self._logger.debug("Bay: Will try log element {}".format(i))
-            if ((
-                ((self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(np_int32) >= 250000000)
-                or
-                i == len(self._cbcore.sensor_log)
-                ) and
-                    type(self._cbcore.sensor_log[i].sensors[self._selected_range].range) is Quantity):
-                self._logger.debug("Vector - Comparing to reading {}".format(i))
-                # TODO: Account for a dead zone so tiny changes don't result in a motion.
-                # FIXME: Returns unknown sometimes, don't know why.
+            self._logger.debug("Bay: Will try log element {} - {}".format(i, self._cbcore.sensor_log[i]))
+            if self._selected_range not in self._cbcore.sensor_log[i].sensors:
+                self._logger.debug("Bay: Selected range not in this sensor response. Skipping.")
+                break
+            elif self._cbcore.sensor_log[i].sensors[self._selected_range].response_type == SENSOR_RESP_OK:
+                #TODO: Update to find the first element that isn't none and then work from there.
                 spread_time = (self._cbcore.sensor_log[0].timestamp - self._cbcore.sensor_log[i].timestamp).astype(
                     np_int32)
                 self._logger.debug("Vector - Sensor reading time spread is {}".format(spread_time))
@@ -633,8 +636,11 @@ class CBBay:
                 speed = speed.to("kph")
                 self._logger.debug("Vector - Converted speed '{}'".format(speed))
                 return Vector(timestamp=datetime64('now', 'ns'), speed=speed, direction=direction)
+            else:
+                self._logger.debug("Bay: Sensor response is not usable. Skipping.")
             # Increment
             i += 1
+        return vector_unknown
 
     ## Private Methods
 
