@@ -112,8 +112,23 @@ class CBSensorMgr:
                 # If resetting hits an error, it will set the _i2c_available to false and we skip this setup.
                 if self._i2c_available:
                     for addr in self._scan_aw9523s():
+                        aw_tries = 1
                         self._logger.info("Configuring AW9523 at address '{}'".format(hex(addr)))
-                        self._ioexpanders[str(addr)] = AW9523(self._i2c_bus, addr, reset=True)
+                        while True:
+                            try:
+                                self._ioexpanders[str(addr)] = AW9523(self._i2c_bus, addr, reset=True)
+                            except OSError as e:
+                                if aw_tries > 3:
+                                    self._logger.critical("AW9523 at address '{}' could not be initialized after '{}' "
+                                                          "attempts.".format(hex(addr), aw_tries))
+                                    raise e
+                                else:
+                                    self._logger.warning("AW9523 at address '{}' did not initialize on attempt '{}'. Will "
+                                                         "try again.".format(hex(addr), aw_tries))
+                                    aw_tries += 1
+                            else:
+                                self._logger.info("AW9523 initialization successful.")
+                                break
                         self._logger.info("Resetting all outputs on board...")
                         self._reset_aw9523(self._ioexpanders[str(addr)])
                         self._logger.info("Devices on I2C Bus: {}".format(self._i2c_bus.scan()))
@@ -131,8 +146,11 @@ class CBSensorMgr:
         # Disable all sensors when shutting down.
         self._logger.debug("Disabling all sensors before deletion.")
         for sensor_id in self._sensors:
-            self._logger.debug("Disabling '{}'".format(sensor_id))
-            self._sensors[sensor_id].status = SENSTATE_DISABLED
+            #TODO: Replace this hack. This is working around errors that come from sensors which don't initalize at
+            # startup become None. They should be some type of dummy sensor.
+            if isinstance(self._sensors[sensor_id],cobrabay.sensors.BaseSensor):
+                self._logger.debug("Disabling '{}'".format(sensor_id))
+                self._sensors[sensor_id].status = SENSTATE_DISABLED
 
     # Public Methods
     def get_sensor(self, sensor_id):
