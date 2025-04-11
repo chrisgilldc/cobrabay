@@ -7,6 +7,7 @@ import queue
 import sys
 import signal
 import logging
+import time
 from logging.handlers import WatchedFileHandler
 from pprint import pformat
 
@@ -31,6 +32,13 @@ class CBCore:
         self._sensor_latest_data = {}
         self.sensor_log = []
         self._sensormgr = None
+        # Network data dict. This collects data from subscriptions as well as interface and MQTT status.
+        # At start, we assume interface is down, and MQTT by definition can't be connected.
+        self._net_data = {
+            'interface': (time.monotonic(), False),
+            'mqtt': (time.monotonic(), False)
+        }
+
         self._triggers = None
         self._exit_code = -1
 
@@ -63,6 +71,9 @@ class CBCore:
 
     # Main operating loop.
     def run(self):
+        """
+        Main operating loop.
+        """
         # Register the signal handlers.
         self._setup_signal_handlers()
         # Start the run loop.
@@ -75,11 +86,7 @@ class CBCore:
                 for bay_id in self._bays:
                     self._bays[bay_id].update()
                 # Poll the network
-                network_data = self._network_handler()
-                # Update the network components of the system state.
-                system_status = {
-                    'network': network_data['online'],
-                    'mqtt': network_data['mqtt_status']}
+                self._network.poll()
                 # Check triggers and execute actions if needed.
                 self._trigger_check()
                 # See if any of the bays checked to a motion state.
@@ -90,7 +97,7 @@ class CBCore:
                         # Go into the motion loop.
                         self._motion(bay_id)
                         break
-                self._display.show("clock", system_status=system_status)
+                self._display.show("clock")
         except BaseException as e:
             # Exit due to failure.
             self._logger.critical("Unexpected exception encountered!")
@@ -130,12 +137,22 @@ class CBCore:
         """Latest data from the sensor manager."""
         return self._sensor_latest_data
 
+    @property
+    def net_data(self):
+        """ Data from subscribed topics in the Network Module. """
+        return self._net_data
+
+    def set_net_data(self, id, payload):
+        """ Set new payload value for a subscribed topic. Wrap it in a timestamp."""
+        self._net_data[id] = (time.monotonic(), payload)
+
     # Private methods
 
     def _core_command(self, cmd):
         """ Core command handlers. Not yet implemented."""
         #TODO: Fully implement core command handler.
         self._logger.info("Core command received: {}".format(cmd))
+        self._logger.info("Core command handling not yet implemented. Nothing to do.")
 
     def _motion(self, bay_id):
         self._logger.info('Beginning {} on bay {}.'.format(self._bays[bay_id].state, bay_id))
@@ -402,6 +419,14 @@ class CBCore:
         # Register the hardware monitor with the network module.
         self._network.register_pistatus(self._pistatus)
 
+        # Add net data entries for all the icons and all the subscriptions, so we have *something*
+        # even before MQTT data is received.
+        for icon in self._active_config.display()['icons']:
+            self._net_data[icon] = (None,None)
+        for sub in self._active_config.network()['subscriptions']:
+            self._net_data[sub['id']] = (None,None)
+        self._logger.debug("Net data at startup: {}".format(self._net_data))
+
         # # Create the outbound messages queue
         self._outbound_messages = []
         # Queue the startup message.
@@ -552,7 +577,6 @@ class CBCore:
                     # is unknown, trap and ignore.
                     self._logger.error("Trigger {} has unknown type {}, cannot create.".
                                        format(trigger_id, trigger_config['type']))
-
 
     def _signal_handler(self, signalNumber=None, frame=None):
         """Catch incoming signals and perform the correct actions.
