@@ -69,7 +69,7 @@ CB_CORE = {
                                'suggested_area': 'Garage'
                            }
                     },
-                    'subscribe': {
+                    'subscriptions': {
                         'type': 'list',
                         'required': False,
                         'schema': {
@@ -158,8 +158,8 @@ CB_CORE = {
                 'type': {'type': 'string', 'required': True, 'allowed': ['mqtt_state', 'syscmd', 'baycmd']},
                 'bay': {'type': 'string', 'required': True, 'dependencies': {'type': 'mqtt_state'}},
                 'topic': {'type': 'string', 'required': True},
-                'to': {'type': 'string', 'dependencies': {'type': 'mqtt_state'}, 'excludes': 'from'},
-                'from': {'type': 'string', 'dependencies': {'type': 'mqtt_state'}, 'excludes': 'to'},
+                'payload_to': {'type': 'string', 'dependencies': {'type': 'mqtt_state'}, 'excludes': 'payload_from'},
+                'payload_from': {'type': 'string', 'dependencies': {'type': 'mqtt_state'}, 'excludes': 'payload_to'},
                 'action': {'type': 'string', 'required': True, 'allowed': ['dock', 'undock', 'occupancy']}
             },
             'empty': True

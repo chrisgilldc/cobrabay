@@ -32,7 +32,7 @@ class CBNetwork:
                  password,
                  base,
                  cbcore,
-                 subscribe,
+                 subscriptions=None,
                  ha=None,
                  chattiness=None,
                  log_level="WARNING",
@@ -53,8 +53,8 @@ class CBNetwork:
         :type password: str
         :param cbcore: Reference to the core module.
         :type cbcore: cobrabay.CBCore
-        :param subscribe: Topics to subscribe to.
-        :type subscribe: list
+        :param subscriptions: Topics to subscribe to.
+        :type subscriptions: list
         :param ha: Home Assistant settings
         :type ha: dict
         :param chattiness: Chattiness settings.
@@ -84,6 +84,8 @@ class CBNetwork:
                 self._logger.info("Raw sensor chattiness enabled!")
             if self._chattiness['sensors_always_send']:
                 self._logger.info("Sensors always send enabled! Prepare to be deluged!")
+        # Flag for when interface down has been logged.
+        self._flag_idown_logged = False
         # Interface to use.
         self._interface = interface
         self._logger.info("Monitoring interface: '{}'".format(self._interface))
@@ -106,8 +108,12 @@ class CBNetwork:
         # Reference to the Hardware Monitor
         self._pistatus = None
         # subscriptions
-        self._subscriptions = subscribe
-        self._logger.debug("Saved subscriptions: {}".format(self._subscriptions))
+        if subscriptions is None:
+            self._logger.info("No additonal subscriptions defined.")
+            self._subscriptions = []
+        else:
+            self._subscriptions = subscriptions
+            self._logger.info("Saved subscriptions: {}".format(self._subscriptions))
 
         # Create a sublogger for the MQTT client.
         self._logger_mqtt = logging.getLogger("cobrabay").getChild("MQTT")
@@ -385,44 +391,49 @@ class CBNetwork:
                                    .format(outbound_message, type(outbound_message)))
                 self._logger.exception(te)
 
-    # Method to be polled by the main run loop.
-    # Main loop passes in the current state of the bay.
     def poll(self, status=None):
         """
-        Main network polling loop.
+        Main network loop. This is called to check the status of the interface and to publish any outbound messages.
+        Any inbound messages are handled by specific callbacks.
         """
         if not self._iface_up():
             # If interface isn't up, not much to do. Set statuses for interface to MQTT to false.
-            self._logger.warning("Interface '{}' down.".format(self._interface))
+            if not self._flag_idown_logged:
+                self._logger.warning("Interface '{}' down.".format(self._interface))
+                self._flag_idown_logged = True
             self._cbcore.set_net_data('interface',False)
             self._cbcore.set_net_data('mqtt',False)
             return
         else:
             # Set interface to up.
+            if self._flag_idown_logged:
+                self._logger.info("Interface '{}' is up.")
+                self._flag_idown_logged = False
             self._cbcore.set_net_data('interface', True)
-
-        if self._mqtt_connected == cobrabay.const.MQTT_DISCONNECTED:
-            # If interface is up but broker is not connected, retry every 30s.
-            try_reconnect = False
-            # Has is been 30s since the previous attempt?
-            if self._connect_timestamp is None:
-                self._logger.info("Making initial MQTT connection attempt...")
-                self._connect_mqtt()
-            elif time.monotonic() - self._connect_timestamp > 30:
-                self._logger.info("30s since previous MQTT connection attempt. Retrying...")
-                self._connect_mqtt()
-            # Set the mqtt status to false.
-            self._cbcore.set_net_data('interface', False)
-            return
-
-        if self._mqtt_connected == cobrabay.const.MQTT_CONNECTING:
-            # Connecting may no longer be needed since MQTT is using a separate thread.
-            wait_time = time.monotonic() - self._connect_timestamp
-            self._logger.info("Awaiting connection acknowledgement from broker for {}s".format(wait_time))
-            return
-
-        # Network/MQTT is up, proceed.
-        if self._mqtt_connected == cobrabay.const.MQTT_CONNECTED:
+        #
+        # if self._mqtt_connected == cobrabay.const.MQTT_DISCONNECTED:
+        #     # If interface is up but broker is not connected, retry every 30s.
+        #     try_reconnect = False
+        #     # Has is been 30s since the previous attempt?
+        #     if self._connect_timestamp is None:
+        #         self._logger.info("Making initial MQTT connection attempt...")
+        #         self._connect_mqtt()
+        #     elif time.monotonic() - self._connect_timestamp > 30:
+        #         self._logger.info("30s since previous MQTT connection attempt. Retrying...")
+        #         self._connect_mqtt()
+        #     # Set the mqtt status to false.
+        #     self._cbcore.set_net_data('interface', False)
+        #     return
+        #
+        # if self._mqtt_connected == cobrabay.const.MQTT_CONNECTING:
+        #     # Connecting may no longer be needed since MQTT is using a separate thread.
+        #     wait_time = time.monotonic() - self._connect_timestamp
+        #     self._logger.info("Awaiting connection acknowledgement from broker for {}s".format(wait_time))
+        #     return
+        #
+        # # Network/MQTT is up, proceed.
+        # if self._mqtt_connected == cobrabay.const.MQTT_CONNECTED:
+        if self._mqtt_client.is_connected():
             # Determine if we should force outbound messages to be sent.
             # For the first 15s after HA discovery, send everything. This makes sure data arrives after HA has
             # established entities.
@@ -442,10 +453,11 @@ class CBNetwork:
             for message in self._mqtt_messages(force_repeat=force_repeat):
                 # self._logger_mqtt.debug("Publishing MQTT message: {}".format(message))
                 self._pub_message(**message)
+            # Switching to the MQTT loop thread should make this unnecessary.
             # Check the MQTT Client.
-            rc = self._mqtt_client.loop()
-            if rc:
-               self._logger.warning("MQTT client received error: {}".format(rc))
+            # rc = self._mqtt_client.loop()
+            # if rc:
+            #    self._logger.warning("MQTT client received error: {}".format(rc))
 
         # # Add the upward commands to the return data.
         # return_data['commands'] = self._upward_commands

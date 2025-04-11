@@ -667,6 +667,7 @@ class CBBay:
             except KeyError:
                 pass
 
+
     # Old _make_range implementation...
 
     # def _make_range_buckets(self, longitudinal, lateral):
@@ -880,23 +881,23 @@ class CBBay:
 
         for quality in quality_ranges:
             self._logger.debug("Checking quality '{}'".format(quality))
-            try:
-                if (self._quality_ranges[sensor_id][quality][0] <=
-                        sensor_reading < self._quality_ranges[sensor_id][quality][1]):
-                    self._logger.debug("In quality range '{}' ({} <= {} < {})".
-                                       format(quality,
-                                              self._quality_ranges[sensor_id][quality][0],
-                                              sensor_reading,
-                                              self._quality_ranges[sensor_id][quality][1]))
-                    return quality
-            except ValueError:
-                self._logger.error(
-                    "Received ValueError when finding quality. Range start {} ({}), end {} ({}), read "
-                    "value {}".format(
-                        self._quality_ranges[sensor_id][quality][0], type(self._quality_ranges[sensor_id][quality][0]),
-                        self._quality_ranges[sensor_id][quality][1], type(self._quality_ranges[sensor_id][quality][1]),
-                        self._sensor_info['reading'][sensor_id]
-                    ))
+            # try:
+            if (self._quality_ranges[sensor_id][quality][0] <=
+                    sensor_reading < self._quality_ranges[sensor_id][quality][1]):
+                self._logger.debug("In quality range '{}' ({} <= {} < {})".
+                                   format(quality,
+                                          self._quality_ranges[sensor_id][quality][0],
+                                          sensor_reading,
+                                          self._quality_ranges[sensor_id][quality][1]))
+                return quality
+            # except ValueError:
+                # self._logger.error(
+                #     "Received ValueError when finding quality. Range start {} ({}), end {} ({}), read "
+                #     "value {}".format(
+                #         self._quality_ranges[sensor_id][quality][0], type(self._quality_ranges[sensor_id][quality][0]),
+                #         self._quality_ranges[sensor_id][quality][1], type(self._quality_ranges[sensor_id][quality][1]),
+                #         self._sensor_info['reading'][sensor_id]
+                #     ))
 
         self._logger.debug("Did not otherwise match quality, marking 'unknown'")
         # In case of a strange failure, return Unknown.
@@ -909,6 +910,8 @@ class CBBay:
         :param sensor_id:
         :return:
         """
+
+
         sensor_reading = self._most_recent_reading(sensor_id)
         self._logger.debug(
             "Evaluating longitudinal raw value '{}' for quality".format(sensor_reading))
@@ -916,25 +919,31 @@ class CBBay:
         quality_ranges = (SENSOR_QUALITY_EMERG, SENSOR_QUALITY_BACKUP, SENSOR_QUALITY_PARK, SENSOR_QUALITY_FINAL,
                           SENSOR_QUALITY_BASE, SENSOR_QUALITY_OK, SENSOR_QUALITY_BEYOND)
 
+        # Escape hatch for when the sensor didn't return a reading.
+        #TODO: Better contextual logic to return an inferred status.
+        if sensor_reading is None:
+            return SENSOR_QUALITY_NOREADING
+
         for quality in quality_ranges:
-            self._logger.debug("Checking quality '{}'".format(quality))
-            try:
-                if (self._quality_ranges[sensor_id][quality][0] <=
-                        sensor_reading < self._quality_ranges[sensor_id][quality][1]):
-                    self._logger.debug("In quality range '{}' ({} <= {} < {})".
-                                       format(quality,
-                                              self._quality_ranges[sensor_id][quality][0],
-                                              self._sensor_info['reading'][sensor_id],
-                                              self._quality_ranges[sensor_id][quality][1]))
-                    return quality
-            except ValueError:
-                self._logger.error(
-                    "Received ValueError when finding quality. Range start {} ({}), end {} ({}), read "
-                    "value {}".format(
-                        self._quality_ranges[sensor_id][quality][0], type(self._quality_ranges[sensor_id][quality][0]),
-                        self._quality_ranges[sensor_id][quality][1], type(self._quality_ranges[sensor_id][quality][1]),
-                        self._sensor_info['reading'][sensor_id]
-                    ))
+            self._logger.debug("Checking quality '{}' for value {}".format(
+                quality, self._quality_ranges[sensor_id][quality][1]))
+            # try:
+            if (self._quality_ranges[sensor_id][quality][0] <=
+                    sensor_reading < self._quality_ranges[sensor_id][quality][1]):
+                self._logger.debug("In quality range '{}' ({} <= {} < {})".
+                                   format(quality,
+                                          self._quality_ranges[sensor_id][quality][0],
+                                          self._sensor_info['reading'][sensor_id],
+                                          self._quality_ranges[sensor_id][quality][1]))
+                return quality
+            # except ValueError:
+            #     self._logger.error(
+            #         "Received ValueError when finding quality. Range start {} ({}), end {} ({}), read "
+            #         "value {}".format(
+            #             self._quality_ranges[sensor_id][quality][0], type(self._quality_ranges[sensor_id][quality][0]),
+            #             self._quality_ranges[sensor_id][quality][1], type(self._quality_ranges[sensor_id][quality][1]),
+            #             self._sensor_info['reading'][sensor_id]
+            #         ))
         # If we get here, quality is unknown.
         return GEN_UNKNOWN
 

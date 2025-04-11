@@ -5,15 +5,17 @@
 ####
 
 import logging
-from time import monotonic_ns
+from base64 import b64encode
 from datetime import datetime
-from rgbmatrix import RGBMatrix, RGBMatrixOptions
+from io import BytesIO
 from pint import UnitRegistry, Quantity
 from PIL import Image, ImageDraw, ImageFont, ImageColor
-from base64 import b64encode
-from io import BytesIO
-import math
+from rgbmatrix import RGBMatrix, RGBMatrixOptions
+import rgbmultitool
+from rgbmultitool import graphics
+from time import monotonic_ns
 from cobrabay.const import *
+
 
 
 # Class definition
@@ -28,9 +30,12 @@ class CBDisplay:
                  font_size_range=None,
                  bottom_box=None,
                  strobe_speed=None,
+                 icons=None,
                  unit_system="metric",
                  log_level="WARNING"):
         """
+        Cobrabay Display Object
+
         :param width: Pixel width of the display.
         :type width: int
         :param height: Pixel height of the display.
@@ -47,7 +52,9 @@ class CBDisplay:
         :param bottom_box: For motions, bottom box to use. May be 'off', 'strobe', or 'progress'
         :type bottom_box: str
         :param strobe_speed: If strobe bottom box is used, how fast should it move?
-        :type strobe_speed: Quantity(ms)
+        :type strobe_speed: Quantity(ms),
+        :param icons: Dict defining which icons to turn on and off.
+        :type icons: dict
         :param unit_system: Unit system to display in. May be 'imperial' or 'metric'
         :type unit_system: str
         :param log_level: Logging level for the display sub-logger. Defaults to 'Warning'
@@ -66,6 +73,12 @@ class CBDisplay:
         self.unit_system = unit_system  # Set the unit system.
         self._cbcore = cbcore  # Save the core reference.
         self._font = font  # Save the font.
+        self._logger.debug("Font: {}".format(self._font))
+        self._logger.debug("Font type: {}".format(type(self._font)))
+        self._logger.debug("Font properties: {}".format(dir(self._font)))
+
+        self._icons = icons
+        self._logger.info("Icon settings: {}".format(self._icons))
 
         # Default the bottom box appropriately.
         if bottom_box is None:
@@ -216,12 +229,10 @@ class CBDisplay:
             i += 1
         self._logger.debug("Created laterals for {}: {}".format(bay_obj.id, self._layers[bay_obj.id]))
 
-    def show(self, mode, system_status=None, message=None, color="white", icons=True):
+    def show(self, mode, message=None, color="white", icons=True):
         """
         Show a general-purpose message on the display.
 
-        :param system_status: Dict with the current network and mqtt connection status
-        :type system_status: dict(network, mqtt)
         :param mode: One of 'clock' to show clock or 'message' to show the string.
         :type mode: str
         :param message: For 'message' mode, the string to display.
@@ -248,18 +259,54 @@ class CBDisplay:
         else:
             raise ValueError("Show mode '{}' is not valid. Must be 'clock' or 'message'.".format(mode))
 
+        placard_h = 0
+
         # Make a base layer.
         img = Image.new("RGBA", (self._matrix_width, self._matrix_height), (0, 0, 0, 255))
         # If enabled, put status icons at the bottom of the display.
-        if icons and (system_status is not None):
-            # Network status icon, shows overall network and MQTT status.
-            network_icon = self._icon_network(system_status['network'], system_status['mqtt'])
-            img = Image.alpha_composite(img, network_icon)
-            # Adjust available placard height so we don't stomp over the icons.
-            placard_h = 6
-        elif icons and (system_status is None):
-            self._logger.warning("Icons requested but system status not provided. Skipping.")
-            placard_h = 0
+        if icons:
+            for icon_name in self._icons:
+                if self._icons[icon_name]:
+                    # If enabled, draw it based on whichever icon it is.
+                    if icon_name == 'network':
+                        # If data is available in the data, draw it.
+                        network_icon = graphics.icon_network(self._cbcore.net_data['interface'][1], self._cbcore.net_data['mqtt'][1])
+                        img.paste(network_icon,
+                                  (self._matrix_width - network_icon.width, self._matrix_height - network_icon.height))
+                        # Adjust available placard height so we don't stomp over the icons.
+                        if placard_h < 6:
+                            placard_h = 6
+                        # Otherwise draw the unavailable version.
+                    elif icon_name == 'ev-battery':
+                        # Only display icon if a value is present.
+                        #TODO: Give the icon an 'unknown' mode.
+                        if self._cbcore.net_data['ev-battery'][1] is not None:
+                            self._logger.debug("EV Battery data value: {}".format(self._cbcore.net_data['ev-battery'][1]))
+                            try:
+                                charge_value = self._cbcore.net_data['ev-battery'][1]
+                                battery_icon = graphics.icon_battery(int(charge_value), 12, 6)
+                                img.paste(battery_icon,
+                                          (int(self._matrix_width/2 - battery_icon.width/2), self._matrix_height - battery_icon.height))
+                                # Move the placard height up.
+                                if placard_h < 7:
+                                    placard_h = 7
+                            except TypeError:
+                                pass
+                    elif icon_name == 'ev-plug':
+                        # If ev-plug is None, don't display it, there's no data.
+                        if self._cbcore.net_data['ev-plug'][1] is not None:
+                            self._logger.debug("EV Plug data value: {}".format(self._cbcore.net_data['ev-plug'][1]))
+                            plug_icon = graphics.icon_evplug(
+                                plugged_in=self._cbcore.net_data['ev-plug'][1],
+                                charging=self._cbcore.net_data['ev-charging'][1])
+                            img.paste(plug_icon,
+                                      (0,self._matrix_height - plug_icon.height))
+                    elif icon_name == 'garage-door':
+                        pass
+                    elif icon_name == 'sensors':
+                        pass
+                    elif icon_name == 'mini_vehicle':
+                        pass
         else:
             placard_h = 0
 
@@ -447,7 +494,8 @@ class CBDisplay:
             for minute in range(0, 60):
                 minute = str(minute).zfill(2)
                 time_string = hour + ":" + minute
-                time_size = self._scale_font(str(time_string), width, height)
+                # time_size = self._scale_font(str(time_string), width, height)
+                time_size = rgbmultitool.util.scale_font(str(time_string), self._font, width, height)
                 if font_size is None:
                     font_size = time_size
                 else:
@@ -466,7 +514,8 @@ class CBDisplay:
         while depth >= min_depth:
             depth_string = self._range_string(depth)
             print("Trying depth string '{}'".format(depth_string))
-            depth_size = self._scale_font(depth_string, w, h)
+            # depth_size = self._scale_font(depth_string, w, h)
+            depth_size = rgbmultitool.util.scale_font(depth_string, self._font, w, h)
             if font_size is None:
                 font_size = depth_size
             else:
@@ -509,55 +558,55 @@ class CBDisplay:
         draw.rectangle([(0, height - 3), (width - 1, height - 1)], width=1)
         return img
 
-    def _icon_network(self, net_status=False, mqtt_status=False, x_input=None, y_input=None):
-        """
-        Draw a network icon based on current status. Icon will be color coded based on the statuses.
-        Green = Connected
-        Red = Not connected
-        Yellow = Unable to connect because of other errors (ie: MQTT can't connect because network is down)
-
-        :param net_status: Network connection status
-        :type net_status: bool
-        :param mqtt_status: MQTT broker connection status
-        :type mqtt_status: bool
-        :param x_input: X position of the icon. Defaults to 5 pixels from the right side.
-        :type x_input: int
-        :param y_input: Y position of the icon. Defaults to 5 pixels from the bottom.
-        :type y_input: int
-        :return:
-        """
-
-        # determine the network status color based on combined network and MQTT status.
-        if net_status is False:
-            net_color = 'red'
-            mqtt_color = 'yellow'
-        elif net_status is True:
-            net_color = 'green'
-            if mqtt_status is False:
-                mqtt_color = 'red'
-            elif mqtt_status is True:
-                mqtt_color = 'green'
-            else:
-                raise ValueError("Network Icon draw got invalid MQTT status value {}.".format(net_status))
-        else:
-            raise ValueError("Network Icon draw got invalid network status value {}.".format(net_status))
-
-        # Default to lower right placement if no alternate positions given.
-        if x_input is None:
-            x_input = self._matrix_width - 5
-        if y_input is None:
-            y_input = self._matrix_height - 5
-
-        w = self._matrix_width
-        h = self._matrix_height
-        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        draw.rectangle([x_input + 1, y_input, x_input + 3, y_input + 2], outline=mqtt_color, fill=mqtt_color)
-        # Base network line.
-        draw.line([x_input, y_input + 4, x_input + 4, y_input + 4], fill=net_color)
-        # Network stem
-        draw.line([x_input + 2, y_input + 3, x_input + 2, y_input + 4], fill=net_color)
-        return img
+    # def _icon_network(self, net_status=False, mqtt_status=False, x_input=None, y_input=None):
+    #     """
+    #     Draw a network icon based on current status. Icon will be color coded based on the statuses.
+    #     Green = Connected
+    #     Red = Not connected
+    #     Yellow = Unable to connect because of other errors (ie: MQTT can't connect because network is down)
+    #
+    #     :param net_status: Network connection status
+    #     :type net_status: bool
+    #     :param mqtt_status: MQTT broker connection status
+    #     :type mqtt_status: bool
+    #     :param x_input: X position of the icon. Defaults to 5 pixels from the right side.
+    #     :type x_input: int
+    #     :param y_input: Y position of the icon. Defaults to 5 pixels from the bottom.
+    #     :type y_input: int
+    #     :return:
+    #     """
+    #
+    #     # determine the network status color based on combined network and MQTT status.
+    #     if net_status is False:
+    #         net_color = 'red'
+    #         mqtt_color = 'yellow'
+    #     elif net_status is True:
+    #         net_color = 'green'
+    #         if mqtt_status is False:
+    #             mqtt_color = 'red'
+    #         elif mqtt_status is True:
+    #             mqtt_color = 'green'
+    #         else:
+    #             raise ValueError("Network Icon draw got invalid MQTT status value {}.".format(net_status))
+    #     else:
+    #         raise ValueError("Network Icon draw got invalid network status value {}.".format(net_status))
+    #
+    #     # Default to lower right placement if no alternate positions given.
+    #     if x_input is None:
+    #         x_input = self._matrix_width - 5
+    #     if y_input is None:
+    #         y_input = self._matrix_height - 5
+    #
+    #     w = self._matrix_width
+    #     h = self._matrix_height
+    #     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    #     draw = ImageDraw.Draw(img)
+    #     draw.rectangle([x_input + 1, y_input, x_input + 3, y_input + 2], outline=mqtt_color, fill=mqtt_color)
+    #     # Base network line.
+    #     draw.line([x_input, y_input + 4, x_input + 4, y_input + 4], fill=net_color)
+    #     # Network stem
+    #     draw.line([x_input + 2, y_input + 3, x_input + 2, y_input + 4], fill=net_color)
+    #     return img
 
     def _icon_vehicle(self, x_input=None, y_input=None):
         # Defaults because you can't reference object variables in parameters.
@@ -623,6 +672,8 @@ class CBDisplay:
         # If no font size was specified, dynamically size the text to fit the space we have.
         if font_size is None:
             font_size = self._scale_font(text, self._matrix_width - w_adjust, self._matrix_height - h_adjust)
+            # self._logger.debug("Calling RGBMT scale_font with font: {} ({})".format(self._font, type(self._font)))
+            # font_size = rgbmultitool.util.scale_font(text, self._font, self._matrix_width - w_adjust, self._matrix_height - h_adjust)
         font = ImageFont.truetype(font=self._font, size=font_size)
         # Make the text. Center it in the middle of the area, using the derived font size.
         draw.text((self._matrix_width / 2, (self._matrix_height - 4) / 2), text,

@@ -179,6 +179,11 @@ def typeconv(payload, tgt_type):
             return int(payload)
         elif tgt_type == 'float':
             return float(payload)
+        elif tgt_type == 'bool':
+            if payload.lower() in ['true','on'] or payload == '1':
+                return True
+            else:
+                return False
         elif tgt_type == 'str':
             # This is silly, but support it.
             return payload
