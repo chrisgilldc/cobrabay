@@ -278,23 +278,18 @@ class CBDisplay:
                             placard_h = 6
                         # Otherwise draw the unavailable version.
                     elif icon_name == 'ev-battery':
-                        # Only display icon if a value is present.
-                        #TODO: Give the icon an 'unknown' mode.
-                        if self._cbcore.net_data['ev-battery'][1] is not None:
-                            self._logger.debug("EV Battery data value: {}".format(self._cbcore.net_data['ev-battery'][1]))
-                            try:
-                                charge_value = self._cbcore.net_data['ev-battery'][1]
-                                battery_icon = graphics.icon_battery(int(charge_value), 12, 6)
-                                img.paste(battery_icon,
-                                          (int(self._matrix_width/2 - battery_icon.width/2), self._matrix_height - battery_icon.height))
-                                # Move the placard height up.
-                                if placard_h < 7:
-                                    placard_h = 7
-                            except TypeError:
-                                pass
+                        self._logger.debug("EV Battery data value: {}".format(self._cbcore.net_data['ev-battery'][1]))
+                        charge_value = self._cbcore.net_data['ev-battery'][1]
+                        battery_icon = graphics.icon_battery(charge_value, 12, 6)
+                        img.paste(battery_icon,
+                                  (int(self._matrix_width/2 - battery_icon.width/2), self._matrix_height - battery_icon.height))
+                        # Move the placard height up.
+                        if placard_h < 7:
+                            placard_h = 7
                     elif icon_name == 'ev-plug':
                         # If ev-plug is None, don't display it, there's no data.
-                        if self._cbcore.net_data['ev-plug'][1] is not None:
+                        if (self._cbcore.net_data['ev-plug'][1] is not None or
+                                self._cbcore.net_data['ev-charging'][1] is not None):
                             self._logger.debug("EV Plug data value: {}".format(self._cbcore.net_data['ev-plug'][1]))
                             plug_icon = graphics.icon_evplug(
                                 plugged_in=self._cbcore.net_data['ev-plug'][1],

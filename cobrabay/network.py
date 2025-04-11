@@ -290,7 +290,7 @@ class CBNetwork:
             self._logger.info("Topic '{}' appears to have multiple items configured. This isn't allowed.".format(message.topic))
         else:
             # Convert to the configured type.
-            payload = cobrabay.util.typeconv(message.payload.decode("utf-8"), matching_subs[0]['type'])
+            payload = cobrabay.util.typeconv(message.payload.decode("utf-8"), matching_subs[0]['type'], allow_none=True)
             # Call the method on the Core to update the net_data dict.
             self._cbcore.set_net_data(matching_subs[0]['id'], payload)
 

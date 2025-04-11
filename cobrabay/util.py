@@ -170,10 +170,12 @@ def scan_i2c():
     i2c.unlock()
     return found_addresses
 
-def typeconv(payload, tgt_type):
+def typeconv(payload, tgt_type, allow_none):
     """ Convert a string to another type based on target name. Is there a built-in for this? IDK. """
     if not isinstance(payload, str):
         raise TypeError("Payload must be a string.")
+    elif allow_none and payload is None:
+        return None
     else:
         if tgt_type == 'int':
             return int(payload)
