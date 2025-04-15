@@ -100,6 +100,7 @@ class CBConfig:
 
     @property
     def config_path(self):
+        """ Path of the config file. """
         if self._config_path is None:
             return None
         else:
@@ -293,7 +294,7 @@ class CBConfig:
     #     """
     #     Retrieve configuration for a specific detector
     #
-    #     :param detector_id: ID of the requested detector.
+    #     :param detector_id: ID of the requested detector
     #     :type detector_id: str
     #     :param detector_type: Detector type, either "longitudinal" or "lateral"
     #     :type detector_type: str
@@ -413,17 +414,17 @@ class CBCoreConfig(CBConfig):
         """
         # Can probably do this in Cerberus, but that's being fiddly, so this is a quick hack.
         # Ensure both 'to' and 'from' are set, even if only to None.
-        if 'to' not in self._config['triggers'][trigger_id] and 'to_value' not in self._config['triggers'][trigger_id]:
-            self._config['triggers'][trigger_id]['to'] = None
-        if 'from' not in self._config['triggers'][trigger_id] and 'from_value' not in self._config['triggers'][
+        if 'payload_to' not in self._config['triggers'][trigger_id] and 'payload_to' not in self._config['triggers'][trigger_id]:
+            self._config['triggers'][trigger_id]['payload_to'] = None
+        if 'payload_from' not in self._config['triggers'][trigger_id] and 'payload_from' not in self._config['triggers'][
             trigger_id]:
-            self._config['triggers'][trigger_id]['from'] = None
+            self._config['triggers'][trigger_id]['payload_from'] = None
 
         # Convert to _value.
-        self._config['triggers'][trigger_id]['to_value'] = self._config['triggers'][trigger_id]['to']
-        del self._config['triggers'][trigger_id]['to']
-        self._config['triggers'][trigger_id]['from_value'] = self._config['triggers'][trigger_id]['from']
-        del self._config['triggers'][trigger_id]['from']
+        self._config['triggers'][trigger_id]['payload_to_value'] = self._config['triggers'][trigger_id]['payload_to']
+        del self._config['triggers'][trigger_id]['payload_to']
+        self._config['triggers'][trigger_id]['payload_from_value'] = self._config['triggers'][trigger_id]['payload_from']
+        del self._config['triggers'][trigger_id]['payload_from']
 
         return {
             **self._config['triggers'][trigger_id],

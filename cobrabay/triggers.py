@@ -168,7 +168,7 @@ class SysCommand(MQTTTrigger):
         if message_text in ('restart', 'rescan', 'save_config'):
             self._logger.info("Received command {}. Adding to core command stack.".format(message_text))
             self._cmd_stack_core.append(message_text)
-        elif message_text in ('rediscover'):
+        elif message_text in 'rediscover':
             self._logger.info("Received command {}. Not yet implemented.".format(message_text))
             # Do a call to Network HA here...
         else:
@@ -231,7 +231,7 @@ class BayCommand(MQTTTrigger):
         if message_text in ('dock', 'undock', 'verify', 'save position') and not self._bay_obj.active:
             self._cmd_stack.append(message_text)
         # Abort the action, only if it's active.
-        elif message_text in ('abort') and self._bay_obj.active:
+        elif message_text in 'abort' and self._bay_obj.active:
             self._cmd_stack.append(message_text)
         else:
             self._logger.warning("Ignoring invalid command: {}".format(message_text))
@@ -251,8 +251,8 @@ class MQTTSensor(MQTTTrigger):
     MQTT Sensor trigger. Used to track the state of an MQTT topic and trigger based on value changes.
     """
     def __init__(self, trigger_id, topic, bay_obj,
-                 to_value=None,
-                 from_value=None,
+                 payload_to_value=None,
+                 payload_from_value=None,
                  action=None,
                  topic_mode="full",
                  topic_prefix=None, log_level="WARNING"):
@@ -279,16 +279,16 @@ class MQTTSensor(MQTTTrigger):
         super().__init__(trigger_id, topic, topic_mode, topic_prefix, log_level)
 
         # Save settings
-        if to_value is not None and from_value is not None:
+        if payload_to_value is not None and payload_from_value is not None:
             raise ValueError("Cannot have both a 'to' and 'from' value set.")
 
         # This is arguably a hack from the old method and should be replaced eventually.
-        if to_value is not None:
+        if payload_to_value is not None:
             self._change_type = 'to'
-            self._trigger_value = to_value
-        elif from_value is not None:
+            self._trigger_value = payload_to_value
+        elif payload_from_value is not None:
             self._change_type = 'from'
-            self._trigger_value = from_value
+            self._trigger_value = payload_from_value
 
         self._action = action
         self._bay_obj = bay_obj
@@ -342,6 +342,9 @@ class MQTTSensor(MQTTTrigger):
 
     @property
     def bay_id(self):
+        """
+        ID of the bay this trigger is linked to
+        """
         return self._bay_obj.id
 
 # Old Range Trigger class. May rework someday.

@@ -542,8 +542,8 @@ class CBCore:
                             topic_mode='full',
                             # topic_prefix=None, Don't pass a topic_prefix, not needed here.
                             bay_obj=self._bays[trigger_config['bay']],
-                            to_value=trigger_config['to_value'],
-                            from_value=trigger_config['from_value'],
+                            payload_to_value=trigger_config['payload_to_value'],
+                            payload_from_value=trigger_config['payload_from_value'],
                             action=trigger_config['action'],
                             log_level=trigger_config['log_level']
                         )
