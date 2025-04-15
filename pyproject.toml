@@ -17,13 +17,13 @@ classifiers = [
     "Topic :: Home Automation"
 ]
 dependencies = [
-    "adafruit-blinka~=8.50.0",
-    "adafruit-circuitpython-aw9523~=1.1.10",
-    "adafruit-circuitpython-vl53l1x~=1.2.0",
-    "cerberus~=1.3.6",
+    "adafruit-blinka~=8.56.0",
+    "adafruit-circuitpython-aw9523~=1.1.11",
+    "adafruit-circuitpython-vl53l1x~=1.2.2",
+    "cerberus~=1.3.7",
     "gpiozero~=2.0.1",
     "lgpio~=0.2.2.0",
-    "numpy~=2.2.1",
+    "numpy~=2.2.4",
     "paho-mqtt~=2.1.0",
     "pid~=3.0.4",
     "pillow~=11.0.0",
@@ -34,8 +34,8 @@ dependencies = [
     "rpi-bad-power~=0.1.0",
     "smbus2~=0.5.0",
     # Replace once published
-    "rgbmatrix@git+https://github.com/chrisgilldc/rpi-rgb-led-matrix",
-    "rgbmultitool@git+https://github.com/chrisgilldc/rgbmultitool"
+    # "rgbmatrix@git+https://github.com/chrisgilldc/rpi-rgb-led-matrix",
+    # "rgbmultitool@git+https://github.com/chrisgilldc/rgbmultitool"
 ]
 
 [project.urls]
