@@ -17,9 +17,22 @@ class CBValidation(namedtuple_typed):
 
 # Define the environment options named tuple.
 ENVOPTIONS = namedtuple_untyped('EnvOptions',
-                                ['base', 'rundir', 'configdir', 'configfile', 'logdir', 'logfile', 'loglevel'])
+                                [
+                                    'base', # Base directory
+                                    'rundir', # Directory to put the PID file
+                                    'configdir', # Directory for the config file.
+                                    'configfile', # Name of the config file.
+                                    'logdir', # Directory for logging
+                                    'logfile', # Name for the log file
+                                    'loglevel', # Default system-wide log level
+                                    'mqttbroker', # MQTT Broker to connect to.
+                                    'mqttport', # MQTT Port
+                                    'mqttuser', # MQTT User
+                                    'mqttpassword' # MQTT Password
+                                    ]
+                                )
 # Empty environment options named tuple.
-ENVOPTIONS_EMPTY = ENVOPTIONS(None, None, None, None, None, None, None)
+ENVOPTIONS_EMPTY = ENVOPTIONS(None, None, None, None, None, None, None, None, None, None, None)
 
 # Sensor interface information
 iface_info = namedtuple_untyped("iface_info", ['type', 'addr'])
