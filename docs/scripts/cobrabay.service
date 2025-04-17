@@ -1,0 +1,14 @@
+[Unit]
+Description=Cobrabay Parking Guidance
+Requires=sys-subsystem-net-devices-wlan0.device
+After=sys-subsystem-net-devices-wlan0.device
+
+[Service]
+Type=simple
+Restart=on-failure
+#Environment="PYTHONPATH=/home/pi/XXXX"
+ExecStart=/home/pi/.virtualenvs/cb_dev/bin/python3 /home/pi/cb_dev/cobrabay/cli.py -c /home/pi/localconfigs/CONFIGFILE.yaml
+#Restart=no
+
+[Install]
+WantedBy=default.target
