@@ -1,6 +1,6 @@
-# CobraBay Installation
+# Cobra Bay Installation
 
-This guide covers the installation of the base system and CobraBay software on the hardware as recommended in [Hardware](HARDWARE.md)
+This guide covers the installation of the base system and Cobra Bay software on the hardware as recommended in [Hardware](HARDWARE.md)
 Variances may be allowable but performance cannot be guaranteed.
 
 ### Platform
@@ -34,7 +34,7 @@ Raspberry Pi OS Lite 64-bit.
 * Reboot the system.
   * ```sudo reboot```
 
-### Prepare to install CobraBay
+### Prepare to install Cobra Bay
 
 #### Install the rgbmatrix library
 Unfortunately, the rgbmatrix library is not packaged. It needs to be installed manually. Install it manually using the following steps.
@@ -49,7 +49,7 @@ Unfortunately, the rgbmatrix library is not packaged. It needs to be installed m
 
 Raspberry Pi OS, as of Bookworm, requires use of Virtual Environments (venvs) to contain Python packages.
 
-To set up a venv for CobraBay, do the following:
+To set up a venv for Cobra Bay, do the following:
 * Ensure venv support is installed.
   * ```sudo apt install python3.11-venv```
 * Install the Python packages available as RPiOS packages.
@@ -60,9 +60,9 @@ To set up a venv for CobraBay, do the following:
   * ```source ~/.env_cobrabay/bin/activate```
 
 
-### Install CobraBay
+### Install Cobra Bay
 
-CobraBay is currently in Alpha and not fully packaged. You will need to install by pulling from the source. The main
+Cobra Bay is currently in Alpha and not fully packaged. You will need to install by pulling from the source. The main
 branch is expected to be relatively stable, with some possible crashing conditions.
 * Download the [main branch code](wget https://github.com/chrisgilldc/cobrabay/archive/refs/heads/main.zip) and extract.
   ```wget https://github.com/chrisgilldc/cobrabay/archive/refs/heads/main.zip```
@@ -83,4 +83,4 @@ the system packages, which should have been included and not get picked up again
   * ```pip3```
   * 
 
-### Configure CobraBay
+### Configure Cobra Bay

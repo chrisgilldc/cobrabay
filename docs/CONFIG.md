@@ -1,4 +1,4 @@
-# CobraBay Configuration
+# Cobra Bay Configuration
 
 The system will look for a configuration file on startup, and is required for operation. 
 The system will search in several places in this order:
@@ -70,7 +70,7 @@ Logging options, system-wide or for specific modules.
 | bays      | No        | None                  | Log level for all Bays                                                                         |
 | bay       | No     | None                  | Enumerate log levels for specific bays, using their IDs.                                       |
 | config    | No     | None                  | Log level for the configuriation handling module.                                              |
-| core      | No     | None                  | Log level for the CobraBay Core.                                                               |
+| core      | No     | None                  | Log level for the Cobra Bay Core.                                                              |
 | detectors | No     | None                  | Log level for all Detectors.                                                                   |
 | detector  | No     | None             | Enumerate log levels for specific detectors, using their IDs.                                  |
 | display   | No     | None                  | Log level for the Display module.                                                              |

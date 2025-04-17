@@ -1,0 +1,3 @@
+[metadata]
+# Needed for now until rgbmatrix gets published.
+allow-direct-references = true

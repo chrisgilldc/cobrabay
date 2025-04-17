@@ -1,6 +1,6 @@
 system:
   unit_system: imperial  # Defaults to 'metric' if set to anything other than 'imperial'.
-  system_name: CobraBay1  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
+  system_name: cobrabay1  # ID of the system. Will be used for MQTT client ID, as well as name in MQTT Topics.
   mqtt:
     broker: BROKER HOSTNAME OR IP
     port: 1883
@@ -37,7 +37,7 @@ triggers:
     to: "on"
     when_triggered: occupancy
   test:
-    topic: CobraBay/test
+    topic: cobrabay/test
     type: mqtt_sensor
     bay: bay1
     to: "on"

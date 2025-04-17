@@ -1,3 +1,0 @@
-"""
-CobraBay - data
-"""
