@@ -30,33 +30,68 @@ All sections are **required**, even if empty. Can be defined in any order.
 | units               | No        | **'metric'**, 'imperial'        | N/A     | Sets units to use for other options and display.                                                                                                                                |
 | system_name         | No        | float                           | seconds | Time between sonic sensor firings. This should be tuned so that echos from one sensor doesn't interfere with another - exact timing will depend on the geometry of your garage. |
 | [mqtt](#mqtt)       | Yes       | dict                            | N/A | Dictionary of MQTT settings. See below                                                                                                                                          |
-| mqtt_commands       | Yes       | bool                            | N/A | Should commands via MQTT be honored?                                                                                                                                            |
 | interface           | Yes       | Any valid Linux interface name. | N/A | Interface to monitor for connectivity status on the display.                                                                                                                    |
-| [ha](#ha)           | Yes       | bool                            | N/A | Options to integrated with Home Assistant.                                                                                       |
-| [logging](#Logging) | No     | dict                       | N/A | Options for logging system-wide or within specific modules. See below for details.                                                                                              |
+| [logging](#Logging) | No        | dict                            | N/A | Options for logging system-wide or within specific modules. See below for details.                                                                                              |
 
 ### System Subsections
-
-#### ha
-
-Home Assistant for specific modules.
-
-| Options  | Required? | Valid Options          | Default         | Description                                                                                                                                                                                                                                                      |
-|----------|-----------|------------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| discover | No        | Bool                   | True            | Should discovery messages be sent?                                                                                                                                                                                                                               |
-| pd_send  | No        | Int                    | 15              | Time in seconds after discovery is complete that all status messages should be sent, regardless of duplication. This allows HA time to set up entities. Setting this too short can result in some entities being Unknown even if an MQTT message has been sent.. | 
-| base     | No        | String | 'homeassistant' | Base MQTT path for Home Assistant. Used to find the Home Assistant 'status' value and created discovery messages.                                                                                                                                                |
 
 #### mqtt
 
 MQTT section, within the system segment.
 
-| Options   | Required? | Description                                          |
-|-----------| --- |------------------------------------------------------------|
-| broker    | Yes | Host or IP of the broker to connect to.                    |
-| port      | Yes | Broker port to connect to. SSL is not currently supported. |
-| username  | Yes | Username to log into the broker with.                      |
-| password  | Yes | Password to log into the broker with.                      |
+| Options                    | Required? | Default  | Description                                                |
+|----------------------------|-----------|----------|------------------------------------------------------------|
+| broker                     | Yes       | None     | Host or IP of the broker to connect to.                    |
+| port                       | Yes       | 1883     | Broker port to connect to. SSL is not currently supported. |
+| username                   | Yes       | None     | Username to log into the broker with.                      |
+| password                   | Yes       | None     | Password to log into the broker with.                      |
+| base                       | Yes       | cobrabay | Base MQTT path to use.                                     |
+| [ha](#ha)                  | Yes       | bool     | Options to integrated with Home Assistant.                 |      
+| [subscribe](#subscribe)    | No        | list     | Options for subscribing to extra data topics for display   |
+| [chattiness](#chattiness) | No        | False    | Options for sending sensors.                               |
+
+##### ha
+
+Options for integrating with Home Assistant.
+
+| Options          | Required? | Valid Options | Default         | Description                                                                                                                                                                                                                                                      |
+|------------------|-----------|---------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| discover         | No        | bool          | True            | Should discovery messages be sent?                                                                                                                                                                                                                               |
+| pd_send          | No        | int           | 15              | Time in seconds after discovery is complete that all status messages should be sent, regardless of duplication. This allows HA time to set up entities. Setting this too short can result in some entities being Unknown even if an MQTT message has been sent.. | 
+| base             | No        | str           | 'homeassistant' | Base MQTT path for Home Assistant. Used to find the Home Assistant 'status' value and created discovery messages.                                                                                                                                                |
+| suggested_area   | No        | str           | 'Garage'        | HA Area to suggest during discovery.                                                                                                                                                                                                                             |
+
+##### subscribe
+
+Tells the system to subscribe to additional MQTT topics to get data for display. This is intended to be used for
+getting icons or idle display. Minimal data processing is performed on the data, so be sure the data put on the topic is
+in the format you want.
+
+Subscribe is a list of elements, each of which requires an id and a topic as below.
+
+| Options | Required? | Valid Options | Default | Description                               |
+|---------|-----------|---------------|---------|-------------------------------------------|
+| id      | Yes       | str           | None    | ID of the subscription to use internally. |
+| topic   | Yes       | str           | None    | Topic to get the data from.               |
+
+Icon display topics are added by default if the icon is enabled and no subscription of that ID already exists. 
+
+| Type   | Option       | Topic                  |
+|--------|--------------|------------------------|
+| Icon   | ev-battery   | base/input/ev-battery  |
+| Icon   | ev-plug      | base/input/ev-plug     |
+
+
+##### chattiness
+
+Options for how 'chatty' MQTT should be.
+
+| Options             | Required? | Default | Description                                             | 
+|---------------------|-----------|---------|---------------------------------------------------------|
+| sensors_raw         | No        | False   | Send raw sensor values, independent of bay adjustments. |
+| sensors_always_send | No        | False   | Always send sensor values, even when otherwise idle.    |
+
+
 
 #### Logging
 
@@ -93,6 +128,8 @@ Supported trigger types:
 | bay | Yes | None | Bay this trigger is assigned to. |
 | to | No | None | Topic payload to match that will set off this trigger. |
 | from | Yes, if 'to' is not set. | None | A change of the topic payload to any state *other* than this value will set off the trigger. |
+| action | Yes | None | What to do when the trigger goes off. | 
+
 
 ## Display
 Configuration for the display in the garage, to be viewed by the driver. This should be an LED matrix display, no other

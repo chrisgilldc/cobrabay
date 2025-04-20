@@ -16,6 +16,8 @@ Raspberry Pi OS Lite 64-bit.
 * Update packages.
   * ```sudo apt-get update```
   * ```sudo apt-get upgrade```
+* Install pre-req packages.
+  * ```sudo apt-get install -y python3-devel git cython3```
 * Update system settings with raspi config ```sudo raspi-config```
   * Enable I2C.
     * Navigate to '3 Interface Options'

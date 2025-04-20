@@ -17,18 +17,24 @@ class CBCore:
     """
     Cobra Bay Core object. Only one is needed. Handles interaction among other modules and shutdown.
     """
-    def __init__(self, config_obj, envoptions, q_cbsmdata=None, q_cbsmcontrol=None):
+    def __init__(self, cmd_options=cobrabay.datatypes.ENVOPTIONS_EMPTY, q_cbsmdata=None, q_cbsmcontrol=None):
         """
         Cobra Bay Core Class Initializer.
 
-        :param config_obj: Configuration object
+        :param config_obj: Configuration object. Defaults to an empty set if not passed.
         :type config_obj: CBConfig object
-        :param envoptions: Environment Options to pass command line options/environment variable settings, if any.
-        :type envoptions: namedtuple
+        :param cmd_options: Command line options as passed. Includes defaults.
+        :type cmd_options: cobrabay.datatypes.ENVOPTIONS
+        :param q_cbsmdata: Data passing queue. Currently, does nothing, for later expansion.
+        :type q_cbsmdata: Queue
+        :param q_cbsmcontrol: Control queue. Currently, does nothing, for later expansion.
+        :type q_cbsmcontrol: Queue
         """
         # Initialize variables
+        self.system_state='init' # System state is initializing.
         self._bays = {}
         self._network = None
+        self._pistatus = None
         self._sensor_latest_data = {}
         self.sensor_log = []
         self._sensormgr = None
@@ -38,12 +44,8 @@ class CBCore:
             'interface': (time.monotonic(), False),
             'mqtt': (time.monotonic(), False)
         }
-
         self._triggers = None
         self._exit_code = -1
-
-        # Set the system state to initializing.
-        self.system_state = 'init'
 
         # Get the master handler. This may have already been started by the command line invoker.
         self._master_logger = logging.getLogger("cobrabay")
@@ -59,13 +61,28 @@ class CBCore:
         self._logger = logging.getLogger("cobrabay").getChild("Core")
 
         self._logger.setLevel(logging.DEBUG)
-        if envoptions.loglevel is not None:
-            self._logger.warning(
-                "Based on command line options, setting core logger to '{}'".format(envoptions.loglevel))
-            self._logger.setLevel(envoptions.loglevel)
+        if cmd_options.loglevel is not None:
+            self._logger.info(
+                "Based on command line option, setting core logger to '{}'".format(cmd_options.loglevel))
+            self._logger.setLevel(cmd_options.loglevel)
 
+        # Register the signal handlers.
+        self._setup_signal_handlers()
+
+        # Create configuration manager.
+        self._configmgr = cobrabay.config.CBConfigMgr(self, cmd_options=cmd_options, parent_logger=self._logger, log_level=cmd_options.loglevel)
+
+        sys.exit(0)
         # Call the system setup method.
-        self._setup_system(config_obj)
+        # self._setup_system(config_obj)
+
+        # Set up the network.
+        self._setup_network()
+
+        # Create the object for checking hardware status.
+        self._logger.info("Creating Pi hardware monitor...")
+        self._pistatus = cobrabay.CBPiStatus()
+
 
     # Public Methods
 
@@ -74,8 +91,7 @@ class CBCore:
         """
         Main operating loop.
         """
-        # Register the signal handlers.
-        self._setup_signal_handlers()
+
         # Start the run loop.
         try:
             # Main run loop. Keep running as long as the exit code isn't set.
@@ -385,128 +401,151 @@ class CBCore:
         signal.signal(signal.SIGPIPE, self._signal_handler)
         signal.signal(signal.SIGALRM, self._signal_handler)
 
-    def _setup_system(self, config_obj):
+    def _setup_network(self):
         """
-        Main system setup operations. This is separated to allow both calling from __init__ and if reinitialized.
+        Set up the Network Object
         """
-
-        # Set the system state to init. This is redundant on startup but needed if reinitializing.
-        self.system_state = 'init'
-        self._logger.info("Setting up system.")
-
-        if not isinstance(config_obj, cobrabay.config.CBCoreConfig):
-            raise TypeError("Cobra Bay core must be passed a Cobra Bay Config object (CBConfig).")
-        else:
-            # Save the passed CBConfig object.
-            self._active_config = config_obj
-
-        # Update the logging handlers.
-        self._setup_logging_handlers(**self._active_config.log_handlers())
-
-        # Reset our own level based on the configuration.
-        self._logger.setLevel(self._active_config.get_loglevel("core"))
-
-        # Create the object for checking hardware status.
-        self._logger.info("Creating Pi hardware monitor...")
-        self._pistatus = cobrabay.CBPiStatus()
 
         # Create the network object.
-        self._logger.info("Creating network object...")
+        self._logger.info("Configuring Network...")
         # Create Network object.
         network_config = self._active_config.network()
         self._logger.debug("Using network config:\n{}".format(pformat(network_config)))
         self._network = cobrabay.CBNetwork(**network_config, cbcore=self)
-        # Register the hardware monitor with the network module.
-        self._network.register_pistatus(self._pistatus)
 
         # Add net data entries for all the icons and all the subscriptions, so we have *something*
         # even before MQTT data is received.
-        for icon in self._active_config.display()['icons']:
-            self._net_data[icon] = (None,None)
-        for sub in self._active_config.network()['subscriptions']:
-            self._net_data[sub['id']] = (None,None)
-        self._logger.debug("Net data at startup: {}".format(self._net_data))
+        # for icon in self._active_config.display()['icons']:
+        #     self._net_data[icon] = (None,None)
+        # for sub in self._active_config.network()['subscriptions']:
+        #     self._net_data[sub['id']] = (None,None)
+        # self._logger.debug("Net data at startup: {}".format(self._net_data))
 
-        # # Create the outbound messages queue
-        self._outbound_messages = []
-        # Queue the startup message.
-        self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'Online'})
+    def _setup_util(self, config_obj):
+        """
+        Setup miscellaneous utility items - PI hardware monitor
+        """
 
-        self._logger.info("Creating sensor manager...")
-        # Create the Sensor Manager
-        sensor_config = self._active_config.sensors_config()
-        self._logger.debug("Using Sensor config:\n{}".format(pformat(sensor_config)))
-        self._logger.debug("Using I2C config:\n{}".format(pformat(self._active_config.i2c_config())))
-        # Create the queues needed for the sensor manager.
-        self._q_cbsmdata = queue.Queue(maxsize=1)
-        self._q_cbsmstatus = queue.Queue(maxsize=1)
-        self._q_cbsmcontrol = queue.Queue(maxsize=1)
-        self._sensormgr = cobrabay.CBSensorMgr(sensor_config=sensor_config, i2c_config=self._active_config.i2c_config(),
-                                               log_level=self._active_config.get_loglevel('sensors'),
-                                               q_cbsmdata=self._q_cbsmdata, q_cbsmstatus=self._q_cbsmstatus,
-                                               q_cbsmcontrol=self._q_cbsmcontrol)
-        # Register the sensor manager with the network handler, now that it exists.
-        self._logger.debug("Registering sensor manager with the network module.")
-        self._network.register_sensormgr(self._sensormgr)
-        # Activate the sensors.
-        #TODO: Convert to using the command queue to be threading safe.
-        self._q_cbsmcontrol.put(
-            (cobrabay.const.SENSTATE_RANGING,None)
-        )
-        #self._sensormgr.set_sensor_state(target_state=cobrabay.const.SENSTATE_RANGING)
-        # Loop once and get initial latest data.
-        #TODO: Add config option for threading vs. not and make conditional.
-        self._sensormgr.loop()
+    # def _setup_system(self, config_obj):
+    #     """
+    #     Main system setup operations. This is separated to allow both calling from __init__ and if reinitialized.
+    #     """
+    #
+    #     # Set the system state to init. This is redundant on startup but needed if reinitializing.
+    #     self.system_state = 'init'
+    #     self._logger.info("Setting up system.")
+    #
+    #     if not isinstance(config_obj, cobrabay.config.CBCoreConfig):
+    #         raise TypeError("Cobra Bay core must be passed a Cobra Bay Config object (CBConfig).")
+    #     else:
+    #         # Save the passed CBConfig object.
+    #         self._active_config = config_obj
+    #
+    #     # Update the logging handlers.
+    #     self._setup_logging_handlers(**self._active_config.log_handlers())
+    #
+    #     # Reset our own level based on the configuration.
+    #     self._logger.setLevel(self._active_config.get_loglevel("core"))
+    #
 
-        # Initial sensor update.
-        self._sensor_update()
-        # self._sensor_latest_data = self._q_cbsmdata.get_nowait()
-        # self._logger.debug("Initial data from sensor manager: {}".format(self._sensor_latest_data))
-
-        # Create master bay object for defined docking bay
-        # Master list to store all the bays.
-        self._bays = {}
-        self._logger.info("Creating bays...")
-        for bay_id in self._active_config.bays:
-            self._logger.info("Bay ID: {}".format(bay_id))
-            bay_config = self._active_config.bay(bay_id)
-            self._logger.debug("Bay config:")
-            self._logger.debug(pformat(bay_config))
-            self._bays[bay_id] = cobrabay.CBBay(bay_id=bay_id, cbcore=self, q_cbsmcontrol=self._q_cbsmcontrol, **bay_config)
-
-        self._logger.info('Creating display...')
-        display_config = self._active_config.display()
-        self._logger.debug("Using display config:")
-        self._logger.debug(pformat(display_config))
-        self._display = cobrabay.CBDisplay(**display_config, cbcore=self)
-        # Inform the network about the display. This is so the network can send display images. Nice to have, very
-        # useful for debugging!
-        self._network.display = self._display
-
-        # Register the bay with the network and display.
-        for bay_id in self._bays:
-            self._network.register_bay(self._bays[bay_id])
-            self._display.register_bay(self._bays[bay_id])
-
-        # Create triggers.
-        self._logger.info("Creating triggers...")
-        self._setup_triggers()
-
-        # Connect to the network.
-        self._logger.info('Connecting to network...')
-        self._network.connect()
-        # Do an initial poll.
-        self._network.poll()
-
-        # Send initial values to MQTT, as we won't otherwise do so until we're in a running state.
-        #TODO: Rework initial sending of sensor values.
-        #self._logger.info('Sending initial detector values...')
-        #for bay_id in self._bays:
-        #    self._network.publish_bay_detectors(bay_id, publish=True)
-
-        # We're done!
-        self._logger.info('System Initialization complete.')
-        self.system_state = 'running'
+    #
+    #     # Create the network object.
+    #     self._logger.info("Creating network object...")
+    #     # Create Network object.
+    #     network_config = self._active_config.network()
+    #     self._logger.debug("Using network config:\n{}".format(pformat(network_config)))
+    #     self._network = cobrabay.CBNetwork(**network_config, cbcore=self)
+    #     # Register the hardware monitor with the network module.
+    #     self._network.register_pistatus(self._pistatus)
+    #
+    #     # Add net data entries for all the icons and all the subscriptions, so we have *something*
+    #     # even before MQTT data is received.
+    #     for icon in self._active_config.display()['icons']:
+    #         self._net_data[icon] = (None,None)
+    #     for sub in self._active_config.network()['subscriptions']:
+    #         self._net_data[sub['id']] = (None,None)
+    #     self._logger.debug("Net data at startup: {}".format(self._net_data))
+    #
+    #     # # Create the outbound messages queue
+    #     self._outbound_messages = []
+    #     # Queue the startup message.
+    #     self._outbound_messages.append({'topic_type': 'system', 'topic': 'device_connectivity', 'message': 'Online'})
+    #
+    #     self._logger.info("Creating sensor manager...")
+    #     # Create the Sensor Manager
+    #     sensor_config = self._active_config.sensors_config()
+    #     self._logger.debug("Using Sensor config:\n{}".format(pformat(sensor_config)))
+    #     self._logger.debug("Using I2C config:\n{}".format(pformat(self._active_config.i2c_config())))
+    #     # Create the queues needed for the sensor manager.
+    #     self._q_cbsmdata = queue.Queue(maxsize=1)
+    #     self._q_cbsmstatus = queue.Queue(maxsize=1)
+    #     self._q_cbsmcontrol = queue.Queue(maxsize=1)
+    #     self._sensormgr = cobrabay.CBSensorMgr(sensor_config=sensor_config, i2c_config=self._active_config.i2c_config(),
+    #                                            log_level=self._active_config.get_loglevel('sensors'),
+    #                                            q_cbsmdata=self._q_cbsmdata, q_cbsmstatus=self._q_cbsmstatus,
+    #                                            q_cbsmcontrol=self._q_cbsmcontrol)
+    #     # Register the sensor manager with the network handler, now that it exists.
+    #     self._logger.debug("Registering sensor manager with the network module.")
+    #     self._network.register_sensormgr(self._sensormgr)
+    #     # Activate the sensors.
+    #     #TODO: Convert to using the command queue to be threading safe.
+    #     self._q_cbsmcontrol.put(
+    #         (cobrabay.const.SENSTATE_RANGING,None)
+    #     )
+    #     #self._sensormgr.set_sensor_state(target_state=cobrabay.const.SENSTATE_RANGING)
+    #     # Loop once and get initial latest data.
+    #     #TODO: Add config option for threading vs. not and make conditional.
+    #     self._sensormgr.loop()
+    #
+    #     # Initial sensor update.
+    #     self._sensor_update()
+    #     # self._sensor_latest_data = self._q_cbsmdata.get_nowait()
+    #     # self._logger.debug("Initial data from sensor manager: {}".format(self._sensor_latest_data))
+    #
+    #     # Create master bay object for defined docking bay
+    #     # Master list to store all the bays.
+    #     self._bays = {}
+    #     self._logger.info("Creating bays...")
+    #     for bay_id in self._active_config.bays:
+    #         self._logger.info("Bay ID: {}".format(bay_id))
+    #         bay_config = self._active_config.bay(bay_id)
+    #         self._logger.debug("Bay config:")
+    #         self._logger.debug(pformat(bay_config))
+    #         self._bays[bay_id] = cobrabay.CBBay(bay_id=bay_id, cbcore=self, q_cbsmcontrol=self._q_cbsmcontrol, **bay_config)
+    #
+    #     self._logger.info('Creating display...')
+    #     display_config = self._active_config.display()
+    #     self._logger.debug("Using display config:")
+    #     self._logger.debug(pformat(display_config))
+    #     self._display = cobrabay.CBDisplay(**display_config, cbcore=self)
+    #     # Inform the network about the display. This is so the network can send display images. Nice to have, very
+    #     # useful for debugging!
+    #     self._network.display = self._display
+    #
+    #     # Register the bay with the network and display.
+    #     for bay_id in self._bays:
+    #         self._network.register_bay(self._bays[bay_id])
+    #         self._display.register_bay(self._bays[bay_id])
+    #
+    #     # Create triggers.
+    #     self._logger.info("Creating triggers...")
+    #     self._setup_triggers()
+    #
+    #     # Connect to the network.
+    #     self._logger.info('Connecting to network...')
+    #     self._network.connect()
+    #     # Do an initial poll.
+    #     self._network.poll()
+    #
+    #     # Send initial values to MQTT, as we won't otherwise do so until we're in a running state.
+    #     #TODO: Rework initial sending of sensor values.
+    #     #self._logger.info('Sending initial detector values...')
+    #     #for bay_id in self._bays:
+    #     #    self._network.publish_bay_detectors(bay_id, publish=True)
+    #
+    #     # We're done!
+    #     self._logger.info('System Initialization complete.')
+    #     self.system_state = 'running'
 
     def _setup_triggers(self):
         """ Setup triggers based on the configuration. """

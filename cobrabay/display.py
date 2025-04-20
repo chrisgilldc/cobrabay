@@ -300,7 +300,7 @@ class CBDisplay:
                         pass
                     elif icon_name == 'sensors':
                         pass
-                    elif icon_name == 'mini_vehicle':
+                    elif icon_name == 'mini-vehicle':
                         pass
         else:
             placard_h = 0

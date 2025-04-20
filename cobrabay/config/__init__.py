@@ -1,11 +1,11 @@
 """
-Cobra Bay - Configuration Handling
+Cobrabay Config Handling
+Now with Marshmallow!
 """
 
-from .validator import CBValidator
-from .configs import CBCoreConfig
+from .config import CBConfig, CBConfigMgr
+from .schema import CBSchema
 
 all = [
-    'CBCoreConfig',
-    'CBValidator'
+    'CBConfig', 'CBConfigMgr', 'CBSchema'
 ]
