@@ -89,6 +89,12 @@ class CBNetwork:
                 self._logger.info("Sensors always send enabled! Prepare to be deluged!")
         # Flag for when interface down has been logged.
         self._flag_idown_logged = False
+        # HA settings.
+        self._ha_do_discover = ha_discover
+        self._ha_pd_send = ha_pd_send
+        self._ha_base = ha_base
+        self._ha_suggested_area = ha_suggested_area
+
         # Interface to use.
         self._interface = interface
         self._logger.info("Monitoring interface: '{}'".format(self._interface))
