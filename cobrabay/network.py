@@ -33,7 +33,10 @@ class CBNetwork:
                  base,
                  cbcore,
                  subscriptions=None,
-                 ha=None,
+                 ha_discover=True,
+                 ha_pd_send=15,
+                 ha_base="homeassistant",
+                 ha_suggested_area="Garage",
                  chattiness=None,
                  log_level="WARNING",
                  mqtt_log_level="DISABLED"):
