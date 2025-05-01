@@ -127,7 +127,7 @@ class CBNetwork:
         # Create a sublogger for the MQTT client.
         self._logger_mqtt = logging.getLogger("cobrabay").getChild("MQTT")
         # If MQTT logging is disabled, send it to a null logger.
-        if mqtt_log_level == 'DISABLE':
+        if mqtt_log_level == 'DISABLED':
             self._logger.info("MQTT client logging is disabled. Set 'mqtt' in logging section if you want it enabled.")
             self._logger_mqtt.addHandler(logging.NullHandler())
             self._logger_mqtt.propagate = False
