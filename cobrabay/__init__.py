@@ -14,6 +14,7 @@ import cobrabay.sensors
 import cobrabay.triggers
 
 # Unitary Classes
+from .base import CBBase
 from .bay import CBBay
 from .display import CBDisplay
 from .core import CBCore

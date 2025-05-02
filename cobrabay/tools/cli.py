@@ -30,12 +30,12 @@ def cbcli():
     parser = argparse.ArgumentParser(
         description="Cobra Bay Parking System"
     )
-    parser.add_argument("-b", "--base", dest="basedir", default=".", help="Base directory, for all other paths")
-    parser.add_argument("-c", "--config", dest="configfile", default='config.yaml', help="Config file location.")
-    parser.add_argument("-cd", "--configdir", default='.', help="Directory for config files.")
-    parser.add_argument("-r", "--rundir", default='/tmp', help="Run directory, for the PID file.")
-    parser.add_argument("-ld", "--logdir", default='.', help="Directory to write logs to.")
-    parser.add_argument("-lf", "--logfile", default='cobrabay.yaml', help="Log file name to write")
+    parser.add_argument("-b", "--base", dest="basedir", help="Base directory, for all other paths")
+    parser.add_argument("-c", "--config", dest="configfile", help="Config file location.")
+    parser.add_argument("-cd", "--configdir", help="Directory for config files.")
+    parser.add_argument("-r", "--rundir", help="Run directory, for the PID file.")
+    parser.add_argument("-ld", "--logdir", help="Directory to write logs to.")
+    parser.add_argument("-lf", "--logfile", help="Log file name to write")
     parser.add_argument("-ll", "--loglevel", help="General logging level. More fine-grained control "
                                                   "in config file.")
     parser.add_argument("-u", "--unit-system", default='metric', dest="unitsystem", help="Unit system to use. Defaults to metric. May be 'imperial'.")
@@ -116,15 +116,14 @@ def cbcli():
             #     print("Could not start system. Exiting.")
             #     print(be)
             #     sys.exit(1)
-            print("Testing done, exiting.")
-            sys.exit(0)
+
             # Start the Sensor Manager process.
             # cbsm_process = Process(target=cobrabay.sensormgr.CBSensorMgr, args=(sensorconfig, q_cbsmdata=q_cbsmdata, q_cbsmcontrol=q_cbsmcontrol))
             # cbsm_process.start()
 
             # Start.
-            # master_logger.info("Initialization complete. Operation start.")
-            # cb.run()
+            master_logger.info("Initialization complete. Operation start.")
+            cb.run()
     except pid.base.PidFileAlreadyLockedError:
         print("Cannot start, already running!")
 

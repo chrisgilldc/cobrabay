@@ -21,6 +21,7 @@ dependencies = [
     "adafruit-circuitpython-aw9523~=1.1.11",
     "adafruit-circuitpython-vl53l1x~=1.2.2",
     "gpiozero~=2.0.1",
+    "ha-mqtt-discoverable~=0.19.1",
     "lgpio~=0.2.2.0",
     "marshmallow~=4.0.0",
     "numpy~=2.2.4",

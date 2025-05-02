@@ -1,13 +1,27 @@
 """
 Cobrabay Marshmallow Schema
 """
+import os
+import importlib
+from pathlib import Path
 import typing
 from marshmallow import Schema, fields, validate, validates_schema, pre_load, post_load, ValidationError
 from marshmallow.fields import Boolean
 from marshmallow.experimental.context import Context
-
+from pint import Quantity
+from .fields import Quantity as FieldQuantity
+from .validators import Dimensionality
 
 # System Schemas
+
+class CBSchemaHA(Schema):
+    """
+    Cobrabay Home Assistant Schema
+    """
+    discover = fields.Boolean(load_default=True)
+    pd_send = fields.Integer(load_default=15)
+    base = fields.String(load_default="homeassistant")
+    suggested_area = fields.String(load_default="Garage")
 
 class CBSchemaI2C(Schema):
     """
@@ -18,6 +32,10 @@ class CBSchemaI2C(Schema):
     ready = fields.Str(load_default="D25")
     wait_ready = fields.Integer(load_default=10, validate=validate.Range(min=0))
     wait_reset = fields.Integer(load_default=10, validate=validate.Range(min=0))
+    # wait_ready = FieldQuantity(load_default=Quantity("10 seconds"), validate=Dimensionality(dimensionality="[time]"))
+    #wait_reset = fields.Integer(load_default=10, validate=validate.Range(min=0))
+
+
 
 class CBSchemaLogging(Schema):
     """
@@ -25,9 +43,11 @@ class CBSchemaLogging(Schema):
     """
     console = fields.Boolean(load_default=True)
     file = fields.Boolean(load_default=False)
-    # file_path - path.cwd() / 'cobrabay.log'
+#TODO: Fix log path assembly.
+    log_file = fields.String(load_default=Path.cwd() / 'cobrabay.log')
+    log_format = fields.String(load_default="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     # Coerce all these to UPPER, limit to valid logging strings. ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-    default = fields.Str(load_default='warning', validate=validate.OneOf(choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL']))
+    default = fields.Str(load_default='WARNING', validate=validate.OneOf(choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL']))
     bays = fields.String(validate=validate.OneOf(choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL']))
     config = fields.String(validate=validate.OneOf(choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL']))
     core = fields.String(validate=validate.OneOf(choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL']))
@@ -37,15 +57,14 @@ class CBSchemaLogging(Schema):
     triggers = fields.String(validate=validate.OneOf(choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL']))
     sensors = fields.String(validate=validate.OneOf(choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL']))
 
-    # @pre_load
-    # def preprocess_data(self, data, **kwargs):
-    #     # Convert all the logging values to upper case.
-    #     log_settings = ['default_level', 'bays', 'config', 'core', 'display', 'mqtt','network','triggers','sensors']
-    #     for log in log_settings:
-    #         if log in data:
-    #             data[log] = data[log].upper()
-    #     print(data)
-    #     return data
+    @pre_load
+    def preprocess_data(self, data, **kwargs):
+        # Convert all the logging values to upper case.
+        log_settings = ['default', 'bays', 'config', 'core', 'display', 'mqtt','network','triggers','sensors']
+        for log in log_settings:
+            if log in data:
+                data[log] = data[log].upper()
+        return data
 
 class CBSchemaMQTT(Schema):
     """
@@ -53,12 +72,38 @@ class CBSchemaMQTT(Schema):
     """
     broker = fields.String()
     port = fields.Integer(validate=validate.Range(min=1023, max=65536))
+    base = fields.String(load_default="cobrabay")
     username = fields.String()
     password = fields.String()
     sensors_raw = fields.Bool(load_default=False)
     sensors_always_send = fields.Bool(load_default=False)
     #TODO: Better validation for Subscriptions. Maybe reorganize them?
     subscriptions = fields.List(fields.Dict())
+
+    @pre_load
+    def preprocess_data(self, data, **kwargs):
+        # Appropriate override settings based on environment or command line.
+        cmd_options = Context.get()['cmd_options']
+        env_options = Context.get()['env_options']
+        print("Got cmd options: {}".format(cmd_options))
+        print("Got env options: {}".format(env_options))
+        # Broker
+        if cmd_options.mqttbroker is not None:
+            data['broker'] = cmd_options.mqttbroker
+        elif env_options.mqttbroker is not None:
+            data['broker'] = env_options.mqttbroker
+        elif data['broker'] is None:
+            raise ValidationError("MQTT Broker must be defined!")
+
+        # Port
+        if cmd_options.mqttport is not None:
+            data['port'] = cmd_options.mqttport
+        elif env_options.mqttport is not None:
+            data['port'] = env_options.mqttport
+        else:
+            data['port'] = 1883
+
+        return data
 
 class CBSchemaIcons(Schema):
     """
@@ -82,9 +127,13 @@ class CBSchemaDisplay(Schema):
     """
     Cobrabay Display Schema
     """
+    def _default_font():
+        return importlib.resources.files('cobrabay.data').joinpath('OpenSans-Light.ttf')
+
     width = fields.Integer(validate=validate.Range(min=0))
     height = fields.Integer(validate=validate.Range(min=0))
     gpio_slowdown = fields.Integer(load_default=5)
+    font = fields.String(load_default=_default_font)
     font_size_clock = fields.Integer()
     font_size_range = fields.Integer()
     icons = fields.Nested(CBSchemaIcons)
@@ -133,23 +182,33 @@ class CBSchemaSensor(Schema):
         if len(missing_fields) > 0:
             raise ValidationError({missing_field:["Missing data for required field."] for missing_field in missing_fields})
 
-
 class CBSchemaSystem(Schema):
     """
     Cobrabay System Schema
     """
     unit_system = fields.Str(load_default='metric', validate=validate.OneOf(['metric','imperial']))
     system_name = fields.String()
-    interface = fields.String()
-    i2c = fields.Nested(CBSchemaI2C)
-    logging = fields.Nested(CBSchemaLogging)
-    mqtt = fields.Nested(CBSchemaMQTT)
+    interface = fields.String(required=True)
+    i2c = fields.Nested(CBSchemaI2C, required=True)
+    logging = fields.Nested(CBSchemaLogging, required=True)
+    mqtt = fields.Nested(CBSchemaMQTT, required=True)
+    ha = fields.Nested(CBSchemaHA, load_default=CBSchemaHA)
 
     @pre_load
     def preprocess_data(self, data, **kwargs):
+        # Make unit system lower-case so it string matches.
         if 'unit_system' in data:
             data['unit_system'] = data['unit_system'].lower()
+
+        # Make sure the required base keys exist for sub-schemas.
+        required_keys = ('i2c','logging','mqtt','ha')
+        for subschema in required_keys:
+            if subschema not in data:
+                data[subschema] = {}
         return data
+
+    def _systemname(self):
+        return os.uname().nodename
 
 class CBSchemaTrigger(Schema):
     """

@@ -16,8 +16,6 @@ from rgbmultitool import graphics
 from time import monotonic_ns
 from cobrabay.const import *
 
-
-
 # Class definition
 class CBDisplay:
     def __init__(self,

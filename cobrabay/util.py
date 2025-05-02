@@ -192,7 +192,6 @@ def typeconv(payload, tgt_type, allow_none):
         else:
             raise ValueError("Target type '{}' not supported.".format(tgt_type))
 
-
 def default_logger(name, parent_logger=None, log_level="WARNING"):
     """
     General
@@ -217,6 +216,29 @@ def default_logger(name, parent_logger=None, log_level="WARNING"):
         the_logger = parent_logger.getChild(name)
         the_logger.setLevel(log_level)
     return the_logger
+
+def uom(self, unit_system, unit_type):
+    """
+    Helper function to get the correct unit_of_measure to send to Home Assistant given a specific unit_system and
+    unit_type.
+    """
+    if unit_type == 'length':
+        if unit_system == 'imperial':
+            return "in"
+        else:
+            return "cm"
+    elif unit_type == 'temp':
+        if unit_system == 'imperial':
+            return "°F"
+        else:
+            return "°C"
+    elif unit_type == 'speed':
+        if unit_system == 'imperial':
+            return 'mph'
+        else:
+            return 'kph'
+    else:
+        raise ValueError("{} isn't a valid unit type".format(unit_type))
 
 # Don't think this is needed anymore.
 # def _validate_environment(input_base,

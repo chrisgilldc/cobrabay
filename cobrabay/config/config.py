@@ -5,6 +5,7 @@ Marshmallow style.
 import copy
 import logging
 from marshmallow import ValidationError
+from marshmallow.experimental.context import Context
 import pathlib
 import platform
 import yaml
@@ -94,13 +95,15 @@ class CBConfig:
         # Merge the configs.
         # merged_config = self._merge_config_environment(copy.deepcopy(self._loaded_config))
         # Put the config through the deserializer to normalize and validate.
-        try:
-            self._config = CBSchema().load(self._loaded_config)
-        except ValidationError as err:
-            self._logger.error("Could not validate.")
-            self._logger.error(err.messages)
-            return False
-        return True
+        with Context({'cmd_options': self._cmd_options,
+                         'env_options': self._env_options}):
+            try:
+                self._config = CBSchema().load(self._loaded_config)
+            except ValidationError as err:
+                self._logger.error("Could not validate.")
+                self._logger.error(err.messages)
+                return False
+            return True
 
     @property
     def config(self):
