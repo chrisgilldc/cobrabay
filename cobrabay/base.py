@@ -4,10 +4,24 @@ Cobrabay Base Object
 This object is inherited by any object that needs to communicate with the network.
 """
 
-class CBBase():
+class CBBase:
+    """
+    Base class for Cobrabay objects that need MQTT capability.
+    """
     def __init__(self, client_id, device_info, mqtt_settings, system_name, unit_system):
         """
-        Initialize and create the objects.
+        Initialize the object.
+
+        :param client_id: Value for the client ID. Usually the MAC address.
+        :type client_id: str
+        :param device_info: Device Information object.
+        :type device_info: ha_mqtt_discoverable.DeviceInfo
+        :param mqtt_settings: MQTT Settings object.
+        :type mqtt_settings: ha_mqtt_discoverable.Settings
+        :param system_name: Name of the system.
+        :type system_name: str
+        :param unit_system: Unit system to use. 'metric' or 'imperial'.
+        :type unit_system: str
         """
         # Initialize the variables to hold basic MQTT settings.
         self._mqtt_obj = {}
