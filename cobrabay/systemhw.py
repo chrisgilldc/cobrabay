@@ -1,8 +1,8 @@
-####
-# Cobra Bay - System Hardware
-#
-# Gets System Hardware Status
-####
+"""
+Cobrabay - System Hardware
+
+Gets System Hardware Status
+"""
 
 from math import floor
 
@@ -13,34 +13,36 @@ from rpi_bad_power import new_under_voltage
 import ha_mqtt_discoverable as hmd
 import ha_mqtt_discoverable.sensors as hmds
 from cobrabay import CBBase
+import time
 
 class CBPiStatus(CBBase):
-    def __init__(self, mqtt_settings, device_info, client_id, system_name, unit_system):
+    def __init__(self, client_id, device_info, mqtt_settings, system_name, unit_system):
         super().__init__(client_id, device_info, mqtt_settings, system_name, unit_system)
-        print("PiStatus settings:")
-        print("client_id: {}".format(self.client_id))
-        print("device_info: {}".format(self.device_info))
-        print("mqtt_settings: {}".format(self.mqtt_settings))
-        print("system_name: {}".format(self.system_name))
-        print("unit_system: {}".format(self.unit_system))
+
+        self._timestamp = time.monotonic() - 1000
 
         self._ureg = UnitRegistry()
         self._ureg.define('percent = 1 / 100 = %')
-        self._Q = self._ureg.Quantity
+        # self._Q = self._ureg.Quantity
 
-    def poll(self):
-        if self._cpu_info() != self._mqtt_previous_values['cpu_pct']:
-            self._mqtt_previous_values['cpu_pct'] = self._cpu_info()
-            self._mqtt_obj['cpu_pct'].set_state(self._mqtt_previous_values['cpu_pct'])
+    def update(self):
+        """
+        Send updates to MQTT.
+        """
+        if time.monotonic() - self._timestamp > 60:
+            self._timestamp = time.monotonic()
+            if self._cpu_info() != self._mqtt_previous_values['cpu_pct']:
+                self._mqtt_previous_values['cpu_pct'] = self._cpu_info()
+                self._mqtt_obj['cpu_pct'].set_state(self._mqtt_previous_values['cpu_pct'])
 
-        if self._cpu_temp() != self._mqtt_previous_values['cpu_temp']:
-            self._mqtt_previous_values['cpu_temp'] = self._cpu_temp()
-            self._mqtt_obj['cpu_temp'].set_state(self._mqtt_previous_values['cpu_temp']) #TODO: Unit conversion for output.
+            if self._cpu_temp() != self._mqtt_previous_values['cpu_temp']:
+                self._mqtt_previous_values['cpu_temp'] = self._cpu_temp()
+                self._mqtt_obj['cpu_temp'].set_state("{:0.2f}".format(
+                    float(self._mqtt_previous_values['cpu_temp'].magnitude)))
 
-        if self._undervoltage() != self._mqtt_previous_values['undervoltage']:
-            self._mqtt_previous_values['undervoltage'] = self._undervoltage()
-            self._mqtt_obj['undervoltage'].update_state(self._mqtt_previous_values['undervoltage'])
-
+            if self._undervoltage() != self._mqtt_previous_values['undervoltage']:
+                self._mqtt_previous_values['undervoltage'] = self._undervoltage()
+                self._mqtt_obj['undervoltage'].update_state(self._mqtt_previous_values['undervoltage'])
 
     def status(self,metric):
         if metric == 'cpu_pct':
@@ -55,11 +57,16 @@ class CBPiStatus(CBBase):
         else:
             raise ValueError('Not a valid metric')
 
-    def _cpu_info(self):
+    @staticmethod
+    def _cpu_info():
         return psutil.cpu_percent()
 
     def _cpu_temp(self):
-        return self._Q(CPUTemperature().temperature, self._ureg.degC)
+        temp = self._ureg.Quantity(CPUTemperature().temperature, self._ureg.degC)
+        if self.unit_system == 'imperial':
+            temp = temp.to('degF')
+        # return self._Q(CPUTemperature().temperature, self._ureg.degC)
+        return temp
 
     def _mem_info(self):
         memory = psutil.virtual_memory()
@@ -72,7 +79,8 @@ class CBPiStatus(CBBase):
                                               self._ureg.percent)
         return return_dict
 
-    def _undervoltage(self):
+    @staticmethod
+    def _undervoltage():
         under_voltage = new_under_voltage()
         if under_voltage is None:
             return "unavailable"
@@ -92,7 +100,7 @@ class CBPiStatus(CBBase):
         self._mqtt_obj['cpu_pct'] = hmds.Sensor(
             hmd.Settings(mqtt=self._mqtt_settings,
                          entity=hmds.SensorInfo(
-                             unique_id=self.client_id + "cpu_pct",
+                             unique_id=self.client_id + "_cpu_pct",
                              name="{} CPU Use Percentage".format(self.system_name),
                              unit_of_measurement="%",
                              icon="mdi:chip",
@@ -102,12 +110,18 @@ class CBPiStatus(CBBase):
         )
         self._mqtt_previous_values['cpu_pct'] = None
 
+        # Determine CPU Temp unit.
+        if self.unit_system == 'imperial':
+            temp_uom = "°F"
+        else:
+            temp_uom = "°C"
+
         self._mqtt_obj['cpu_temp'] = hmds.Sensor(
             hmd.Settings(mqtt=self.mqtt_settings,
                          entity=hmds.SensorInfo(
-                             unique_id=self.client_id + "cpu_temp",
+                             unique_id=self.client_id + "_cpu_temp",
                              name="{} CPU Temperature".format(self.system_name),
-                             unit_of_measurement="%",
+                             unit_of_measurement=temp_uom,
                              icon="mdi:thermometer",
                              device=self.device_info
                          ),
@@ -118,7 +132,7 @@ class CBPiStatus(CBBase):
         self._mqtt_obj['mem_info'] = hmds.Sensor(
             hmd.Settings(mqtt=self.mqtt_settings,
                         entity=hmds.SensorInfo(
-                            unique_id=self.client_id + "mem_free",
+                            unique_id=self.client_id + "_mem_free",
                             name="{} Memory Free".format(self.system_name),
                             unit_of_measurement='%',
                             icon="mdi:memory",
@@ -128,25 +142,14 @@ class CBPiStatus(CBBase):
         )
         self._mqtt_previous_values['mem_info'] = None
 
-        #     # Memory Info
-        #     self._ha_discover(
-        #         name="{} Memory Free".format(self._system_name),
-        #         topic=f"{self._mqtt_base}/{self._client_id}/system/mem_info",
-        #         entity_type='sensor',
-        #         entity="{}_mem_info".format(self._system_name.lower()),
-        #         value_template='{{ value_json.mem_avail_pct }}',
-        #         unit_of_measurement='%',
-        #         icon="mdi:memory"
-        #     )
-
         self._mqtt_obj['undervoltage'] = hmds.BinarySensor(
             hmd.Settings(mqtt=self.mqtt_settings,
                          entity=hmds.BinarySensorInfo(
-                             unique_id=self.client_id + "undervoltage",
+                             unique_id=self.client_id + "_undervoltage",
                              name="{} Undervoltage".format(self.system_name),
                              payload_on="true",
                              payload_off="false",
-                             icon="mdi:alert-octogram",
+                             icon="mdi:alert-octagram",
                              device=self.device_info
                          )
                      )
