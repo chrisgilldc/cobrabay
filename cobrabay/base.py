@@ -98,5 +98,26 @@ class CBBase:
         """
         self._system_name = new_system_name
 
+    @property
+    def unit_system(self):
+        """
+        The current unit system of the display.
+        :return:
+        """
+        return self._unit_system
+
+    @unit_system.setter
+    def unit_system(self, the_input):
+        """
+        Set the unit system
+
+        :param the_input:
+        :return:
+        """
+        if the_input.lower() not in ('imperial', 'metric'):
+            raise ValueError("Unit system must be one of 'imperial' or 'metric'. Instead got '{}' ({})".
+                             format(the_input, type(the_input)))
+        self._unit_system = the_input.lower()
+
     def _make_mqtt_objects(self):
         raise NotImplemented("MQTT Object Creation should be implemented by the subclass.")
