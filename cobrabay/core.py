@@ -86,7 +86,7 @@ class CBCore:
             while self._exit_code < 0:
                 # New style....
                 # Poll all the main objects to get them to update.
-                self._pistatus.poll()
+                self._pistatus.update()
                 # Update the local sensor variable.
                 # self._sensor_update()
                 # Call Bay update to have them update their data state.
@@ -405,6 +405,10 @@ class CBCore:
         """
         # Create the display.
         self._display = cobrabay.CBDisplay(
+            client_id=self._network.client_id,
+            device_info=self._network.device_info,
+            mqtt_settings=self._network.mqtt_settings,
+            system_name=self._network.system_name,
             width=self._configmgr.active_config.config['display']['width'],
             height=self._configmgr.active_config.config['display']['height'],
             gpio_slowdown=self._configmgr.active_config.config['display']['gpio_slowdown'],
@@ -506,7 +510,6 @@ class CBCore:
 
         # Create the display so we can show a startup message!
         self._setup_display()
-
 
         # Register the hardware monitor with the network module.
         # self._network.register_pistatus(self._pistatus)

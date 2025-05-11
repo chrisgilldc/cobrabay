@@ -7,6 +7,8 @@
 import logging
 from base64 import b64encode
 from datetime import datetime
+import ha_mqtt_discoverable as hmd
+import ha_mqtt_discoverable.sensors as hmds
 from io import BytesIO
 from pint import UnitRegistry, Quantity
 from PIL import Image, ImageDraw, ImageFont, ImageColor
@@ -14,11 +16,12 @@ from rgbmatrix import RGBMatrix, RGBMatrixOptions
 import rgbmultitool
 from rgbmultitool import graphics
 from time import monotonic_ns
+from cobrabay import CBBase
 from cobrabay.const import *
 
 # Class definition
-class CBDisplay:
-    def __init__(self,
+class CBDisplay(CBBase):
+    def __init__(self, client_id, device_info, mqtt_settings, system_name,
                  width,
                  height,
                  gpio_slowdown,
@@ -34,6 +37,14 @@ class CBDisplay:
         """
         Cobrabay Display Object
 
+        :param client_id: Value for the client ID. Usually the MAC address.
+        :type client_id: str
+        :param device_info: Device Information object.
+        :type device_info: ha_mqtt_discoverable.DeviceInfo
+        :param mqtt_settings: MQTT Settings object.
+        :type mqtt_settings: ha_mqtt_discoverable.Settings
+        :param system_name: Name of the system.
+        :type system_name: str
         :param width: Pixel width of the display.
         :type width: int
         :param height: Pixel height of the display.
@@ -59,6 +70,7 @@ class CBDisplay:
         :type log_level: str
         """
 
+
         # Set up our logger.
         self._logger = logging.getLogger("cobrabay").getChild("Display")
         self._logger.setLevel(log_level.upper())
@@ -68,12 +80,16 @@ class CBDisplay:
         # Save parameters
         self._matrix_width = width
         self._matrix_height = height
+        self._gpio_slowdown = gpio_slowdown
         self.unit_system = unit_system  # Set the unit system.
         self._cbcore = cbcore  # Save the core reference.
         self._font = font  # Save the font.
         self._logger.debug("Font: {}".format(self._font))
         self._logger.debug("Font type: {}".format(type(self._font)))
         self._logger.debug("Font properties: {}".format(dir(self._font)))
+
+        # Call super class init.
+        super().__init__(client_id, device_info, mqtt_settings, system_name, unit_system)
 
         self._icons = icons
         self._logger.info("Icon settings: {}".format(self._icons))
@@ -118,6 +134,15 @@ class CBDisplay:
         # Set up the matrix object itself.
         self._logger.info("Initializing matrix...")
         self._matrix = self._create_matrix(self._matrix_width, self._matrix_height, gpio_slowdown)
+        # Set Attributes
+        #TODO: Get Attributes to send reliably.
+        # self._mqtt_obj['display'].set_attributes(
+        #     {'width': self._matrix_width,
+        #      'height': self._matrix_height,
+        #      'gpio_slowdown': self._gpio_slowdown
+        #     }
+        # )
+
         self._logger.info("Display initialization complete.")
 
     ## Public Methods
@@ -432,28 +457,8 @@ class CBDisplay:
         image_buffer = BytesIO()
         # Put in the staging variable for pickup, base64 encoded.
         image.save(image_buffer, format='PNG')
-        self._current_image = b64encode(image_buffer.getvalue())
-
-    @property
-    def unit_system(self):
-        """
-        The current unit system of the display.
-        :return:
-        """
-        return self._unit_system
-
-    @unit_system.setter
-    def unit_system(self, the_input):
-        """
-        Set the unit system
-
-        :param the_input:
-        :return:
-        """
-        if the_input.lower() not in ('imperial', 'metric'):
-            raise ValueError("Unit system must be one of 'imperial' or 'metric'. Instead got '{}' ({})".
-                             format(the_input, type(the_input)))
-        self._unit_system = the_input.lower()
+        # Push the blob out to MQTT
+        self._mqtt_obj['display'].set_image(b64encode(image_buffer.getvalue()))
 
     ## Private Methods
     def _create_matrix(self, width, height, gpio_slowdown):
@@ -551,96 +556,30 @@ class CBDisplay:
         draw.rectangle([(0, height - 3), (width - 1, height - 1)], width=1)
         return img
 
-    # def _icon_network(self, net_status=False, mqtt_status=False, x_input=None, y_input=None):
-    #     """
-    #     Draw a network icon based on current status. Icon will be color coded based on the statuses.
-    #     Green = Connected
-    #     Red = Not connected
-    #     Yellow = Unable to connect because of other errors (ie: MQTT can't connect because network is down)
-    #
-    #     :param net_status: Network connection status
-    #     :type net_status: bool
-    #     :param mqtt_status: MQTT broker connection status
-    #     :type mqtt_status: bool
-    #     :param x_input: X position of the icon. Defaults to 5 pixels from the right side.
-    #     :type x_input: int
-    #     :param y_input: Y position of the icon. Defaults to 5 pixels from the bottom.
-    #     :type y_input: int
-    #     :return:
-    #     """
-    #
-    #     # determine the network status color based on combined network and MQTT status.
-    #     if net_status is False:
-    #         net_color = 'red'
-    #         mqtt_color = 'yellow'
-    #     elif net_status is True:
-    #         net_color = 'green'
-    #         if mqtt_status is False:
-    #             mqtt_color = 'red'
-    #         elif mqtt_status is True:
-    #             mqtt_color = 'green'
-    #         else:
-    #             raise ValueError("Network Icon draw got invalid MQTT status value {}.".format(net_status))
-    #     else:
-    #         raise ValueError("Network Icon draw got invalid network status value {}.".format(net_status))
-    #
-    #     # Default to lower right placement if no alternate positions given.
-    #     if x_input is None:
-    #         x_input = self._matrix_width - 5
-    #     if y_input is None:
-    #         y_input = self._matrix_height - 5
-    #
-    #     w = self._matrix_width
-    #     h = self._matrix_height
-    #     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    #     draw = ImageDraw.Draw(img)
-    #     draw.rectangle([x_input + 1, y_input, x_input + 3, y_input + 2], outline=mqtt_color, fill=mqtt_color)
-    #     # Base network line.
-    #     draw.line([x_input, y_input + 4, x_input + 4, y_input + 4], fill=net_color)
-    #     # Network stem
-    #     draw.line([x_input + 2, y_input + 3, x_input + 2, y_input + 4], fill=net_color)
-    #     return img
+    def _make_mqtt_objects(self):
+        """
+        Create MQTT objects
+        """
+        self._mqtt_obj['display'] =  hmds.Image(
+            hmd.Settings(mqtt=self.mqtt_settings,
+                         entity=hmds.ImageInfo(
+                             unique_id=self.client_id + "display",
+                             name="{} Display".format(self.system_name),
+                             icon="mdi:view-dashboard",
+                             image_encoding="b64",
+                             image_topic=self.mqtt_settings.state_prefix + "/image/" + self.system_name + "-Display/state",
+                             content_type="image/png",
+                             device=self.device_info
+                         ),
+                     ),
+        )
 
-    def _icon_vehicle(self, x_input=None, y_input=None):
-        # Defaults because you can't reference object variables in parameters.
-        # Default to lower_left.
-        if x_input is None:
-            x_input = 0
-        if y_input is None:
-            y_input = self._matrix_height
-
-        w = self._matrix_width
-        h = self._matrix_height
-        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        # Draw the vehicle box.
-
-        draw.rectangle([x_input + 2, y_input, x_input + 4, y_input - 5], outline='green', fill='green')
-        # Lateral sensor. Presuming one!
-        draw.line([x_input + 3, y_input - 7, x_input + 3, y_input - 7],
-                  fill=self._status_color(SENSOR_QUALITY_WARN)['fill'])
-        # Lateral sensors.
-        return img
-
-    # def _output_image(self, image):
-    #     """
-    #     Send an image to the display.
-    #
-    #     :param image:
-    #     :return:
-    #     """
-    #     # Send to the matrix
-    #     self._matrix.SetImage(image.convert('RGB'))
-    #
-    #     image_buffer = BytesIO()
-    #     # Put in the staging variable for pickup, base64 encoded.
-    #     image.save(image_buffer, format='PNG')
-    #     self.current = b64encode(image_buffer.getvalue())
-
-    # Divide into roughly equal parts. Found this here:
-    # https://stackoverflow.com/questions/52697875/split-number-into-rounded-numbers
     @staticmethod
     def _parts(a, b):
+        """
+        Divide a range into roughly equal parts but whole numbers.
+        Found here: https://stackoverflow.com/questions/52697875/split-number-into-rounded-numbers
+        """
         q, r = divmod(a, b)
         return [q + 1] * r + [q] * (b - r)
 
