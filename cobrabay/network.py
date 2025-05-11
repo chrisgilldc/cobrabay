@@ -22,10 +22,6 @@ from cobrabay import CBBase
 import ha_mqtt_discoverable as hmd
 import ha_mqtt_discoverable.sensors as hmds
 
-# TODO: Reorganize class to standard.
-# FixMe: Maybe MQTT server reconnect issue.
-
-
 class CBNetwork(CBBase):
     def __init__(self,
                  unit_system,
