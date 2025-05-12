@@ -16,8 +16,25 @@ from cobrabay import CBBase
 import time
 
 class CBPiStatus(CBBase):
-    def __init__(self, client_id, device_info, mqtt_settings, system_name, unit_system):
-        super().__init__(client_id, device_info, mqtt_settings, system_name, unit_system)
+    def __init__(self,
+                 availability_topic, client_id, device_info, mqtt_settings, system_name, unit_system):
+        """
+        Initialize the pi hardware status object. This only takes the standard CBBase parameters to create MQTT objects.
+
+        :param availability_topic: Settings for entity availability
+        :type availability_topic: dict
+        :param client_id: Value for the client ID. Usually the MAC address.
+        :type client_id: str
+        :param device_info: Device Information object.
+        :type device_info: ha_mqtt_discoverable.DeviceInfo
+        :param mqtt_settings: MQTT Settings object.
+        :type mqtt_settings: ha_mqtt_discoverable.Settings
+        :param system_name: Name of the system.
+        :type system_name: str
+        :param unit_system: Unit system to use. 'metric' or 'imperial'.
+        :type unit_system: str
+        """
+        super().__init__(availability_topic, client_id, device_info, mqtt_settings, system_name, unit_system)
 
         self._timestamp = time.monotonic() - 1000
 
@@ -71,11 +88,11 @@ class CBPiStatus(CBBase):
     def _mem_info(self):
         memory = psutil.virtual_memory()
         return_dict = {
-            'mem_avail': self._Q(floor(memory.available), self._ureg.byte),
-            'mem_total': self._Q(memory.total, self._ureg.byte)
+            'mem_avail': self._ureg.Quantity(floor(memory.available), self._ureg.byte),
+            'mem_total': self._ureg.Quantity(memory.total, self._ureg.byte)
         }
-        return_dict['mem_avail_pct'] = self._Q(1 - floor(return_dict['mem_avail']) / return_dict['mem_total'], self._ureg.percent)
-        return_dict['mem_used_pct'] = self._Q(1 - floor(return_dict['mem_total'] - return_dict['mem_avail']) / return_dict['mem_total'],
+        return_dict['mem_avail_pct'] = self._ureg.Quantity(1 - floor(return_dict['mem_avail']) / return_dict['mem_total'], self._ureg.percent)
+        return_dict['mem_used_pct'] = self._ureg.Quantity(1 - floor(return_dict['mem_total'] - return_dict['mem_avail']) / return_dict['mem_total'],
                                               self._ureg.percent)
         return return_dict
 
@@ -106,8 +123,9 @@ class CBPiStatus(CBBase):
                              icon="mdi:chip",
                              device=self.device_info
                          ),
-                     ),
+                     )
         )
+        self._mqtt_obj['cpu_pct'].availability_topic = self.availability_topic
         self._mqtt_previous_values['cpu_pct'] = None
 
         # Determine CPU Temp unit.
@@ -125,8 +143,9 @@ class CBPiStatus(CBBase):
                              icon="mdi:thermometer",
                              device=self.device_info
                          ),
-                     ),
+                     )
         )
+        self._mqtt_obj['cpu_temp'].availability_topic = self.availability_topic
         self._mqtt_previous_values['cpu_temp'] = None
 
         self._mqtt_obj['mem_info'] = hmds.Sensor(
@@ -140,6 +159,7 @@ class CBPiStatus(CBBase):
                         )
                     )
         )
+        self._mqtt_obj['mem_info'].availability_topic = self.availability_topic
         self._mqtt_previous_values['mem_info'] = None
 
         self._mqtt_obj['undervoltage'] = hmds.BinarySensor(
@@ -154,6 +174,7 @@ class CBPiStatus(CBBase):
                          )
                      )
         )
+        self._mqtt_obj['undervoltage'].availability_topic = self.availability_topic
         self._mqtt_previous_values['undervoltage'] = None
 
         return None

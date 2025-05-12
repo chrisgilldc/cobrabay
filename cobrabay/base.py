@@ -3,21 +3,25 @@ Cobrabay Base Object
 
 This object is inherited by any object that needs to communicate with the network.
 """
+from zoneinfo import available_timezones
+
 
 class CBBase:
     """
     Base class for Cobrabay objects that need MQTT capability.
     """
-    def __init__(self, client_id, device_info, mqtt_settings, system_name, unit_system):
+    def __init__(self, availability_topic, client_id, device_info, mqtt_settings, system_name, unit_system):
         """
         Initialize the object.
 
+        :param availability_topic: Settings for entity availability
+        :type availability_topic: dict
         :param client_id: Value for the client ID. Usually the MAC address.
         :type client_id: str
         :param device_info: Device Information object.
         :type device_info: ha_mqtt_discoverable.DeviceInfo
         :param mqtt_settings: MQTT Settings object.
-        :type mqtt_settings: ha_mqtt_discoverable.Settings
+        :type mqtt_settings: ha_mqtt_discoverable.Settings.MQTT
         :param system_name: Name of the system.
         :type system_name: str
         :param unit_system: Unit system to use. 'metric' or 'imperial'.
@@ -32,6 +36,7 @@ class CBBase:
         self._system_name = None
         # Assign the MQTT Settings. This will trigger MQTT object creation.
         # Assign the settings.
+        self.availability_topic = availability_topic
         self.client_id = client_id
         self.device_info = device_info
         self.mqtt_settings = mqtt_settings
@@ -40,6 +45,20 @@ class CBBase:
 
         # Make the objects.
         self._make_mqtt_objects()
+
+    @property
+    def availability_topic(self):
+        """
+        Entity availability settings
+        """
+        return self._availability_topic
+
+    @availability_topic.setter
+    def availability_topic(self, new_availability_topic):
+        """
+        Set the availabilty_topic as obtained from the network object.
+        """
+        self._availability_topic = new_availability_topic
 
     @property
     def client_id(self):

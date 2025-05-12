@@ -21,7 +21,8 @@ from cobrabay.const import *
 
 # Class definition
 class CBDisplay(CBBase):
-    def __init__(self, client_id, device_info, mqtt_settings, system_name,
+    def __init__(self, availability_topic,
+                 client_id, device_info, mqtt_settings, system_name,
                  width,
                  height,
                  gpio_slowdown,
@@ -37,6 +38,8 @@ class CBDisplay(CBBase):
         """
         Cobrabay Display Object
 
+        :param availability_topic: Settings for entity availability
+        :type availability_topic: dict
         :param client_id: Value for the client ID. Usually the MAC address.
         :type client_id: str
         :param device_info: Device Information object.
@@ -89,7 +92,7 @@ class CBDisplay(CBBase):
         self._logger.debug("Font properties: {}".format(dir(self._font)))
 
         # Call super class init.
-        super().__init__(client_id, device_info, mqtt_settings, system_name, unit_system)
+        super().__init__(availability_topic, client_id, device_info, mqtt_settings, system_name, unit_system)
 
         self._icons = icons
         self._logger.info("Icon settings: {}".format(self._icons))
@@ -571,8 +574,10 @@ class CBDisplay(CBBase):
                              content_type="image/png",
                              device=self.device_info
                          ),
-                     ),
+                     )
         )
+        self._mqtt_obj['display'].availability_topic = self.availability_topic
+        self._mqtt_previous_values['display'] = None
 
     @staticmethod
     def _parts(a, b):

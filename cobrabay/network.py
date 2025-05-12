@@ -150,9 +150,9 @@ class CBNetwork(CBBase):
         # History of payloads, to determine if we need to repeat.
         self._topic_history = {}
         # Registry to keep extant bays.
-        self._bay_registry = {}
+        # self._bay_registry = {}
         # Registry to keep triggers
-        self._trigger_registry = {}
+        # self._trigger_registry = {}
 
         # Pull out the MAC as the client ID.
         for address in psutil.net_if_addrs()[interface]:
@@ -160,17 +160,6 @@ class CBNetwork(CBBase):
             if address.family == psutil.AF_LINK:
                 client_id = address.address.replace(':', '').upper()
                 break
-
-        # Device info to include in all Home Assistant discovery messages.
-        # self._device_info = dict(
-        #     name=self._system_name,
-        #     identifiers=[self._client_id],
-        #     suggested_area=self._ha_suggested_area,
-        #     manufacturer='ConHugeCo',
-        #     model='Cobra Bay Parking System',
-        #     sw_version=str(__version__)
-        # )
-        # self._device_info =
 
         self._logger.info("Defined Client ID: {}".format(client_id))
 
@@ -192,11 +181,12 @@ class CBNetwork(CBBase):
         self._mqtt_client.on_disconnect = self._on_disconnect
 
         super().__init__(
+            None,
             client_id,
             hmd.DeviceInfo(
                 name=system_name,
                 identifiers=[client_id],
-                # suggested_area=self._ha_suggested_area,
+                suggested_area=self._ha_suggested_area,
                 manufacturer='ConHugeCo',
                 model='Cobra Bay Parking System',
                 sw_version=str(__version__)
@@ -209,11 +199,7 @@ class CBNetwork(CBBase):
             unit_system
         )
 
-        # Create HMD MQTT Settings
-        # self._mqtt_hmd_settings =
-
-
-
+        self._logger.info("Availability topic: {}".format(self.availability_topic))
         self._logger.info('Network: Initialization complete.')
 
     # Properties
@@ -290,12 +276,12 @@ class CBNetwork(CBBase):
         # Subscribe to the Home Assistant status topic.
         self._mqtt_client.subscribe(f"{self._ha_base}/status")
         # Connect to all trigger topic callbacks.
-        for trigger_id in self._trigger_registry.keys():
-            self._trigger_subscribe(trigger_id)
+        # for trigger_id in self._trigger_registry.keys():
+        #     self._trigger_subscribe(trigger_id)
         # Connect to general purpose subscriptions
-        for subscription in self._subscriptions:
-            self._logger.info("Subscribing to {}:{}".format(subscription['id'],subscription['topic']))
-            self._mqtt_client.subscribe(subscription['topic'])
+        # for subscription in self._subscriptions:
+        #     self._logger.info("Subscribing to {}:{}".format(subscription['id'],subscription['topic']))
+        #     self._mqtt_client.subscribe(subscription['topic'])
         # Attach the general message callback
         self._mqtt_client.on_message = self._on_message
 
@@ -359,6 +345,21 @@ class CBNetwork(CBBase):
     #     return message_out
 
     # Public Methods
+
+    @property
+    def availability_topic(self):
+        """ Get the availability topic """
+        # The availability topic for other entities is the state_topic for the connectivity object.
+        at = self._mqtt_obj['connectivity'].generate_config()['state_topic']
+        self._logger.error("Returning availability topic: {}".format(at))
+        return at
+
+    @availability_topic.setter
+    def availability_topic(self, new_at):
+        """
+        Set the availability topic
+        """
+        pass
 
     def connect(self):
         """
@@ -529,6 +530,7 @@ class CBNetwork(CBBase):
         """
 
         # Connectivity
+        # This *doesn't* get the availability settings because it *is* the availability setting!
         self._mqtt_obj['connectivity'] = hmds.BinarySensor(
             hmd.Settings(mqtt=self.mqtt_settings,
                      entity=hmds.BinarySensorInfo(

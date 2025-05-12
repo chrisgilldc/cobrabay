@@ -404,7 +404,9 @@ class CBCore:
         Set up the Display Object
         """
         # Create the display.
+        self._logger.info("Core got availability topic: {}".format(self._network.availability_topic))
         self._display = cobrabay.CBDisplay(
+            availability_topic=self._network.availability_topic,
             client_id=self._network.client_id,
             device_info=self._network.device_info,
             mqtt_settings=self._network.mqtt_settings,
@@ -501,6 +503,7 @@ class CBCore:
         # Create the object for checking hardware status.
         self._logger.info("Creating Pi hardware monitor...")
         self._pistatus = cobrabay.CBPiStatus(
+            availability_topic=self._network.availability_topic,
             client_id=self._network.client_id,
             device_info=self._network.device_info,
             mqtt_settings=self._network.mqtt_settings,
