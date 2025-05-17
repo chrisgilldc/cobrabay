@@ -12,6 +12,8 @@ import cobrabay.datatypes
 import cobrabay.sensors
 # Triggers
 import cobrabay.triggers
+# Utility methods.
+import cobrabay.util
 
 # Unitary Classes
 from .base import CBBase
