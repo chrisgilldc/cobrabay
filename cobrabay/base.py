@@ -140,3 +140,11 @@ class CBBase:
 
     def _make_mqtt_objects(self):
         raise NotImplemented("MQTT Object Creation should be implemented by the subclass.")
+
+    def update(self, initial_connect=False):
+        """
+        Update the MQTT objects from acquired data.
+        The initial_connect flag is set when an update is called and the client has first connected. Use this to send
+        data that only needs to be sent once - ie: attributes that reflect configuration but don't change.
+        """
+        raise NotImplemented("Update method should be defined by child class.")
