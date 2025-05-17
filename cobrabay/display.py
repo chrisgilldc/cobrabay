@@ -304,24 +304,37 @@ class CBDisplay(CBBase):
                             placard_h = 6
                         # Otherwise draw the unavailable version.
                     elif icon_name == 'ev-battery':
-                        self._logger.debug("EV Battery data value: {}".format(self._cbcore.net_data['ev-battery'][1]))
-                        charge_value = self._cbcore.net_data['ev-battery'][1]
-                        battery_icon = graphics.icon_battery(charge_value, 12, 6)
-                        img.paste(battery_icon,
-                                  (int(self._matrix_width/2 - battery_icon.width/2), self._matrix_height - battery_icon.height))
-                        # Move the placard height up.
-                        if placard_h < 7:
-                            placard_h = 7
+                        #TODO: Temporary fix for ev-battery not being defined. Revisit this. Icon data should be
+                        # pre-defined in the dict during system setup.
+                        try:
+                            charge_value = self._cbcore.net_data['ev-battery'][1]
+                        except KeyError:
+                            pass
+                        else:
+                            self._logger.debug(
+                                "EV Battery data value: {}".format(self._cbcore.net_data['ev-battery'][1]))
+                            battery_icon = graphics.icon_battery(charge_value, 12, 6)
+                            img.paste(battery_icon,
+                                      (int(self._matrix_width/2 - battery_icon.width/2), self._matrix_height -
+                                       battery_icon.height))
+                            # Move the placard height up.
+                            if placard_h < 7:
+                                placard_h = 7
                     elif icon_name == 'ev-plug':
-                        # If ev-plug is None, don't display it, there's no data.
-                        if (self._cbcore.net_data['ev-plug'][1] is not None or
-                                self._cbcore.net_data['ev-charging'][1] is not None):
-                            self._logger.debug("EV Plug data value: {}".format(self._cbcore.net_data['ev-plug'][1]))
-                            plug_icon = graphics.icon_evplug(
-                                plugged_in=self._cbcore.net_data['ev-plug'][1],
-                                charging=self._cbcore.net_data['ev-charging'][1])
-                            img.paste(plug_icon,
-                                      (0,self._matrix_height - plug_icon.height))
+                        #TODO: Temporary fix for ev-plug not being defined. Revisit, like ev-battery.
+                        try:
+                            plug_state = self._cbcore.net_data['ev-plug'][1]
+                        except KeyError:
+                            pass
+                        else:
+                            if (self._cbcore.net_data['ev-plug'][1] is not None or
+                                    self._cbcore.net_data['ev-charging'][1] is not None):
+                                self._logger.debug("EV Plug data value: {}".format(self._cbcore.net_data['ev-plug'][1]))
+                                plug_icon = graphics.icon_evplug(
+                                    plugged_in=self._cbcore.net_data['ev-plug'][1],
+                                    charging=self._cbcore.net_data['ev-charging'][1])
+                                img.paste(plug_icon,
+                                          (0,self._matrix_height - plug_icon.height))
                     elif icon_name == 'garage-door':
                         pass
                     elif icon_name == 'sensors':
