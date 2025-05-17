@@ -3,14 +3,19 @@ Cobra Bay Core
 """
 
 import copy
-# import queue
+import queue
 import sys
 import signal
 import logging
 import time
 from logging.handlers import WatchedFileHandler
-
 import cobrabay
+from pprint import pformat
+# Network Imports
+import ha_mqtt_discoverable as hmd
+import ha_mqtt_discoverable.sensors as hmds
+from paho.mqtt.client import Client
+import psutil
 
 class CBCore:
     """
@@ -30,11 +35,20 @@ class CBCore:
         # Initialize variables
         self.system_state='init' # System state is initializing.
         self._bays = {}
+        self._mqtt_obj = {}
+        self._mqtt_previous_values = {}
         self._network = None
         self._pistatus = None
         self._sensor_latest_data = {}
         self.sensor_log = []
         self._sensormgr = None
+        self._connect_timestamp = None
+        self._mqtt_connected = cobrabay.const.MQTT_DISCONNECTED
+        self._device_info = None
+        self._mqtt_settings = None
+        self._client_id = None
+        # Flag for when interface down has been logged.
+        self._flag_idown_logged = False
         # Network data dict. This collects data from subscriptions as well as interface and MQTT status.
         # At start, we assume interface is down, and MQTT by definition can't be connected.
         self._net_data = {
@@ -63,6 +77,8 @@ class CBCore:
                 "Based on command line option, setting core logger to '{}'".format(cmd_options.loglevel))
             self._logger.setLevel(cmd_options.loglevel)
 
+        #TODO: Add some way to get debugging from the MQTT objects.
+
         # Register the signal handlers.
         self._setup_signal_handlers()
 
@@ -73,6 +89,27 @@ class CBCore:
         self._setup_system()
 
     # Public Methods
+
+    def poll(self, status=None):
+        """
+        Poll Network client.
+        """
+        # Pull out the interface for convenience.
+        interface = self._configmgr.active_config.config['system']['interface']
+        if not self._iface_up():
+            # If interface isn't up, not much to do. Set statuses for interface to MQTT to false.
+            if not self._flag_idown_logged:
+                self._logger.warning("Interface '{}' down.".format(interface))
+                self._flag_idown_logged = True
+            self.set_net_data('interface',False)
+            self.set_net_data('mqtt',False)
+            return
+        else:
+            # Set interface to up.
+            if self._flag_idown_logged:
+                self._logger.info("Interface '{}' is up.")
+                self._flag_idown_logged = False
+            self.set_net_data('interface', True)
 
     # Main operating loop.
     def run(self):
@@ -87,14 +124,16 @@ class CBCore:
                 # New style....
                 # Poll all the main objects to get them to update.
                 self._pistatus.update()
+                # Update the local I2C Status
+                self._mqtt_obj['i2c'].update_state("false")
                 # Update the local sensor variable.
                 # self._sensor_update()
                 # Call Bay update to have them update their data state.
                 for bay_id in self._bays:
                     self._bays[bay_id].update()
                 # Poll the network
-                self._logger.debug("Polling network.")
-                self._network.poll()
+                #self._logger.debug("Polling network.")
+                #self._network.poll()
                 # Check triggers and execute actions if needed.
                 # self._trigger_check()
                 # See if any of the bays checked to a motion state.
@@ -106,7 +145,7 @@ class CBCore:
                         # Go into the motion loop.
                         self._motion(bay_id)
                         break
-                self._logger.debug("Updating idle display.")
+                #self._logger.debug("Updating idle display.")
                 self._display.show("clock")
         except BaseException as e:
             # Exit due to failure.
@@ -130,21 +169,21 @@ class CBCore:
         try:
             self._sensormgr.set_sensor_state(cobrabay.const.SENSTATE_DISABLED)
         except AttributeError:
-            # If the sensor manager wasn't initialized, this failsed. But that's okay.
+            # If the sensor manager wasn't initialized, this failed. But that's okay.
             pass
         self._logger.critical("Terminated.")
         sys.exit(exit_code)
 
     # Public Properties
 
-    @property
-    def configured_sensors(self):
-        """
-        Return a list of configured sensor IDs.
-
-        :return:
-        """
-        return self._active_config.sensors
+    # @property
+    # def configured_sensors(self):
+    #     """
+    #     Return a list of configured sensor IDs.
+    #
+    #     :return:
+    #     """
+    #     return self._active_config.sensors
 
     @property
     def sensor_latest_data(self):
@@ -156,9 +195,10 @@ class CBCore:
         """ Data from subscribed topics in the Network Module. """
         return self._net_data
 
-    def set_net_data(self, id, payload):
+
+    def set_net_data(self, sub_id, payload):
         """ Set new payload value for a subscribed topic. Wrap it in a timestamp."""
-        self._net_data[id] = (time.monotonic(), payload)
+        self._net_data[sub_id] = (time.monotonic(), payload)
 
     # Private methods
 
@@ -167,6 +207,66 @@ class CBCore:
         #TODO: Fully implement core command handler.
         self._logger.info("Core command received: {}".format(cmd))
         self._logger.info("Core command handling not yet implemented. Nothing to do.")
+
+    def _make_mqtt_objects(self):
+        """
+        Make MQTT objects for the Core. This includes raw sensor objects, if configured, because the sensor manager
+        doesn't have direct MQTT access.
+        """
+        # Connectivity
+        # This *doesn't* get the availability settings because it *is* the availability setting!
+        self._mqtt_obj['connectivity'] = hmds.BinarySensor(
+            hmd.Settings(mqtt=self.mqtt_settings,
+                     entity=hmds.BinarySensorInfo(
+                         unique_id=self.client_id + "connectivity",
+                         name="{} Connectivity".format(self.system_name),
+                         device_class='connectivity',
+                         payload_on='online',
+                         payload_off='offline',
+                         device=self.device_info
+                     )
+            )
+        )
+        # Having created connectivity, set the global availability topic property so other objects can reference this.
+        self.availability_topic = self._mqtt_obj['connectivity'].generate_config()['state_topic']
+
+        self._logger.info("Making Core MQTT objects.")
+        # Make core command handler here.
+
+        # Make I2C Bus status object.
+        self._mqtt_obj['i2c'] = hmds.BinarySensor(
+            hmd.Settings(mqtt=self.mqtt_settings,
+                         entity=hmds.BinarySensorInfo(
+                             unique_id=self.client_id + "_i2c",
+                             name="{} I2C".format(self._configmgr.system_name),
+                             payload_on="online",
+                             payload_off="offline",
+                             icon="mdi:transit-connection-horizontal",
+                             device=self.device_info
+                         )
+                     )
+        )
+        self._mqtt_obj['i2c'].availability_topic = self.availability_topic
+        # self._logger.info("I2C Object config: {}".format(self._mqtt_obj['i2c'].generate_config()))
+
+        # Make the sensor objects based purely on the configuration. Even if the Sensor Manager can't bring it up, that
+        # will get it marked as faulted.
+        # for sensor_id in self._configmgr.active_config.config['sensors']:
+        #     self._logger.debug("Would create MQTT object for: {}".format(sensor_id))
+
+    def _make_client_id(self, interface):
+        """
+        Determine a client id from the primary interface's MAC.
+        """
+        client_id = None
+        for address in psutil.net_if_addrs()[interface]:
+            # Find the link address.
+            if address.family == psutil.AF_LINK:
+                client_id = address.address.replace(':', '').upper()
+                break
+
+        self._logger.info("Defined Client ID: {}".format(client_id))
+        return client_id
 
     def _motion(self, bay_id):
         self._logger.info('Beginning {} on bay {}.'.format(self._bays[bay_id].state, bay_id))
@@ -227,6 +327,18 @@ class CBCore:
         self._outbound_messages = []
         return network_data
 
+    def _core_on_connect(self):
+        """
+        On Connect callback
+        """
+        self._mqtt_obj['i2c'].set_attributes(
+            {"Bus": self._configmgr.active_config.config['system']['i2c']['bus'],
+            "Enable Pin": self._configmgr.active_config.config['system']['i2c']['enable'],
+            "Ready Pin": self._configmgr.active_config.config['system']['i2c']['ready'],
+            "Ready Wait Time": self._configmgr.active_config.config['system']['i2c']['wait_ready'],
+            "Reset Wait Time": self._configmgr.active_config.config['system']['i2c']['wait_reset']}
+        )
+
     def _sensor_update(self):
         """
         Update local latest sensor variable from the data queue.
@@ -270,6 +382,7 @@ class CBCore:
             self._logger.debug("No data marked as latest, considering all data in sensor log as latest.")
             self._sensor_latest_data = self.sensor_log[0].sensors
         # Pull out the most recent data and put it in the sensor_most_recent dict.
+        self._logger.debug("Sensor log keys: {}".format(self.sensor_log[0].sensors.keys()))
         for sensor_id in self.sensor_log[0].sensors:
             # Don't update when waiting for an interrupt.
             if self.sensor_log[0].sensors[sensor_id].response_type == cobrabay.const.SENSOR_RESP_INR:
@@ -336,40 +449,79 @@ class CBCore:
             ch.setLevel(logging.CRITICAL)
         self._master_logger.addHandler(ch)
 
-    def _setup_sensors(self):
+    def _setup_sensormgr(self):
         """
-        Setup sensors. OLD.
-        :return:
+        Set up the Sensor Manager
         """
-        return_dict = {}
-        # Create the correct sensors.
-        self._logger.debug("Creating sensors.")
-        for sensor_id  in self._active_config.sensors:
-            self._logger.debug("Creating sensor: {}".format(sensor_id))
-            sensor_config = self._active_config.sensor(sensor_id)
-            self._logger.debug("Using settings: {}".format(sensor_config))
-            # Create the correct type of sensor object based on defined type.
-            if sensor_config['hw_type'] == 'VL53L1X':
-                # return_dict[sensor_id] = cobrabay.sensors.CBVL53L1X(
-                #     name=sensor_config['name'], i2c_address=sensor_config['hw_settings']['i2c_address'],
-                #     i2c_bus=sensor_config['hw_settings']['i2c_bus'],
-                #     enable_board=sensor_config['hw_settings']['enable_board'],
-                #     enable_pin=sensor_config['hw_settings']['enable_pin'],
-                #     timing=sensor_config['hw_settings']['timing'], always_range=sensor_config['always_range'],
-                #     distance_mode=sensor_config['hw_settings']['distance_mode'],
-                #     parent_logger=self._logger,
-                #     log_level=sensor_config['log_level'])
-                return_dict[sensor_id] = cobrabay.sensors.CBVL53L1X(name=sensor_config['name'],
-                                                                    **sensor_config['hw_settings'])
-            elif sensor_config['hw_type'] == 'TFMini':
-                return_dict[sensor_id] = cobrabay.sensors.TFMini(name=sensor_config['name'],
-                                                                 **sensor_config['hw_settings'])
 
-            else:
-                self._logger.error("Sensor '{}' has unknown type '{}'. Cannot configure!".
-                                   format(sensor_id, sensor_config['hw_type']))
-        # self._logger.debug("VL53LX instances: {}".format(len(cobrabay.sensors.CBVL53L1X.instances)))
-        return return_dict
+        self._logger.info("Configuring sensor manager...")
+        # Create the queues needed for the sensor manager.
+        self._q_cbsmdata = queue.Queue(maxsize=1)
+        self._q_cbsmstatus = queue.Queue(maxsize=1)
+        self._q_cbsmcontrol = queue.Queue(maxsize=1)
+        # Create the sensor manager object.
+        self._sensormgr = cobrabay.CBSensorMgr(
+            sensor_config=self._configmgr.active_config.config['sensors'],
+            i2c_config=self._configmgr.active_config.config['system']['i2c'],
+            log_level=self._configmgr.active_config.get_loglevel('sensors'),
+            q_cbsmdata=self._q_cbsmdata,
+            q_cbsmstatus=self._q_cbsmstatus,
+            q_cbsmcontrol=self._q_cbsmcontrol)
+
+        # Activate the sensors.
+        self._q_cbsmcontrol.put(
+            (cobrabay.const.SENSTATE_RANGING,None)
+        )
+        # Loop once and get initial latest data.
+        #TODO: Add config option for threading vs. not and make conditional.
+        self._sensormgr.loop()
+        # Initial sensor update.
+        self._sensor_update()
+        # self._sensor_latest_data = self._q_cbsmdata.get_nowait()
+        self._logger.debug("Initial data from sensor manager: {}".format(self._sensor_latest_data))
+
+    # def _setup_sensor_mqtt(self):
+    #     """
+    #     Create sensor MQTT objects.
+    #     MQTT for Sensors are handled by the core so the Sensor Manager can be thread-safe (I think?)
+    #     """
+
+
+
+    # def _setup_sensors(self):
+    #     """
+    #     Setup sensors. OLD.
+    #     :return:
+    #     """
+    #     return_dict = {}
+    #     # Create the correct sensors.
+    #     self._logger.debug("Creating sensors.")
+    #     for sensor_id  in self._active_config.sensors:
+    #         self._logger.debug("Creating sensor: {}".format(sensor_id))
+    #         sensor_config = self._active_config.sensor(sensor_id)
+    #         self._logger.debug("Using settings: {}".format(sensor_config))
+    #         # Create the correct type of sensor object based on defined type.
+    #         if sensor_config['hw_type'] == 'VL53L1X':
+    #             # return_dict[sensor_id] = cobrabay.sensors.CBVL53L1X(
+    #             #     name=sensor_config['name'], i2c_address=sensor_config['hw_settings']['i2c_address'],
+    #             #     i2c_bus=sensor_config['hw_settings']['i2c_bus'],
+    #             #     enable_board=sensor_config['hw_settings']['enable_board'],
+    #             #     enable_pin=sensor_config['hw_settings']['enable_pin'],
+    #             #     timing=sensor_config['hw_settings']['timing'], always_range=sensor_config['always_range'],
+    #             #     distance_mode=sensor_config['hw_settings']['distance_mode'],
+    #             #     parent_logger=self._logger,
+    #             #     log_level=sensor_config['log_level'])
+    #             return_dict[sensor_id] = cobrabay.sensors.CBVL53L1X(name=sensor_config['name'],
+    #                                                                 **sensor_config['hw_settings'])
+    #         elif sensor_config['hw_type'] == 'TFMini':
+    #             return_dict[sensor_id] = cobrabay.sensors.TFMini(name=sensor_config['name'],
+    #                                                              **sensor_config['hw_settings'])
+    #
+    #         else:
+    #             self._logger.error("Sensor '{}' has unknown type '{}'. Cannot configure!".
+    #                                format(sensor_id, sensor_config['hw_type']))
+    #     # self._logger.debug("VL53LX instances: {}".format(len(cobrabay.sensors.CBVL53L1X.instances)))
+    #     return return_dict
 
     def _setup_signal_handlers(self):
         """
@@ -403,14 +555,14 @@ class CBCore:
         """
         Set up the Display Object
         """
+        self._logger.info("Configuring display...")
         # Create the display.
-        self._logger.info("Core got availability topic: {}".format(self._network.availability_topic))
         self._display = cobrabay.CBDisplay(
-            availability_topic=self._network.availability_topic,
-            client_id=self._network.client_id,
-            device_info=self._network.device_info,
-            mqtt_settings=self._network.mqtt_settings,
-            system_name=self._network.system_name,
+            availability_topic=self.availability_topic,
+            client_id=self.client_id,
+            device_info=self.device_info,
+            mqtt_settings=self.mqtt_settings,
+            system_name=self.system_name,
             width=self._configmgr.active_config.config['display']['width'],
             height=self._configmgr.active_config.config['display']['height'],
             gpio_slowdown=self._configmgr.active_config.config['display']['gpio_slowdown'],
@@ -425,8 +577,48 @@ class CBCore:
             log_level=self._configmgr.active_config.get_loglevel('display')
         )
 
-
     def _setup_network(self):
+        """
+        Setup network components.
+        """
+        self._client_id = self._make_client_id(self._configmgr.active_config.config['system']['interface'])
+        self._logger.info("Defined Client ID: {}".format(self.client_id))
+
+        # Create the MQTT Client.
+        self._mqtt_client = Client(
+            client_id=self._client_id
+        )
+        self._mqtt_client.username_pw_set(
+            username=self._configmgr.active_config.config['system']['mqtt']['username'],
+            password=self._configmgr.active_config.config['system']['mqtt']['password']
+        )
+        # Send MQTT logging to the MQTT sublogger
+        # if mqtt_log_level != 'DISABLE':
+        #     self._mqtt_client.enable_logger(self._logger_mqtt)
+
+        # Connect callback.
+        self._mqtt_client.on_connect = self._on_connect
+        # Disconnect callback
+        self._mqtt_client.on_disconnect = self._on_disconnect
+
+        # Set device info.
+        self._device_info = hmd.DeviceInfo(
+                name=self._configmgr.system_name,
+                identifiers=[self._client_id],
+                suggested_area=self._configmgr.active_config.config['system']['ha']['suggested_area'],
+                manufacturer='ConHugeCo',
+                model='Cobra Bay Parking System',
+                sw_version=str(cobrabay.__version__)
+            )
+        self._mqtt_settings = hmd.Settings.MQTT(
+                client=self._mqtt_client,
+                state_prefix="cobrabay/{}".format(self._configmgr.system_name)
+            )
+
+        # Create the Core's MQTT objects.
+        self._make_mqtt_objects()
+
+    def _setup_network_obj(self):
         """
         Set up the Network Object
         """
@@ -497,17 +689,16 @@ class CBCore:
         self._logger.setLevel(self._configmgr.active_config.get_loglevel("core"))
 
         # Create the network object.
-        self._logger.info("Creating network object...")
         self._setup_network()
 
         # Create the object for checking hardware status.
         self._logger.info("Creating Pi hardware monitor...")
         self._pistatus = cobrabay.CBPiStatus(
-            availability_topic=self._network.availability_topic,
-            client_id=self._network.client_id,
-            device_info=self._network.device_info,
-            mqtt_settings=self._network.mqtt_settings,
-            system_name=self._configmgr.system_name,
+            availability_topic=self.availability_topic,
+            client_id=self.client_id,
+            device_info=self.device_info,
+            mqtt_settings=self.mqtt_settings,
+            system_name=self.system_name,
             unit_system=self._configmgr.unit_system
         )
 
@@ -517,38 +708,10 @@ class CBCore:
         # Register the hardware monitor with the network module.
         # self._network.register_pistatus(self._pistatus)
         # Register the display with the network module.
-        self._network.display = self._display
+        # self._network.display = self._display
 
-        # self._logger.info("Creating sensor manager...")
-        # # Create the Sensor Manager
-        # sensor_config = self._active_config.sensors_config()
-        # self._logger.debug("Using Sensor config:\n{}".format(pformat(sensor_config)))
-        # self._logger.debug("Using I2C config:\n{}".format(pformat(self._active_config.i2c_config())))
-        # # Create the queues needed for the sensor manager.
-        # self._q_cbsmdata = queue.Queue(maxsize=1)
-        # self._q_cbsmstatus = queue.Queue(maxsize=1)
-        # self._q_cbsmcontrol = queue.Queue(maxsize=1)
-        # self._sensormgr = cobrabay.CBSensorMgr(sensor_config=sensor_config, i2c_config=self._active_config.i2c_config(),
-        #                                        log_level=self._active_config.get_loglevel('sensors'),
-        #                                        q_cbsmdata=self._q_cbsmdata, q_cbsmstatus=self._q_cbsmstatus,
-        #                                        q_cbsmcontrol=self._q_cbsmcontrol)
-        # # Register the sensor manager with the network handler, now that it exists.
-        # self._logger.debug("Registering sensor manager with the network module.")
-        # self._network.register_sensormgr(self._sensormgr)
-        # # Activate the sensors.
-        # #TODO: Convert to using the command queue to be threading safe.
-        # self._q_cbsmcontrol.put(
-        #     (cobrabay.const.SENSTATE_RANGING,None)
-        # )
-        # #self._sensormgr.set_sensor_state(target_state=cobrabay.const.SENSTATE_RANGING)
-        # # Loop once and get initial latest data.
-        # #TODO: Add config option for threading vs. not and make conditional.
-        # self._sensormgr.loop()
-        #
-        # # Initial sensor update.
-        # self._sensor_update()
-        # self._sensor_latest_data = self._q_cbsmdata.get_nowait()
-        # self._logger.debug("Initial data from sensor manager: {}".format(self._sensor_latest_data))
+        # Create the sensor manager, let's get some data!
+        self._setup_sensormgr()
 
         # Create master bay object for defined docking bay
         # Master list to store all the bays.
@@ -579,9 +742,9 @@ class CBCore:
 
         # Connect to the network.
         self._logger.info('Connecting to network...')
-        self._network.connect()
+        self._connect_mqtt()
         # Do an initial poll.
-        self._network.poll()
+        self.poll()
 
         # Send initial values to MQTT, as we won't otherwise do so until we're in a running state.
         #TODO: Rework initial sending of sensor values.
@@ -684,3 +847,160 @@ class CBCore:
         else:
             self._logger.critical("Unexpected signal received. Cleaning up and exiting.")
             self._exit_code = signalNumber+128
+
+## Network Methods
+    # def poll(self, status=None):
+    #     """
+    #     Main network loop. This is called to check the status of the interface and to publish any outbound messages.
+    #     Any inbound messages are handled by specific callbacks.
+    #     """
+    #     if not self._iface_up():
+    #         # If interface isn't up, not much to do. Set statuses for interface to MQTT to false.
+    #         if not self._flag_idown_logged:
+    #             self._logger.warning("Interface '{}' down.".format(self._interface))
+    #             self._flag_idown_logged = True
+    #         self._cbcore.set_net_data('interface',False)
+    #         self._cbcore.set_net_data('mqtt',False)
+    #         return
+    #     else:
+    #         # Set interface to up.
+    #         if self._flag_idown_logged:
+    #             self._logger.info("Interface '{}' is up.")
+    #             self._flag_idown_logged = False
+    #         self._cbcore.set_net_data('interface', True)
+
+    def _connect_mqtt(self):
+        #TODO: Fix the MQTT connection handling. This is sufficiently robust to handle immediate errors (ie: no route
+        # to host) that throw exceptions, but never calls the network loop so doesn't actually wait for a CONNACK. This
+        # will fail to catch errors on the broker side like "unauthorized".
+        # See: https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html#paho.mqtt.client.Client.connect
+
+        self._logger.info("Establishing MQTT Broker connection...")
+        self._logger.debug("Broker: {}\tClient ID: {}\tUsername: {}".
+                           format(self._configmgr.active_config.config['system']['mqtt']['broker'],
+                                  self.client_id,
+                                  self._configmgr.active_config.config['system']['mqtt']['username']))
+
+        # Set the last will prior to connecting.
+        self._logger.info("Creating last will.")
+        # This should match the topic that HA-MQTT-Discoverable creates for the Connectivity Binary Sensor.
+        # Currently, no way to set this as the will, I don't think.
+        self._mqtt_client.will_set(f"{self._configmgr.active_config.config['system']['mqtt']['base']}/"
+                                   f"{self.system_name}/binary_sensor/{self.system_name}/"
+                                   f"{self.system_name}-Connectivity/state",
+                                   payload='offline', qos=0, retain=True)
+        try:
+            self._mqtt_client.connect(host=self._configmgr.active_config.config['system']['mqtt']['broker'],
+                                      port=self._configmgr.active_config.config['system']['mqtt']['port'])
+        except Exception as e:
+            self._logger.warning("Could not connect to MQTT broker. Received exception '{}'".format(e))
+            return False
+
+        # Send a discovery message and an online notification.
+        # if self._ha_discover:
+        #     self._ha_discovery()
+        #     # Reset the topic history so any newly discovered entities get sent to.
+        #     self._topic_history = {}
+
+        # Set the internal tracker to CONNECTING. We don't actually mark this as connected until we get the callback.
+        self._mqtt_connected = cobrabay.const.MQTT_CONNECTING
+        # Set the connect timestamp.
+        self._connect_timestamp = time.monotonic()
+        # Start the client thread.
+        self._mqtt_client.loop_start()
+
+        return True
+
+    def _iface_up(self):
+        """ Check if the designated interface is up. """
+        stats = psutil.net_if_stats()[self._configmgr.active_config.config['system']['interface']]
+        return stats.isup
+
+    def _on_connect(self, userdata, flags, rc, properties=None):
+        """
+        Callback to handle tasks when the broker connection comes up.
+        """
+        self._logger.info("Connected to MQTT Broker with result code: {}".format(rc))
+        # Set connection status to connected.
+        self._mqtt_connected = cobrabay.const.MQTT_CONNECTED
+        # Call the Core's On Message.
+        # self._cbcore._on_connect()
+        # Update the core's net_data.
+        # If MQTT is up, Interface must also be up.
+        self._cbcore.set_net_data('interface', True)
+        self._cbcore.set_net_data('mqtt', True)
+        # Set connectivity to online.
+        self._mqtt_obj['connectivity'].update_state(True)
+        # Subscribe to the Home Assistant status topic.
+        self._mqtt_client.subscribe(f"{self._ha_base}/status")
+        # Connect to all trigger topic callbacks.
+        # for trigger_id in self._trigger_registry.keys():
+        #     self._trigger_subscribe(trigger_id)
+        # Connect to general purpose subscriptions
+        # for subscription in self._subscriptions:
+        #     self._logger.info("Subscribing to {}:{}".format(subscription['id'],subscription['topic']))
+        #     self._mqtt_client.subscribe(subscription['topic'])
+        # Attach the general message callback
+        self._mqtt_client.on_message = self._on_message
+
+    def _on_disconnect(self, client, userdata, rc):
+        """
+        Callback for handling disconnections.
+        """
+        if rc != 0:
+            self._logger.warning("Unexpected disconnect with reason - '{}' ({})".format(rc.name, rc))
+            self._mqtt_connected = cobrabay.const.MQTT_DISCONNECTED
+        else:
+            self._mqtt_connected = cobrabay.const.MQTT_DISCONNECTED_PLANNED
+            # Update the connectivity state. This shouldn't actually send a message, but at least we're keeping the
+            # state consistent.
+            self._mqtt_obj['connectivity'].update_state(False)
+        self._reconnect_timer = time.monotonic()
+        self._mqtt_client.loop_stop()
+
+    def _on_message(self, client, user, message):
+        """ Catch-all callback for subscriptions."""
+
+        matching_subs = list(filter(lambda sub: sub['topic'] == message.topic, self._subscriptions))
+        if len(matching_subs) == 0:
+            self._logger.info("Received message on topic {} with payload {}. No other handler, no action.".format(
+                message.topic, message.payload
+            ))
+        elif len(matching_subs) > 1:
+            self._logger.info("Topic '{}' appears to have multiple items configured. This isn't allowed.".format(message.topic))
+        else:
+            # Convert to the configured type.
+            payload = cobrabay.util.typeconv(message.payload.decode("utf-8"), matching_subs[0]['type'], allow_none=True)
+            # Call the method on the Core to update the net_data dict.
+            # self._cbcore.set_net_data(matching_subs[0]['id'], payload)
+
+    @property
+    def availability_topic(self):
+        """Availability topic for MQTT objects to use. This is the state topic from the Connectivity object."""
+        #return self._mqtt_obj['connectivity'].generate_config()['state_topic']
+        return self._availability_topic
+
+    @availability_topic.setter
+    def availability_topic(self, new_at):
+        """ Set the availability topic. Should be the state topic from the Connectivity object."""
+        self._availability_topic = new_at
+
+    @property
+    def client_id(self):
+        """ Client ID to use for device identification. Set to be the MAC."""
+        return self._client_id
+
+    @property
+    def device_info(self):
+        """ Device Info for MQTT object creation."""
+        return self._device_info
+
+    @property
+    def mqtt_settings(self):
+        """ MQTT Settings for MQTT object creation."""
+        return self._mqtt_settings
+
+    @property
+    def system_name(self):
+        """ System Name. Returns the system name from the current active config."""
+        return self._configmgr.system_name
