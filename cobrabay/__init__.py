@@ -18,7 +18,6 @@ from .base import CBBase
 from .bay import CBBay
 from .display import CBDisplay
 from .core import CBCore
-from .network import CBNetwork
 from .sensormgr import CBSensorMgr
 from .systemhw import CBPiStatus
 from .version import __version__
@@ -29,7 +28,6 @@ all = [
     'CBDisplay',
     'CBCore',
     'CBConfig',
-    'CBNetwork',
     'CBPiStatus',
     'CBSensorMgr',
     'const',
