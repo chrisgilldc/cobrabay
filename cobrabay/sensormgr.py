@@ -116,7 +116,7 @@ class CBSensorMgr:
                         self._logger.info("Configuring AW9523 at address '{}'".format(hex(addr)))
                         while True:
                             try:
-                                self._ioexpanders[str(addr)] = AW9523(self._i2c_bus, addr, reset=True)
+                                self._ioexpanders[str(addr)] = AW9523(self._i2c_bus, addr) # This will reset by default.
                             except OSError as e:
                                 if aw_tries > 3:
                                     self._logger.critical("AW9523 at address '{}' could not be initialized after '{}' "
@@ -152,15 +152,15 @@ class CBSensorMgr:
                 self._logger.debug("Disabling '{}'".format(sensor_id))
                 self._sensors[sensor_id].status = SENSTATE_DISABLED
 
-    # Public Methods
-    def get_sensor(self, sensor_id):
-        """
-        Return a given sensor object by ID. Should only be used in rare cases, usually let the manager do it's thing.
-
-        :param sensor_id:
-        :return: cobrabay.sensors.basesensor
-        """
-        return self._sensors[sensor_id]
+    # # Public Methods
+    # def get_sensor(self, sensor_id):
+    #     """
+    #     Return a given sensor object by ID. Should only be used in rare cases, usually let the manager do it's thing.
+    #
+    #     :param sensor_id:
+    #     :return: cobrabay.sensors.basesensor
+    #     """
+    #     return self._sensors[sensor_id]
 
     def loop(self):
         """
@@ -284,13 +284,13 @@ class CBSensorMgr:
         for sensor_obj in self._sensors:
             del self._sensors[sensor_obj]
 
-    def sensors_activate(self):
-        """
-        Set all sensors to ranging.
-        """
-        for sensor_id in self._sensors:
-            if isinstance(self._sensors[sensor_id], cobrabay.sensors.BaseSensor):
-                self._sensors[sensor_id].status = 'ranging'
+    # def sensors_activate(self):
+    #     """
+    #     Set all sensors to ranging.
+    #     """
+    #     for sensor_id in self._sensors:
+    #         if isinstance(self._sensors[sensor_id], cobrabay.sensors.BaseSensor):
+    #             self._sensors[sensor_id].status = 'ranging'
 
     def set_sensor_state(self, target_state, target_sensor=None):
         """
@@ -349,6 +349,7 @@ class CBSensorMgr:
         return sensors
 
     def _create_sensor_single(self, sensor_config):
+        self._logger.debug("Sensor type defined as: {}".format(sensor_config['hw_type']))
         if sensor_config['hw_type'] == 'TFMini':
             self._logger.info("Creating TFMini '{}' sensor...".format(sensor_config['name']))
             # Create the sensor object.
@@ -365,7 +366,8 @@ class CBSensorMgr:
                 raise e
             else:
                 return sensor_obj
-        elif sensor_config['hw_type'] == 'VL53L1X':
+        elif sensor_config['hw_type'].upper() == 'VL53L1X':
+            # There's odd casing going on here, so force the hwtype to be upper case to evaluate.
             self._logger.info("Creating VL53L1X '{}' sensor...".format(sensor_config['name']))
             if self._i2c_bus is None:
                 raise ValueError("Using I2C Sensor without I2C bus defined!")
