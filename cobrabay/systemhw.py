@@ -13,6 +13,7 @@ from rpi_bad_power import new_under_voltage
 import ha_mqtt_discoverable as hmd
 import ha_mqtt_discoverable.sensors as hmds
 from cobrabay import CBBase
+from cobrabay.util import uom
 import time
 
 class CBPiStatus(CBBase):
@@ -28,7 +29,7 @@ class CBPiStatus(CBBase):
         :param device_info: Device Information object.
         :type device_info: ha_mqtt_discoverable.DeviceInfo
         :param mqtt_settings: MQTT Settings object.
-        :type mqtt_settings: ha_mqtt_discoverable.Settings
+        :type mqtt_settings: ha_mqtt_discoverable.Settings.MQTT
         :param system_name: Name of the system.
         :type system_name: str
         :param unit_system: Unit system to use. 'metric' or 'imperial'.
@@ -42,7 +43,7 @@ class CBPiStatus(CBBase):
         self._ureg.define('percent = 1 / 100 = %')
         # self._Q = self._ureg.Quantity
 
-    def update(self):
+    def update(self, initial_connect=False):
         """
         Send updates to MQTT.
         """
@@ -61,18 +62,18 @@ class CBPiStatus(CBBase):
                 self._mqtt_previous_values['undervoltage'] = self._undervoltage()
                 self._mqtt_obj['undervoltage'].update_state(self._mqtt_previous_values['undervoltage'])
 
-    def status(self,metric):
-        if metric == 'cpu_pct':
-            # CPU UseGet the CPU use
-            return self._cpu_info()
-        elif metric == 'cpu_temp':
-            return self._cpu_temp()
-        elif metric == 'mem_info':
-            return self._mem_info()
-        elif metric == 'undervoltage':
-            return self._undervoltage()
-        else:
-            raise ValueError('Not a valid metric')
+    # def status(self,metric):
+    #     if metric == 'cpu_pct':
+    #         # CPU UseGet the CPU use
+    #         return self._cpu_info()
+    #     elif metric == 'cpu_temp':
+    #         return self._cpu_temp()
+    #     elif metric == 'mem_info':
+    #         return self._mem_info()
+    #     elif metric == 'undervoltage':
+    #         return self._undervoltage()
+    #     else:
+    #         raise ValueError('Not a valid metric')
 
     @staticmethod
     def _cpu_info():
@@ -128,18 +129,18 @@ class CBPiStatus(CBBase):
         self._mqtt_obj['cpu_pct'].availability_topic = self.availability_topic
         self._mqtt_previous_values['cpu_pct'] = None
 
-        # Determine CPU Temp unit.
-        if self.unit_system == 'imperial':
-            temp_uom = "°F"
-        else:
-            temp_uom = "°C"
+        # # Determine CPU Temp unit.
+        # if self.unit_system == 'imperial':
+        #     temp_uom = "°F"
+        # else:
+        #     temp_uom = "°C"
 
         self._mqtt_obj['cpu_temp'] = hmds.Sensor(
             hmd.Settings(mqtt=self.mqtt_settings,
                          entity=hmds.SensorInfo(
                              unique_id=self.client_id + "_cpu_temp",
                              name="{} CPU Temperature".format(self.system_name),
-                             unit_of_measurement=temp_uom,
+                             unit_of_measurement=uom(self.unit_system,"temp"),
                              icon="mdi:thermometer",
                              device=self.device_info
                          ),

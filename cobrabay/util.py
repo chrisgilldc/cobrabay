@@ -217,7 +217,7 @@ def default_logger(name, parent_logger=None, log_level="WARNING"):
         the_logger.setLevel(log_level)
     return the_logger
 
-def uom(self, unit_system, unit_type):
+def uom(unit_system, unit_type):
     """
     Helper function to get the correct unit_of_measure to send to Home Assistant given a specific unit_system and
     unit_type.
