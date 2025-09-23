@@ -17,11 +17,11 @@ classifiers = [
     "Topic :: Home Automation"
 ]
 dependencies = [
-    "adafruit-blinka~=8.56.0",
+    "Adafruit-Blinka>=8.66.0",
     "adafruit-circuitpython-aw9523~=1.1.11",
     "adafruit-circuitpython-vl53l1x~=1.2.2",
     "gpiozero~=2.0.1",
-    #"ha-mqtt-discoverable~=0.19.1",
+    "ha-mqtt-discoverabe>=0.20.0", # This is the version with support for image blob publication.
     "lgpio~=0.2.2.0",
     "marshmallow~=4.0.0",
     "numpy~=2.2.4",
@@ -29,7 +29,7 @@ dependencies = [
     "pid~=3.0.4",
     "pillow~=11.0.0",
     "pint~=0.24.4",
-    "psutil~=6.1.1",
+    "psutil>=7.1.0",
     "pyserial~=3.5",
     "pyyaml~=6.0.2",
     "rpi-bad-power~=0.1.0",
@@ -37,8 +37,7 @@ dependencies = [
     # Replace once published
     "rgbmatrix@git+https://github.com/chrisgilldc/rpi-rgb-led-matrix",
     "rgbmultitool@git+https://github.com/chrisgilldc/rgbmultitool",
-    # PR submitted to include updates. Use his for now.
-    "ha-mqtt-discoverable@git+https://github.com/chrisgilldc/ha-mqtt-discoverable"
+
 ]
 
 [project.urls]
