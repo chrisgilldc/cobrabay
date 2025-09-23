@@ -35,8 +35,6 @@ class CBSchemaI2C(Schema):
     # wait_ready = FieldQuantity(load_default=Quantity("10 seconds"), validate=Dimensionality(dimensionality="[time]"))
     #wait_reset = fields.Integer(load_default=10, validate=validate.Range(min=0))
 
-
-
 class CBSchemaLogging(Schema):
     """
     Cobrabay Logging Schema
@@ -121,7 +119,31 @@ class CBSchemaIcons(Schema):
     network = fields.Boolean(load_default=True)
     sensors = fields.Boolean(load_default=False)
 
+class CBSchemaLongitudinal(Schema):
+    """
+    Cobra Bay Longitudinal Sensor Schema
+    """
+    sensors = fields.Dict()
+
+class CBSchemaLateral(Schema):
+    """
+    Cobra Bay Lateral Sensor Schema
+    """
+    sensors = fields.Dict()
+
 # Top level schemas
+
+class CBSchemaBay(Schema):
+    """
+    Cobra Bay Bay Schema
+    """
+    name = fields.String()
+    depth = fields.String()
+    timeout_dock = fields.String()
+    timeout_undock = fields.String()
+    longitudinal = fields.Nested(CBSchemaLongitudinal)
+    lateral = fields.Nested(CBSchemaLateral)
+
 
 class CBSchemaDisplay(Schema):
     """
