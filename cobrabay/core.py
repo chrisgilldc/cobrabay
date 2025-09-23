@@ -114,7 +114,7 @@ class CBCore:
                 self._flag_idown_logged = False
             self.set_net_data('interface', True)
 
-    def update_mqtt(self, initial_connect=False):
+    def _update_mqtt(self, initial_connect=False):
         """
         Call objects to make network updates.
         """
@@ -186,7 +186,7 @@ class CBCore:
                 self.poll_network()
                 # Update MQTT statuses.
                 self._logger.debug("Updating MQTT statuses")
-                self.update_mqtt(False)
+                self._update_mqtt(False)
                 # Check triggers and execute actions if needed.
                 # self._trigger_check()
                 # See if any of the bays checked to a motion state.
@@ -585,6 +585,33 @@ class CBCore:
         signal.signal(signal.SIGPIPE, self._signal_handler)
         signal.signal(signal.SIGALRM, self._signal_handler)
 
+    def _setup_bays(self):
+        """
+        Set up defined Bays.
+        """
+        self._logger.info("Configuring bays...")
+        for bay_id in self._configmgr.active_config.config['bays']:
+            self._logger.info("Bay ID: {}".format(bay_id))
+            self._logger.debug("Bay config:")
+            self._logger.debug(pformat(self._configmgr.active_config.config['bays'][bay_id]))
+            self._bays[bay_id] = cobrabay.CBBay(
+                availability_topic=self.availability_topic,
+                client_id=self.client_id,
+                device_info=self.device_info,
+                mqtt_settings=self.mqtt_settings,
+                system_name=self.system_name,
+                unit_system=self._configmgr.unit_system,
+                bay_id=bay_id,
+                name=self._configmgr.active_config.config['bays'][bay_id]['name'],
+                depth=self._configmgr.active_config.config['bays'][bay_id]['depth'],
+                longitudinal=self._configmgr.active_config.config['bays'][bay_id]['longitudinal'],
+                lateral=self._configmgr.active_config.config['bays'][bay_id]['lateral'],
+                cbcore=self,
+                q_cbsmcontrol=self._q_cbsmcontrol,
+                timeouts=self._configmgr.active_config.config['bays'][bay_id]['timeouts'],
+                log_level=self._configmgr.active_config.get_loglevel('bays')
+            )
+
     def _setup_display(self):
         """
         Set up the Display Object
@@ -701,17 +728,9 @@ class CBCore:
         # Create the sensor manager, let's get some data!
         self._setup_sensormgr()
 
-        # Create master bay object for defined docking bay
-        # Master list to store all the bays.
-        # self._bays = {}
-        # self._logger.info("Creating bays...")
-        # for bay_id in self._active_config.bays:
-        #     self._logger.info("Bay ID: {}".format(bay_id))
-        #     bay_config = self._active_config.bay(bay_id)
-        #     self._logger.debug("Bay config:")
-        #     self._logger.debug(pformat(bay_config))
-        #     self._bays[bay_id] = cobrabay.CBBay(bay_id=bay_id, cbcore=self, q_cbsmcontrol=self._q_cbsmcontrol, **bay_config)
-        #
+        # Create the bays.
+        self._setup_bays()
+
         # self._logger.info('Creating display...')
         # display_config = self._active_config.display()
         # self._logger.debug("Using display config:")
@@ -908,7 +927,7 @@ class CBCore:
         #     self._logger.info("Subscribing to {}:{}".format(subscription['id'],subscription['topic']))
         #     self._mqtt_client.subscribe(subscription['topic'])
         # Do an update of MQTT messages.
-        self.update_mqtt(True)
+        self._update_mqtt(True)
         # Attach the general message callback
         self._mqtt_client.on_message = self._on_message
 
