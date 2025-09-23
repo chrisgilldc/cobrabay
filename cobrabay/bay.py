@@ -8,21 +8,26 @@ import time
 import pint.errors
 from pint import UnitRegistry, Quantity
 from time import monotonic
+import ha_mqtt_discoverable as hmd
+import ha_mqtt_discoverable.sensors as hmds
 from math import floor
 from numpy import datetime64
 from numpy import int32 as np_int32
 import logging
 from pprint import pformat
 from operator import attrgetter
+from cobrabay import CBBase
 from cobrabay.const import *
 from cobrabay.datatypes import Intercept, Vector
 
 
-class CBBay:
+class CBBay(CBBase):
     """
     Bay class. Contains dimensions of a place to park and calculates status of docking/undocking.
     """
-    def __init__(self, bay_id,
+    def __init__(self,
+                 availability_topic, client_id, device_info, mqtt_settings, system_name, unit_system,
+                 bay_id,
                  name,
                  depth,
                  longitudinal,
@@ -34,6 +39,19 @@ class CBBay:
                  report_adjusted=True,
                  log_level="WARNING"):
         """
+        Cobrabay Bay object. This object collects a
+
+        :param client_id: Value for the client ID. Usually the MAC address.
+        :type client_id: str
+        :param device_info: Device Information object.
+        :type device_info: ha_mqtt_discoverable.DeviceInfo
+        :param mqtt_settings: MQTT Settings object.
+        :type mqtt_settings: ha_mqtt_discoverable.Settings
+        :param system_name: Name of the system.
+        :type system_name: str
+        :param unit_system: Unit system to use. 'metric' or 'imperial'.
+        :type unit_system: str
+
         :param bay_id: ID for the bay. Cannot have spaces.
         :type bay_id: str
         :param name: Long "friendly" name for the Bay, used in MQTT messages
@@ -56,16 +74,20 @@ class CBBay:
         """
         # Must set ID before we can create the logger.
         self.id = bay_id
+        self.name = name
         self._logger = logging.getLogger("cobrabay").getChild(self.id)
         self._logger.setLevel(log_level.upper())
         self._logger.info("Initializing bay: {}".format(bay_id))
 
-        # Save the parameters.
+        # Call the super class.
+        super().__init__(availability_topic, client_id, device_info, mqtt_settings, system_name, unit_system)
+
+        # Save other parameters.
         self._cbcore = cbcore
         self._config = {'long': longitudinal, 'lat': lateral}
         self._config_merged = self._merge_config()
         self.depth_abs = depth
-        self._name = name
+
         self._q_cbsmcontrol = q_cbsmcontrol
         self._timeouts = timeouts
         if triggers is None:
@@ -232,7 +254,7 @@ class CBBay:
                     else:
                         self._logger.debug("'{}' has no associated action as a bay command.".format(cmd))
 
-    def update(self):
+    def update(self, initial_connect=False):
         """
         Read in sensor values and update all derived values.
         """
@@ -300,6 +322,9 @@ class CBBay:
         # If bay is in a motion state, check the timer for expiration.
         if self.state in BAYSTATE_MOTION:
             self.check_timer()
+
+        # Now update our MQTT objects.
+        self._update_mqtt()
 
     ## Public Properties
 
@@ -644,6 +669,105 @@ class CBBay:
 
     ## Private Methods
 
+    def _make_mqtt_objects(self):
+        """
+        Make MQTT objects for this bay.
+        """
+
+        # cmd
+        #TODO: Figure out how the callback should actually work. Get rid of triggers? TBD.
+        # self._mqtt_obj['cmd'] = hmds.Select(
+        #     hmd.Settings(mqtt=self._mqtt_settings,
+        #                  entity=hmds.SelectInfo(
+        #                      unique_id=self.client_id + "_" + self.id + "_bay_cmd",
+        #                      name="{} {} Motion Timer".format(self.system_name, self.name),
+        #                      icon="mdi:timer",
+        #                      options=["Ready for Command", "Dock", "Undock", "Verify", "Abort", "Save Position"],
+        #                      device=self.device_info
+        #                  ),
+        #              ),
+        # )
+        # self._mqtt_previous_values['cmd'] = None
+
+        # Make the motion_timer
+        self._mqtt_obj['motion_timer'] = hmds.Sensor(
+            hmd.Settings(mqtt=self._mqtt_settings,
+                         entity=hmds.SensorInfo(
+                             unique_id=self.client_id + "_" + self.id + "_motion_timer",
+                             name="{} {} Motion Timer".format(self.system_name, self.name),
+                             device_class="duration",
+                             unit_of_measurement="s",
+                             icon="mdi:timer",
+                             device=self.device_info
+                         ),
+                     ),
+        )
+        self._mqtt_obj['motion_timer'].availability_topic = self.availability_topic
+        self._mqtt_previous_values['motion_timer'] = None
+
+        # occupied
+        self._mqtt_obj['occupied'] = hmds.BinarySensor(
+            hmd.Settings(mqtt=self.mqtt_settings,
+                         entity=hmds.BinarySensorInfo(
+                             unique_id=self.client_id + "_" + self.id + "_occupied",
+                             name="{} {} Occupied".format(self.system_name, self.name),
+                             payload_on="true",
+                             payload_off="false",
+                             icon="mdi:alert-octagram",
+                             device=self.device_info
+                         )
+                     )
+        )
+        self._mqtt_obj['occupied'].availability_topic = self.availability_topic
+        self._mqtt_previous_values['occupied'] = None
+
+        # state
+        self._mqtt_obj['state'] = hmds.Sensor(
+            hmd.Settings(mqtt=self._mqtt_settings,
+                         entity=hmds.SensorInfo(
+                             unique_id=self.client_id + "_" + self.id + "_state",
+                             name="{} {} State".format(self.system_name, self.name),
+                             device=self.device_info
+                         ),
+                     ),
+        )
+        self._mqtt_obj['state'].availability_topic = self.availability_topic
+        self._mqtt_previous_values['state'] = None
+
+        # Direction of movement
+        self._mqtt_obj['direction'] = hmds.Sensor(
+            hmd.Settings(mqtt=self._mqtt_settings,
+                         entity=hmds.SensorInfo(
+                             unique_id=self.client_id + "_" + self.id + "_direction",
+                             name="{} {} Direction".format(self.system_name, self.name),
+                             icon="mdi:arrow-left-right",
+                             device=self.device_info
+                         ),
+                     ),
+        )
+        self._mqtt_obj['direction'].availability_topic = self.availability_topic
+        self._mqtt_previous_values['direction'] = None
+
+        # Speed of movement
+        if self.unit_system == 'imperial':
+            speed_uom = 'mph'
+        else:
+            speed_uom = 'kph'
+        self._mqtt_obj['speed'] = hmds.Sensor(
+            hmd.Settings(mqtt=self._mqtt_settings,
+                         entity=hmds.SensorInfo(
+                             unique_id=self.client_id + "_" + self.id + "_speed",
+                             name="{} {} Speed".format(self.system_name, self.name),
+                             device_class="speed",
+                             unit_of_measurement=speed_uom,
+                             icon="mdi:speedometer",
+                             device=self.device_info
+                         ),
+                     ),
+        )
+        self._mqtt_obj['speed'].availability_topic = self.availability_topic
+        self._mqtt_previous_values['speed'] = None
+
     def _merge_config(self):
         merged_config = {}
         for sensor_config in self._config['long']['sensors']:
@@ -720,8 +844,8 @@ class CBBay:
             self._logger.info("Calculating quality ranges for '{}'.".format(sensor_config['name']))
             # Create the sub-dict
             self._quality_ranges[sensor_config['name']] = {}
-            self._logger.debug("Total bay depth: {}".format(self.depth_abs))
-            self._logger.debug("Zero Point: {}".format(sensor_config['zero_point']))
+            self._logger.debug("Total bay depth: {} ({})".format(self.depth_abs, type(self.depth_abs)))
+            self._logger.debug("Zero Point: {} ({})".format(sensor_config['zero_point'], type(sensor_config['zero_point'])))
             # Adjusted distance of the bay. Distance from the offset point to the end of the bay
             adjusted_depth = self.depth_abs - sensor_config['zero_point']
             self._logger.debug("Adjusted depth: {}".format(adjusted_depth))
@@ -1000,3 +1124,23 @@ class CBBay:
         max_score = len(self.lateral_sorted)
         score = floor(max_score * (2 / 3)) + 1  # Add 1 for the longitudinal sensor.
         return score
+
+    def _update_mqtt(self):
+        """
+        Update the Bay's MQTT objects
+        """
+
+        # Update the motion timer.
+        self._mqtt_obj['motion_timer'].set_state(self._motion_timeout)
+
+        # Update occupancy
+        self._mqtt_obj['occupied'].update_state(self._occupancy)
+
+        # Update overall state
+        self._mqtt_obj['state'].set_state(self.state)
+
+        # Update direction and speed
+        # Get the vector
+        vector = self.vector
+        self._mqtt_obj['direction'].set_state(vector.direction)
+        self._mqtt_obj['speed'].set_state(vector.speed)
