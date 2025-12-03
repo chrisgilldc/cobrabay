@@ -10,7 +10,22 @@ just the right way.
 It has also been the primary way I have taught myself python and electronics, so there is likely a lot that can be 
 optimized, done better or redesigned here. Constructive feedback welcome!
 
-Current development version: 0.4.2a3
+All versions should be considered Beta, at best!
+Current Production version: 0.4.2a6
+Current Development version: 0.4.3a1
+
+Changes in 0.4.2a6
+* Pull rgbmatrix straight from the rpi-rgb-led-matrix repo, as python packaging PR has been accepted. Still not published to PyPi. See [#1749](https://github.com/hzeller/rpi-rgb-led-matrix/issues/1749) for more info on rpi-rgb-led-matrix Python.
+* Rebase library dependencies
+  * adafruit-blinka to 8.68.0
+  * adafruit-circuitpython-aw9523 to 1.1.14
+  * adafruit-circuitpython-vl53l1x to 1.2.7
+  * cerberus to 1.3.8
+  * numpy to 2.3.5
+  * pillow to 12.0.0
+  * pint to 0.25.2
+  * psutil to 7.1.3
+  * pyyaml to 6.0.3
 
 ---
 * [Building](docs/HARDWARE.md) - How to put together the hardware
