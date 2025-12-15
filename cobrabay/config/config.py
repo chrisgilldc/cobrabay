@@ -39,6 +39,7 @@ class CBConfig:
         """
 
         # Save our name.
+        self._loaded_config = None
         self._name = name
 
         # Create a logger for ourselves.
@@ -89,8 +90,6 @@ class CBConfig:
         """
         # Load the config from the YAML.
         self._loaded_config = self._yaml_read(self.configfile)
-        self._logger.debug("YAML dump:")
-        self._logger.debug(pformat(self._loaded_config))
 
         # Merge the configs.
         # merged_config = self._merge_config_environment(copy.deepcopy(self._loaded_config))
@@ -300,6 +299,9 @@ class CBConfig:
 
         return dict
         """
+
+        #TODO: Make this smoother structure and have it conditionally update and log.
+
         # Update the unit system.
         input_config['system']['unit_system'] = self._get_param('unitsystem')
         # Update the default loglevel.
