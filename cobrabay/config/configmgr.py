@@ -9,7 +9,6 @@ import os
 import pathlib
 import cobrabay
 
-
 class CBConfigMgr:
     """
     Cobrabay Configuration Manager
@@ -43,37 +42,14 @@ class CBConfigMgr:
         self._env_options = self._get_envoptions()
 
         # Set our base directory. This cannot be changed later.
-        try:
-            self._basedir = self._validate_basedir(self._get_envoptions().basedir)
-        except TypeError:
-            try:
-                self._basedir = self._validate_basedir(self._cmd_options.basedir)
-            except TypeError:
-                self._logger.info("No base directory in environment or command line. Assuming current working directory.")
-                try:
-                    self._basedir = self._validate_basedir(pathlib.Path.cwd())
-                except TypeError as te:
-                    self._logger.critical("Could not set base directory!")
-                    raise te
+        self._basedir = self._find_basedir()
         self._logger.info("Base directory: {}".format(self.basedir))
 
-
-        # Set the default configdir as provided. This *could* change later, maybe, but no facility is provided for that
-        # now.
-        try:
-            self._configdir = self._validate_configdir(self._get_envoptions().configdir)
-        except TypeError:
-            try:
-                self._configdir = self._validate_configdir(self._cmd_options.configdir)
-            except TypeError:
-                self._logger.info("No config directory in environment or command line. Assuming 'base/config'.")
-                try:
-                    self._validate_basedir(self.basedir / 'config')
-                except TypeError as te:
-                    self._logger.critical("Could not set config directory!")
-                    raise te
+        # Set the config directory.
+        self._configdir = self._find_configdir()
 
         self._logger.info("Attempting to load config file: {}".format(self._cmd_options.configfile))
+
         # Try to get an initial configuration.
         try:
             self._active_config = self._bootstrap()
@@ -91,14 +67,14 @@ class CBConfigMgr:
         Initial bootstrapping of the system. This will try to use the config file, environment and command line to get
         a valid config.
         """
-
+        self._logger.debug("Attempting to instantiate initial config.")
         return cobrabay.config.CBConfig(
             'initial',
             configfile=self._get_configfile(),
             cmd_options=self._cmd_options,
             env_options=self._env_options,
             parent_logger=self._logger,
-            log_level=self._logger.level
+            log_level=logging.getLevelName(self._logger.level)
         )
 
     @property
@@ -160,12 +136,16 @@ class CBConfigMgr:
 
         if self._cmd_options.configfile is not None:
             configfile = pathlib.Path(self._cmd_options.configfile)
+            self._logger.info("Using config file from command line '{}'".format(configfile))
         elif self._env_options.basedir is not None:
-            configfile = pathlib.Path(self._env_options.configfile)
+            configfile = pathlib.Path(self._get_envoptions().configfile)
+            self._logger.info("Using config file from environment line '{}'".format(configfile))
         else:
-            configfile = 'config.yaml'
+            configfile = pathlib.Path('config.yaml')
+            self._logger.info("Config file not specified, defaulting to 'config.yaml'")
 
         if not configfile.is_absolute():
+            self._logger.info("Config file is not an absolute path. Assuming it's in the config directory.")
             configfile = self._configdir / configfile
 
         return configfile
@@ -190,6 +170,60 @@ class CBConfigMgr:
             unitsystem=os.getenv("CB_UNITSYSTEM")
         )
 
+    def _find_basedir(self):
+        """
+        Find a valid basedir to use from command line, environment, or cwd.
+        """
+        if self._cmd_options.basedir is not None:
+            try:
+                basedir = self._validate_basedir(self._cmd_options.basedir)
+            except TypeError:
+                self._logger.warning("Base directory set in command line but not valid. Setting is '{}'".
+                                     format(self._cmd_options.basedir))
+
+        if self._get_envoptions().basedir is not None:
+            try:
+                basedir = self._validate_basedir(self._get_envoptions().basedir)
+            except TypeError:
+                self._logger.warning("Environment variable for base directory set but not valid. Setting is '{}'".
+                                     format(self._get_envoptions().basedir))
+
+        self._logger.info("Basedir not otherwise set, defaulting to current working directory.")
+        try:
+            basedir = self._validate_basedir(pathlib.Path.cwd())
+        except TypeError as te:
+            self._logger.critical("Could not set base directory!")
+            raise te
+        return basedir
+
+    def _find_configdir(self):
+        """
+        Find a valid configdir to use from command line, environment, or cwd.
+        """
+        if self._cmd_options.configdir is not None:
+            try:
+                return self._validate_configdir(self._cmd_options.configdir)
+            except TypeError:
+                self._logger.warning("Config directory set in command line but not valid. Setting is '{}'".
+                                     format(self._cmd_options.configdir))
+
+        if self._get_envoptions().configdir is not None:
+            try:
+                return self._validate_configdir(self._get_envoptions().configdir)
+            except TypeError:
+                self._logger.warning("Environment variable for config directory set but not valid. Setting is '{}'".
+                                     format(self._get_envoptions().configdir))
+
+        try:
+            configdir = self._validate_configdir(pathlib.Path.cwd() / 'config')
+            self._logger.info('Configdir defaulted to \'{}\''.format(configdir))
+            return configdir
+        except ValueError:
+            self._logger.error("Separate config directory does not exist. Defaulting config directory to base directory")
+            return self._basedir
+
+
+
     def _validate_basedir(self, basedir):
         """
         Validate the base directory.
@@ -207,7 +241,6 @@ class CBConfigMgr:
             basedir = basedir.absolute()
             if not basedir.is_dir():
                 raise TypeError("Base directory '{}' is not a directory.".format(basedir))
-
         return basedir
 
     def _validate_configdir(self, configdir):
@@ -219,7 +252,7 @@ class CBConfigMgr:
         try:
             configdir = pathlib.Path(configdir)
         except TypeError as e:
-            print("Cannot make a valid path for config directory from '{}'.".format(configdir))
+            self._logger.error("Cannot make a valid path for config directory from '{}'.".format(configdir))
             raise e
         else:
             if not configdir.is_absolute():
