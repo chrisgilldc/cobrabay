@@ -7,7 +7,10 @@ Instantiate one of these to handled swapping between configurations.
 import logging
 import os
 import pathlib
-import cobrabay
+from marshmallow import ValidationError
+from cobrabay.config import CBConfig
+import cobrabay.const
+from cobrabay.datatypes import ENVOPTIONS, ENVOPTIONS_EMPTY
 
 class CBConfigMgr:
     """
@@ -16,7 +19,7 @@ class CBConfigMgr:
     Can handle multiple configurations, load, save and validate them.
     """
 
-    def __init__(self, cbcore, cmd_options=None, parent_logger=None, log_level="WARNING"):
+    def __init__(self, cbcore, cmd_options=ENVOPTIONS_EMPTY, parent_logger=None, log_level="WARNING"):
         """
         Initialize.
 
@@ -35,54 +38,108 @@ class CBConfigMgr:
             self._logger = parent_logger.getChild("ConfigMgr")
 
         self._initial_config = None
-        self._active_config = None
+        self._active_config_name = None
+        self._configs = {}
         self._cbcore = cbcore
         self._cmd_options = cmd_options
-        # Get the options from the environment and save them.
-        self._env_options = self._get_envoptions()
+
+        # CMD and ENV debugging
+        self._logger.debug("Received command line options: {}".format(cmd_options))
+        self._logger.debug("Have environment: {}".format(self._get_envoptions()))
 
         # Set our base directory. This cannot be changed later.
         self._basedir = self._find_basedir()
-        self._logger.info("Base directory: {}".format(self.basedir))
 
         # Set the config directory.
         self._configdir = self._find_configdir()
 
-        self._logger.info("Attempting to load config file: {}".format(self._cmd_options.configfile))
-
         # Try to get an initial configuration.
-        try:
-            self._active_config = self._bootstrap()
-        except FileNotFoundError as fe:
-            self._logger.critical("No such file or directory for initial configuration file '{}'".
-                                  format(self._cmd_options.configfile))
-            raise fe
+        # try:
+        #     self._active_config = self._bootstrap()
+        # except FileNotFoundError as fe:
+        #     self._logger.critical("No such file or directory for initial configuration file '{}'".
+        #                           format(self._cmd_options.configfile))
+        #     raise fe
+        # except ValidationError as ve:
+        #     self._logger.critical("Initial configuration file does not validate! Cannot continue.")
+        #     self._logger.critical("Error encountered '{}'".format(ve))
 
         # Try to validate it.
         # if not self._active_config.validate():
         #     raise ValueError("Cannot validate initial configuration!")
 
-    def _bootstrap(self):
+    def load_config(self, config_file=None, config_name=None):
         """
-        Initial bootstrapping of the system. This will try to use the config file, environment and command line to get
-        a valid config.
+        Load and validate a config to make it available.
         """
-        self._logger.debug("Attempting to instantiate initial config.")
-        return cobrabay.config.CBConfig(
-            'initial',
-            configfile=self._get_configfile(),
-            cmd_options=self._cmd_options,
-            env_options=self._env_options,
-            parent_logger=self._logger,
-            log_level=logging.getLevelName(self._logger.level)
-        )
+        if config_file is None:
+            target_file = self._get_configfile()
+        else:
+            target_file = config_file
+
+        try:
+            config_obj = CBConfig(
+                config_name,
+                configfile=target_file,
+                cmd_options=self._cmd_options,
+                env_options=self._get_envoptions(),
+                parent_logger=self._logger
+                # log_level=logging.getLevelName(self._logger.level)
+            )
+        except ValidationError as ve:
+            self._logger.error("File in '{}' is not valid.".format(config_file))
+            self._logger.error(ve)
+            return False
+        else:
+            self._configs[config_name] = {
+                'name': config_name,
+                'path': config_file,
+                'obj': config_obj
+            }
+            return True
+
+    def activate_config(self, config_name):
+        """
+        Activate a loaded config.
+        """
+        if not config_name in self._configs:
+            raise ValueError("'{}' is not a loaded configuration!".format(config_name))
+        self._active_config_name = config_name
 
     @property
     def active_config(self):
         """
         The currently loaded configuration
         """
-        return self._active_config
+        if self._active_config_name is None:
+            raise ValueError("Cannot return active config as active config has not yet been set.")
+        return self._configs[self._active_config_name]['obj']
+
+    @property
+    def active_config_name(self):
+        """
+        Return the name of the currently active configuration.
+        """
+        return self._active_config_name
+
+    def configs(self):
+        """List available configurations"""
+        return self._configs.keys()
+
+    # def _bootstrap(self):
+    #     """
+    #     Initial bootstrapping of the system. This will try to use the config file, environment and command line to get
+    #     a valid config.
+    #     """
+    #     self._logger.debug("Attempting to instantiate initial config.")
+    #     return CBConfig(
+    #         'initial',
+    #         configfile=self._get_configfile(),
+    #         cmd_options=self._cmd_options,
+    #         env_options=self._get_envoptions(),
+    #         parent_logger=self._logger,
+    #         log_level=logging.getLevelName(self._logger.level)
+    #     )
 
     @property
     def basedir(self):
@@ -93,19 +150,25 @@ class CBConfigMgr:
         return self._basedir
 
     @property
+    def configdir(self):
+        """
+        The directory for configuration files
+        """
+        return self._configdir
+
+    @property
     def system_name(self):
         """
         Convenience property to get the system_name as defined by the current active configuration.
         """
-        return self._active_config.config['system']['system_name']
+        return self.active_config.config['system']['system_name']
 
     @property
     def unit_system(self):
         """
         Convenience property to get the unit_system as defined by the current active configuration.
         """
-        return self._active_config.config['system']['unit_system']
-
+        return self.active_config.config['system']['unit_system']
 
     @property
     def cmd_options(self):
@@ -114,12 +177,12 @@ class CBConfigMgr:
         """
         return self._cmd_options
 
-    @property
-    def env_options(self):
-        """
-        The environment variables set at startup.
-        """
-        return self._env_options
+    # @property
+    # def env_options(self):
+    #     """
+    #     The environment variables set at startup.
+    #     """
+    #     return self._env_options
 
     def add_cfgobj(self, cfgobj):
         """
@@ -137,7 +200,7 @@ class CBConfigMgr:
         if self._cmd_options.configfile is not None:
             configfile = pathlib.Path(self._cmd_options.configfile)
             self._logger.info("Using config file from command line '{}'".format(configfile))
-        elif self._env_options.basedir is not None:
+        elif self._get_envoptions().configfile is not None:
             configfile = pathlib.Path(self._get_envoptions().configfile)
             self._logger.info("Using config file from environment line '{}'".format(configfile))
         else:
@@ -157,9 +220,9 @@ class CBConfigMgr:
         """
         return cobrabay.datatypes.ENVOPTIONS(
             basedir=os.getenv("CB_BASEDIR"),
-            rundir=None,
+            rundir=os.getenv("CB_RUNDIR"),
             configdir=os.getenv("CB_CONFIGDIR"),
-            configfile=None,
+            configfile=os.getenv("CB_CONFIGFILE"),
             logdir=os.getenv("CB_LOGDIR"),
             logfile=None,
             loglevel=os.getenv("CB_LOGLEVEL"),
@@ -180,6 +243,9 @@ class CBConfigMgr:
             except TypeError:
                 self._logger.warning("Base directory set in command line but not valid. Setting is '{}'".
                                      format(self._cmd_options.basedir))
+            else:
+                self._logger.info("Set base directory to '{}' from command line.".format(basedir))
+                return basedir
 
         if self._get_envoptions().basedir is not None:
             try:
@@ -187,13 +253,17 @@ class CBConfigMgr:
             except TypeError:
                 self._logger.warning("Environment variable for base directory set but not valid. Setting is '{}'".
                                      format(self._get_envoptions().basedir))
+            else:
+                self._logger.info("Set base directory to '{}' from environment.".format(basedir))
+                return basedir
 
-        self._logger.info("Basedir not otherwise set, defaulting to current working directory.")
+        # No base directory from environment or command line, so default it to CWD.
         try:
             basedir = self._validate_basedir(pathlib.Path.cwd())
         except TypeError as te:
             self._logger.critical("Could not set base directory!")
             raise te
+        self._logger.info("Set base directory to '{}' as default".format(basedir))
         return basedir
 
     def _find_configdir(self):
@@ -202,25 +272,32 @@ class CBConfigMgr:
         """
         if self._cmd_options.configdir is not None:
             try:
-                return self._validate_configdir(self._cmd_options.configdir)
+                configdir = self._validate_configdir(self._cmd_options.configdir)
             except TypeError:
                 self._logger.warning("Config directory set in command line but not valid. Setting is '{}'".
                                      format(self._cmd_options.configdir))
+            else:
+                self._logger.info("Config dir set to '{}' from command line.".format(configdir))
+                return configdir
 
         if self._get_envoptions().configdir is not None:
             try:
-                return self._validate_configdir(self._get_envoptions().configdir)
+                configdir = self._validate_configdir(self._get_envoptions().configdir)
             except TypeError:
                 self._logger.warning("Environment variable for config directory set but not valid. Setting is '{}'".
                                      format(self._get_envoptions().configdir))
+            else:
+                self._logger.info("Config dir set to '{}' from environment.".format(configdir))
+                return configdir
 
         try:
             configdir = self._validate_configdir(pathlib.Path.cwd() / 'config')
-            self._logger.info('Configdir defaulted to \'{}\''.format(configdir))
-            return configdir
         except ValueError:
-            self._logger.error("Separate config directory does not exist. Defaulting config directory to base directory")
-            return self._basedir
+            self._logger.warning("Separate config directory does not exist. Defaulting config directory to base directory")
+            return self.basedir
+        else:
+            self._logger.info("Config dir defaulted to \'{}\'".format(configdir))
+            return configdir
 
 
 
@@ -256,10 +333,7 @@ class CBConfigMgr:
             raise e
         else:
             if not configdir.is_absolute():
-                configdir = self._cmd_options.basedir / configdir
+                configdir = self.basedir / configdir
             if not configdir.is_dir():
                 raise ValueError("Config directory '{}' not a directory.".format(configdir))
-            if configdir != self._cmd_options.basedir:
-                self._logger.info("Config directory: {}".format(configdir))
-
         return configdir

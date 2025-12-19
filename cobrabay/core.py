@@ -86,7 +86,12 @@ class CBCore:
         self._setup_signal_handlers()
 
         # Create configuration manager.
-        self._configmgr = cobrabay.config.CBConfigMgr(self, cmd_options=cmd_options, parent_logger=self._logger, log_level=cmd_options.loglevel)
+        self._configmgr = cobrabay.config.CBConfigMgr(
+            self, cmd_options=cmd_options, parent_logger=self._logger, log_level=cmd_options.loglevel)
+
+        # Load the initial configuration
+        self._configmgr.load_config(config_name='initial')
+        self._configmgr.activate_config('initial')
 
         # Call the system setup method.
         self._setup_system()

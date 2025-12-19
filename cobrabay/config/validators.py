@@ -10,20 +10,20 @@ from pint.registry import Quantity
 
 class Dimensionality(Validator):
     """
-    Ensure a Quantity has a given dimensionality.
+    Validator which ensures a Pint Quantity has a given dimensionality.
 
     :param dimensionality: A valid Pint dimensionality to enforce
 
     """
-    def __init__(self):
-        pass
+    def __init__(self, dimensionality: str):
+        self.dimensionality = dimensionality
 
-    def _call_(self, value: Quantity, dimensionality: str) -> Quantity:
+    def __call__(self, value: Quantity) -> Quantity:
         if not value:
             raise ValidationError("No value provided.")
         if not isinstance(value, pint.Quantity):
             raise ValidationError("Value is not a pint quantity.")
-        if str(value.dimensionality) != dimensionality:
+        if str(value.dimensionality) != self.dimensionality:
             raise ValidationError("Value does not have required dimensionality '{}'. (Actually has {}).".
-                                  format(dimensionality, str(value.dimensionality)))
+                                  format(self.dimensionality, str(value.dimensionality)))
         return value

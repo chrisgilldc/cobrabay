@@ -9,7 +9,7 @@ from marshmallow import Schema, fields, validate, validates_schema, pre_load, po
 from marshmallow.fields import Boolean
 from marshmallow.experimental.context import Context
 from pint import Quantity
-from .fields import Quantity as FieldQuantity
+from .fields import Quantity as Quantity
 from .validators import Dimensionality
 
 # System Schemas
@@ -30,10 +30,8 @@ class CBSchemaI2C(Schema):
     bus = fields.Int(load_default=1, validate=validate.Range(min=0, max=3))
     enable = fields.Str(load_default="D19")
     ready = fields.Str(load_default="D25")
-    wait_ready = fields.Integer(load_default=10, validate=validate.Range(min=0))
-    wait_reset = fields.Integer(load_default=10, validate=validate.Range(min=0))
-    # wait_ready = FieldQuantity(load_default=Quantity("10 seconds"), validate=Dimensionality(dimensionality="[time]"))
-    #wait_reset = fields.Integer(load_default=10, validate=validate.Range(min=0))
+    wait_ready = Quantity(load_default="10 seconds", validate=Dimensionality(dimensionality="[time]"))
+    wait_reset = Quantity(load_default="10 seconds", validate=Dimensionality(dimensionality="[time]"))
 
 class CBSchemaLogging(Schema):
     """
@@ -83,8 +81,8 @@ class CBSchemaMQTT(Schema):
         # Appropriate override settings based on environment or command line.
         cmd_options = Context.get()['cmd_options']
         env_options = Context.get()['env_options']
-        print("Got cmd options: {}".format(cmd_options))
-        print("Got env options: {}".format(env_options))
+        # print("Got cmd options: {}".format(cmd_options))
+        # print("Got env options: {}".format(env_options))
         # Broker
         if cmd_options.mqttbroker is not None:
             data['broker'] = cmd_options.mqttbroker
@@ -119,11 +117,19 @@ class CBSchemaIcons(Schema):
     network = fields.Boolean(load_default=True)
     sensors = fields.Boolean(load_default=False)
 
-class CBSchemaLongitudinal(Schema):
-    """
-    Cobra Bay Longitudinal Sensor Schema
-    """
-    sensors = fields.Dict()
+# class CBSchemaLongitudinalDefaults(Schema):
+#     """
+#     Cobra Bay Longitudinal Defaults Schema
+#     """
+#     spread_park = FieldQuantity()
+#     zero_point = FieldQuantity()
+#
+# class CBSchemaLongitudinal(Schema):
+#     """
+#     Cobra Bay Longitudinal Sensor Schema
+#     """
+#     sensors = fields.Dict()
+#     defaults = fields.Dict()
 
 class CBSchemaLateral(Schema):
     """
@@ -141,8 +147,8 @@ class CBSchemaBay(Schema):
     depth = fields.String()
     timeout_dock = fields.String()
     timeout_undock = fields.String()
-    longitudinal = fields.Nested(CBSchemaLongitudinal)
-    lateral = fields.Nested(CBSchemaLateral)
+    # longitudinal = fields.Nested(CBSchemaLongitudinal)
+    # lateral = fields.Nested(CBSchemaLateral)
 
 
 class CBSchemaDisplay(Schema):
@@ -176,7 +182,7 @@ class CBSchemaSensor(Schema):
     i2c_address = fields.Integer(required=False, validate=validate.Range(min=0, min_inclusive=True, max=127, max_inclusive=True))
     enable_board = fields.Integer(required=False, validate=validate.Range(min=0, min_inclusive=True, max=127, max_inclusive=True))
     enable_pin = fields.Integer(required=False, validate=validate.Range(min=0, min_inclusive=True, max=15, max_inclusive=True))
-    timing = fields.String(required=False)
+    timing = Quantity(validate=Dimensionality(dimensionality='[time]'))
 
     @pre_load
     def preprocess_data(self, data, **kwargs):

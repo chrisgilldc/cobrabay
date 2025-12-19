@@ -60,7 +60,10 @@ class CBConfig:
         self._env_options = env_options
 
         # Load the config.
-        self.load_config()
+        try:
+            self.load_config()
+        except ValidationError as ve:
+            raise ve
 
     @property
     def configfile(self):
@@ -98,11 +101,12 @@ class CBConfig:
                          'env_options': self._env_options}):
             try:
                 self._config = CBSchema().load(self._loaded_config)
-            except ValidationError as err:
-                self._logger.error("Could not validate.")
-                self._logger.error(err.messages)
-                return False
-            return True
+            except ValidationError as ve:
+                 raise ve
+            #     self._logger.error("Could not validate.")
+            #     self._logger.error(err.messages)
+            #     return False
+            # return True
 
     @property
     def config(self):
