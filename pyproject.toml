@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 name = "Cobrabay"
 version = "0.4.2a6"
 description = "Cobrabay Parking Guidance System"
