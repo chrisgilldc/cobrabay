@@ -282,36 +282,6 @@ class CBVL53L1X(I2CSensor):
         elif isinstance(self.enable_board, adafruit_aw9523.AW9523):
             self._enable_pin = self.enable_board.get_pin(enable_pin)
 
-        # else:
-        #     # Check to see if the AW9523 object has already been created.
-        #     # Use the key format "bus-addr"
-        #     awkey = str(self.i2c_bus) + "-" + str(self.enable_board)
-        #     if awkey not in self.__class__.aw9523_boards.keys():
-        #         self._logger.info("Establishing access to AW9523 board on bus {}, address 0x{:x}".
-        #                           format(self.i2c_bus, self.enable_board))
-        #         # Need to create the board.
-        #         try:
-        #             self.__class__.aw9523_boards[awkey] = AW9523(self._i2c_bus, self.enable_board, reset=True)
-        #         except BaseException as e:
-        #             self._logger.critical("Could not access AW9523 on bus {}, address 0x{:x}".
-        #                                   format(self.i2c_bus, self.enable_board))
-        #             raise e
-        #         else:
-        #             self._logger.debug("Waiting 1s for I2C bus to settle.")
-        #             sleep(1)
-        #             self._logger.debug("Setting all to outputs with value off.")
-        #             try:
-        #                 cobrabay.util.aw9523_reset(self.__class__.aw9523_boards[awkey])
-        #             except OSError as e:
-        #                 self._logger.error("Error while resetting pins on AW9523 board on bus '{}', address "
-        #                                    "'0x{:x}'. Base error was: '{} - {}'".
-        #                                    format(self.i2c_bus, self.enable_board, e.__class__.__name__, str(e)))
-        #                 self._logger.critical("Cannot continue!")
-        #                 raise SystemExit
-        #
-        #     # Can now create the pin
-        #     self._enable_pin = self.__class__.aw9523_boards[awkey].get_pin(enable_pin)
-
         # Make sure this is an 'output' type pin.
         self._enable_pin.switch_to_output()
 
