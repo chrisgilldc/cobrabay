@@ -15,7 +15,7 @@ Raspberry Pi OS Lite 64-bit.
 * Boot system and login via SSH.
 * Update packages.
   * ```sudo apt-get update```
-  * ```sudo apt-get upgrade```
+  * ```sudo apt-get full-upgrade```
 * Update system settings with raspi config ```sudo raspi-config```
   * Enable I2C.
     * Navigate to '3 Interface Options'
@@ -30,57 +30,32 @@ Raspberry Pi OS Lite 64-bit.
 * Update system configuration.
   * Add 'isolcpus=3' to the end of /boot/firmware/cmdline.txt
   * Blacklist the sound module. The Adafruit installation script currently doesn't do this correctly for the latest RPiOS version ([#253](https://github.com/adafruit/Raspberry-Pi-Installer-Scripts/issues/253))
-  ```sudo echo -n "blacklist snd_bcm2835" > /etc/modprobe.d/alsa-blacklist.conf```
+  ```sudo bash -c 'echo -n "blacklist snd_bcm2835" > /etc/modprobe.d/alsa-blacklist.conf'```
 * Reboot the system.
   * ```sudo reboot```
 
-### Prepare to install Cobra Bay
-
-#### Install the rgbmatrix library
-Unfortunately, the rgbmatrix library is not packaged. It needs to be installed manually. Install it manually using the following steps.
-* Install the RGB Matrix library using the Adafruit scripts
-  * ```curl https://raw.githubusercontent.com/adafruit/Raspberry-Pi-Installer-Scripts/main/rgb-matrix.sh >rgb-matrix.sh; sudo bash rgb-matrix.sh```
-  * Select "Y" to Continue
-  * Select "2", Matrix HAT + RTC
-  * Select "1" for Quality
-  * The library will compile. When complete and asked to reboot, select "y"
-
-#### Create a Virtual Environment.
-
-Raspberry Pi OS, as of Bookworm, requires use of Virtual Environments (venvs) to contain Python packages.
-
-To set up a venv for Cobra Bay, do the following:
-* Ensure venv support is installed.
-  * ```sudo apt install python3.11-venv```
-* Install the Python packages available as RPiOS packages.
-  * ```sudo apt-get install -y python3-cerberus python3-gpiozero python3-paho-mqtt python3-numpy python3-pint python3-psutil python3-serial python3-smbus2 python3-yaml```
-* Create a venv. If you change the path of this venv, be sure to update the path in all further instructions.
-  * ```python -m venv --system-site-packages ~/.env_cobrabay```
+### Install Cobrabay
+* Install system packages.
+  * ```sudo apt-get install liblgpio-dev swig```
+* Create a virtual environment. If you change the path of this venv, be sure to update the path in all further instructions.
+  * ```python -m venv ~/.virtualenvs/cb_prod```
 * Enter the venv
   * ```source ~/.env_cobrabay/bin/activate```
-
-
-### Install Cobra Bay
-
-Cobra Bay is currently in Alpha and not fully packaged. You will need to install by pulling from the source. The main
-branch is expected to be relatively stable, with some possible crashing conditions.
-* Download the [main branch code](wget https://github.com/chrisgilldc/cobrabay/archive/refs/heads/main.zip) and extract.
-  ```wget https://github.com/chrisgilldc/cobrabay/archive/refs/heads/main.zip```
-* Extract the archive.
-  ```unzip main.zip```
-* It's recommended to rename based on the current version. These instructions will use 'cobrabay_version' as the path.
-  * ```mv cobrabay-main cobrabay_0.4.0a```
-* Install the remaining packages into the venv.
-  * Enter the venv if not already. ```source ~/.env_cobrabay/bin/activate```
-  * Install packages. ```pip install -r ~/cobrabay_version/requirements.txt```
-* 
-* Install a few extra packages (if you used Lite)
-  * ```sudo apt install gcc python3-dev git```
-* Install requirements.
-  * ```pip3 install -r requirements.txt```
-* Install the remaining packages from the requirements list. Note that this includes the packages already installed from
-the system packages, which should have been included and not get picked up again.
-  * ```pip3```
-  * 
-
-### Configure Cobra Bay
+* Install Cobrabay.
+  * ```pip install git+https://github.com/chrisgilldc/cobrabay```
+* Create a configuration file. See [CONFIG](CONFIG.md) for more details.
+* Create the user systemd unit directory
+* ```mkdir -p ~pi/.config/systemd/user```
+* Create a user system unit in ```~pi/.config/systemd/user/cobrabay.service```. An [example](docs/scripts/cobrabay.service) is included in docs/scripts.
+* Load the new systemd unit.
+  * ```systemctl --user daemon-reload```
+* Try to start Cobrabay with systemd.
+  * ```systemctl --user start cobrabay.service```
+* Make sure the service started. Running the 'status' command should show 'active (running)', and data should have been sent to your MQTT broker.
+  * ```systemctl --user status cobrabay.service```
+* If running, you can now activate the service to start at boot-time.
+  * ```systemctl --user enable cobrabay.service```
+* Reboot the system and confirm the service starts.
+  * ```sudo reboot```
+* Confirm the system starts when rebooted.
+* Should be set!
