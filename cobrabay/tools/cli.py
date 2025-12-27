@@ -24,7 +24,7 @@ def cbcli():
     Main Cobra Bay CLI Invoker
     """
     print("cobrabay Parking System - {}".format(cobrabay.__version__))
-    print("User: {}'\tHost: {}\tIP: {}".format(pwd.getpwuid(os.getuid()).pw_name, socket.getfqdn(), socket.gethostbyname(socket.gethostname())))
+    print("User: {}\tHost: {}\tIP: {}".format(pwd.getpwuid(os.getuid()).pw_name, socket.getfqdn(), socket.gethostbyname(socket.gethostname())))
     # Parse command line options.
     parser = argparse.ArgumentParser(
         description="Cobra Bay Parking System"

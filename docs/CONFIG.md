@@ -86,13 +86,13 @@ Supported trigger types:
 * MQTT Trigger - Monitors an MQTT topic for state change.
 
 ### MQTT Trigger
-| Options | Required? | Default | Description |
-| --- | -- | --- | --- |
-| type | Yes | mqtt_sensor | Type of trigger this should be. Currently only 'mqtt_sensor' is supported. |
-| topic | Yes | None | MQTT topic to monitor. This must be a *complete* MQTT topic path. |
-| bay | Yes | None | Bay this trigger is assigned to. |
-| to | No | None | Topic payload to match that will set off this trigger. |
-| from | Yes, if 'to' is not set. | None | A change of the topic payload to any state *other* than this value will set off the trigger. |
+| Options      | Required? | Default | Description |
+|--------------| -- | --- | --- |
+| type         | Yes | mqtt_sensor | Type of trigger this should be. Currently only 'mqtt_sensor' is supported. |
+| topic        | Yes | None | MQTT topic to monitor. This must be a *complete* MQTT topic path. |
+| bay          | Yes | None | Bay this trigger is assigned to. |
+| payload_to   | No | None | Topic payload to match that will set off this trigger. |
+| payload_from | Yes, if 'to' is not set. | None | A change of the topic payload to any state *other* than this value will set off the trigger. |
 
 ## Display
 Configuration for the display in the garage, to be viewed by the driver. This should be an LED matrix display, no other
