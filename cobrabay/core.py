@@ -9,7 +9,7 @@ import signal
 import logging
 import time
 from logging.handlers import WatchedFileHandler
-from pprint import pformat
+#import pint
 
 import cobrabay
 
@@ -17,16 +17,19 @@ class CBCore:
     """
     Cobra Bay Core object. Only one is needed. Handles interaction among other modules and shutdown.
     """
-    def __init__(self, config_obj, envoptions, q_cbsmdata=None, q_cbsmcontrol=None):
+    def __init__(self, cmd_options=cobrabay.datatypes.ENVOPTIONS_EMPTY, q_cbsmdata=None, q_cbsmcontrol=None):
         """
         Cobra Bay Core Class Initializer.
 
-        :param config_obj: Configuration object
-        :type config_obj: CBConfig object
-        :param envoptions: Environment Options to pass command line options/environment variable settings, if any.
-        :type envoptions: namedtuple
+        :param cmd_options: Command line options as passed. Includes defaults.
+        :type cmd_options: cobrabay.datatypes.ENVOPTIONS
+        :param q_cbsmdata: Data passing queue. Currently, does nothing, for later expansion.
+        :type q_cbsmdata: Queue
+        :param q_cbsmcontrol: Control queue. Currently, does nothing, for later expansion.
+        :type q_cbsmcontrol: Queue
         """
         # Initialize variables
+        self.system_state='init' # System state is initializing.
         self._bays = {}
         self._network = None
         self._sensor_latest_data = {}
@@ -59,13 +62,24 @@ class CBCore:
         self._logger = logging.getLogger("cobrabay").getChild("Core")
 
         self._logger.setLevel(logging.DEBUG)
-        if envoptions.loglevel is not None:
+        if cmd_options.loglevel is not None:
             self._logger.warning(
-                "Based on command line options, setting core logger to '{}'".format(envoptions.loglevel))
-            self._logger.setLevel(envoptions.loglevel)
+                "Based on command line options, setting core logger to '{}'".format(cmd_options.loglevel))
+            self._logger.setLevel(cmd_options.loglevel)
+
+        # Register the signal handlers.
+        self._setup_signal_handlers()
+
+        # Create configuration manager.
+        self._configmgr = cobrabay.config.CBConfigMgr(
+            self, cmd_options=cmd_options, parent_logger=self._logger, log_level=cmd_options.loglevel)
+
+        # Load the initial configuration
+        self._configmgr.load_config(config_name='initial')
+        self._configmgr.activate_config('initial')
 
         # Call the system setup method.
-        self._setup_system(config_obj)
+        self._setup_system()
 
     # Public Methods
 
@@ -80,7 +94,8 @@ class CBCore:
         try:
             # Main run loop. Keep running as long as the exit code isn't set.
             while self._exit_code < 0:
-                # Update the local sensor variable.
+                # Update Sensors.
+                self._logger.debug("Updating Sensors")
                 self._sensor_update()
                 # Call Bay update to have them update their data state.
                 for bay_id in self._bays:
@@ -90,6 +105,7 @@ class CBCore:
                 # Check triggers and execute actions if needed.
                 self._trigger_check()
                 # See if any of the bays checked to a motion state.
+                self._logger.debug("Updating bays.")
                 for bay_id in self._bays:
                     if self._bays[bay_id].state in cobrabay.const.BAYSTATE_MOTION:
                         # Set the overall system state.
@@ -256,6 +272,7 @@ class CBCore:
             self._logger.debug("No data marked as latest, considering all data in sensor log as latest.")
             self._sensor_latest_data = self.sensor_log[0].sensors
         # Pull out the most recent data and put it in the sensor_most_recent dict.
+        self._logger.debug("Sensor log keys: {}".format(self.sensor_log[0].sensors.keys()))
         for sensor_id in self.sensor_log[0].sensors:
             # Don't update when waiting for an interrupt.
             if self.sensor_log[0].sensors[sensor_id].response_type == cobrabay.const.SENSOR_RESP_INR:
@@ -284,16 +301,16 @@ class CBCore:
             self._logger.debug("Commanding trigger scan for bay '{}'".format(bay_id))
             self._bays[bay_id].triggers_check()
 
-    def _setup_logging_handlers(self, file=False, console=False, file_path=None, log_format=None, syslog=False):
+    def _setup_logging_handlers(self, file=False, console=False, log_file=None, log_format=None, syslog=False):
         """ Setup logging handlers."""
         # File based handler setup.
         if file:
-            fh = WatchedFileHandler(file_path)
+            fh = WatchedFileHandler(log_file)
             fh.setFormatter(logging.Formatter(log_format))
             fh.setLevel(logging.DEBUG)
             # Attach to the master logger.
             self._master_logger.addHandler(fh)
-            self._master_logger.info("File logging enabled. Writing to file: {}".format(file_path))
+            self._master_logger.info("File logging enabled. Writing to file: {}".format(log_file))
 
         if syslog:
             raise NotImplemented("Syslog logging not yet implemented")
